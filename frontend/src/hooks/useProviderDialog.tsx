@@ -22,7 +22,7 @@ export interface ConnectFormResult {
     optionalEditableToken: boolean;
 }
 
-const emptyForm = (apiStyle?: 'openai' | 'anthropic'): EnhancedProviderFormData => ({
+export const emptyForm = (apiStyle?: 'openai' | 'anthropic'): EnhancedProviderFormData => ({
     name: '',
     apiBase: '',
     apiStyle: apiStyle || undefined,
@@ -34,10 +34,10 @@ const emptyForm = (apiStyle?: 'openai' | 'anthropic'): EnhancedProviderFormData 
 
 /**
  * Convert a picker selection into provider form data.
- * Returns null when the picker result doesn't open the form (oauth / import).
+ * Returns null when the picker result doesn't open the form (oauth / import / paste).
  */
 export function buildProviderFormData(selection: ConnectSelection): ConnectFormResult | null {
-    if (selection.kind === 'oauth' || selection.kind === 'import') {
+    if (selection.kind === 'oauth' || selection.kind === 'import' || selection.kind === 'paste') {
         return null;
     }
 
@@ -79,6 +79,11 @@ interface UseProviderDialogReturn {
     handleConnectAIClick: () => void;
     handleConnectSelect: (selection: ConnectSelection) => void;
     handleCloseConnect: () => void;
+    /** Apply a paste-detected prefill and open the provider form. */
+    handlePastePick: (prefill: EnhancedProviderFormData) => void;
+    /** Open state for the built-in PasteDetectDialog (owned by this hook). */
+    pasteDialogOpen: boolean;
+    handleClosePasteDialog: () => void;
     fromConnectPicker: boolean;
     /** Self-hosted / local providers: token is optional but editable. */
     optionalEditableToken: boolean;
@@ -92,6 +97,7 @@ export const useProviderDialog = (
 
     const [providerDialogOpen, setProviderDialogOpen] = useState(false);
     const [connectDialogOpen, setConnectDialogOpen] = useState(false);
+    const [pasteDialogOpen, setPasteDialogOpen] = useState(false);
     const [fromConnectPicker, setFromConnectPicker] = useState(false);
     const [optionalEditableToken, setOptionalEditableToken] = useState(false);
     const [providerFormData, setProviderFormData] = useState<EnhancedProviderFormData>(emptyForm(defaultApiStyle));
@@ -120,6 +126,11 @@ export const useProviderDialog = (
             // oauth / import — handled by caller via other dialogs
             if (selection.kind === 'oauth') onOAuth?.(selection.providerId);
             if (selection.kind === 'import') onImport?.();
+            // paste — this hook owns the built-in PasteDetectDialog so every
+            // consumer gets it for free.
+            if (selection.kind === 'paste') {
+                setPasteDialogOpen(true);
+            }
             return;
         }
 
@@ -127,6 +138,20 @@ export const useProviderDialog = (
         setOptionalEditableToken(built.optionalEditableToken);
         setProviderDialogOpen(true);
     }, [defaultApiStyle, onImport, onOAuth]);
+
+    // Paste-detected prefill: apply it and open the form (token always required
+    // here — paste produces an explicit value or the user chose manual fill).
+    const handlePastePick = useCallback((prefill: EnhancedProviderFormData) => {
+        setPasteDialogOpen(false);
+        setFromConnectPicker(true);
+        setOptionalEditableToken(false);
+        setProviderFormData(prefill);
+        setProviderDialogOpen(true);
+    }, []);
+
+    const handleClosePasteDialog = useCallback(() => {
+        setPasteDialogOpen(false);
+    }, []);
 
     const handleProviderSubmit = async (e: React.FormEvent, resolved?: Partial<EnhancedProviderFormData>) => {
         e.preventDefault();
@@ -203,6 +228,9 @@ export const useProviderDialog = (
         handleConnectAIClick,
         handleConnectSelect,
         handleCloseConnect,
+        handlePastePick,
+        pasteDialogOpen,
+        handleClosePasteDialog,
         fromConnectPicker,
         optionalEditableToken,
     };

@@ -25,7 +25,7 @@ import UnifiedCard from '@/components/UnifiedCard';
 import ProviderFormDialog, {type EnhancedProviderFormData} from '@/components/ProviderFormDialog';
 import {ProviderListContent, type ConnectSelection} from '@/components/ConnectProviderDialog';
 import OAuthDialog from '@/components/OAuthDialog';
-import PasteAndDetect from '@/components/onboarding/PasteAndDetect';
+import PasteAndDetect from '@/components/paste-detect/PasteDetectPanel';
 import {api} from '@/services/api';
 import {buildProviderFormData} from '@/hooks/useProviderDialog';
 
@@ -86,6 +86,9 @@ const Onboarding: React.FC = () => {
             return;
         }
         if (selection.kind === 'import') return;
+        // Paste & detect has its own dedicated tab in onboarding; the card is
+        // hidden in browse mode (showPasteCard={false}), so this is unreachable.
+        if (selection.kind === 'paste') return;
 
         const built = buildProviderFormData(selection)!;
 
@@ -190,6 +193,7 @@ const Onboarding: React.FC = () => {
                             hideOfficialInfo={true}
                             showDetails={true}
                             wide={true}
+                            showPasteCard={false}
                         />
                     )}
                     {tab === 'paste' && (

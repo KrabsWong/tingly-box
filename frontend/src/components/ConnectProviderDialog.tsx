@@ -1,4 +1,4 @@
-import {Add, Close, Computer, Key, Login, Search, Language, Description, Upload} from '@/components/icons';
+import {Add, Close, Computer, ContentPaste, Key, Login, Search, Language, Description, Upload} from '@/components/icons';
 import RegionBadge from './RegionBadge';
 import {
     Box,
@@ -28,7 +28,8 @@ export type ConnectSelection =
     | {kind: 'oauth'; providerId: string}
     | {kind: 'local'; provider: UniqueProvider}
     | {kind: 'custom'}
-    | {kind: 'import'};
+    | {kind: 'import'}
+    | {kind: 'paste'};
 
 interface ConnectProviderDialogProps {
     open: boolean;
@@ -44,6 +45,8 @@ interface ProviderListContentProps {
     hideOfficialInfo?: boolean;
     showDetails?: boolean; // If true, show website links and other details
     wide?: boolean; // If true, use wider grid layout (2-3 columns)
+    /** If false, hide the "Paste & detect" card (e.g. onboarding has its own paste tab). */
+    showPasteCard?: boolean;
 }
 
 type Accent = 'custom' | 'oauth' | 'key' | 'local';
@@ -54,6 +57,10 @@ const ACCENT: Record<Accent, string> = {
     key: 'primary.main',
     local: 'warning.main',
 };
+
+// Search terms that keep the "Custom" section visible. Module-level so it
+// isn't reallocated on every keystroke in the search box.
+const CUSTOM_SEARCH_TERMS = ['custom endpoint', 'import', 'paste & detect'];
 
 const SectionHeader: React.FC<{icon: React.ReactNode; title: string; count?: number; accent: Accent}> = ({
     icon, title, count, accent,
@@ -276,6 +283,7 @@ export const ProviderListContent: React.FC<ProviderListContentProps> = ({
     hideOfficialInfo = false,
     showDetails = false,
     wide = false,
+    showPasteCard = true,
 }) => {
     const keyProviders = useProviderTemplates();
 
@@ -293,7 +301,7 @@ export const ProviderListContent: React.FC<ProviderListContentProps> = ({
     const filteredOAuth = needle
         ? oauthProviders.filter((p) => `${p.name} ${p.displayName} ${p.id}`.toLowerCase().includes(needle.toLowerCase()))
         : oauthProviders;
-    const showCustom = !needle || 'custom endpoint import'.includes(needle);
+    const showCustom = !needle || CUSTOM_SEARCH_TERMS.some(s => s.toLowerCase().includes(needle.toLowerCase()));
 
     // Group key providers by region (CN vs Global vs Self-hosted)
     const {cnKeyProviders, globalKeyProviders, selfHostedProviders} = useMemo(() => {
@@ -388,6 +396,15 @@ export const ProviderListContent: React.FC<ProviderListContentProps> = ({
                                 badge={keyBadge}
                                 onClick={() => onSelect({kind: 'import'})}
                             />
+                            {showPasteCard && (
+                                <ProviderCard
+                                    icon={<ContentPaste/>}
+                                    name="Paste & detect"
+                                    meta="Paste a .env, curl, or JSON — we extract the URL and key"
+                                    badge={keyBadge}
+                                    onClick={() => onSelect({kind: 'paste'})}
+                                />
+                            )}
                         </CardGrid>
                     </>
                 )}

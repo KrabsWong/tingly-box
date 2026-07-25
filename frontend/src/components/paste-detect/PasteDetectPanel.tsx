@@ -19,8 +19,15 @@ import { Link as LinkIcon } from '@/components/icons';
 import { VpnKey as VpnKeyIcon } from '@/components/icons';
 import {extractOnboardingCandidates, type OnboardingTokenCandidate} from '@/services/onboardingExtract';
 import type {EnhancedProviderFormData} from '@/components/ProviderFormDialog';
+import {emptyForm} from '@/hooks/useProviderDialog';
 
-interface PasteAndDetectProps {
+// Shell-agnostic core of the "Paste & detect" experience: a paste textarea, a
+// Detect button backed by the backend regex extractor, and the URLs/tokens
+// candidate lists. Used inline by Onboarding and inside PasteDetectDialog for
+// the Connect AI flow. Owns all of its own state; the parent decides whether
+// it lives inline or in a Dialog.
+
+interface PasteDetectPanelProps {
     onPick: (prefill: EnhancedProviderFormData) => void;
     onManualFill: () => void;
 }
@@ -35,7 +42,7 @@ curl https://api.anthropic.com/v1/messages \\
   -H "x-api-key: sk-ant-..."
 `;
 
-const PasteAndDetect: React.FC<PasteAndDetectProps> = ({onPick, onManualFill}) => {
+const PasteDetectPanel: React.FC<PasteDetectPanelProps> = ({onPick, onManualFill}) => {
     const {t} = useTranslation();
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
@@ -74,11 +81,9 @@ const PasteAndDetect: React.FC<PasteAndDetectProps> = ({onPick, onManualFill}) =
         // apiBase, fills the rest of the form, and lets the user override
         // anything before saving.
         onPick({
-            name: '',
+            ...emptyForm(),
             apiBase: selectedURL || '',
-            apiStyle: undefined,
             token: selectedToken || '',
-            enabled: true,
         });
     };
 
@@ -280,4 +285,4 @@ const PasteAndDetect: React.FC<PasteAndDetectProps> = ({onPick, onManualFill}) =
     );
 };
 
-export default PasteAndDetect;
+export default PasteDetectPanel;
