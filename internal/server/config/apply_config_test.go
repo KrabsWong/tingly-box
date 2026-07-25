@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplyClaudeSettings_DefaultMode(t *testing.T) {
@@ -1405,4 +1407,118 @@ func TestApplyCodexConfig_PrefsRejectInvalidEnumAndCannotClobberManaged(t *testi
 	if cfg["model"] != "m1" {
 		t.Errorf("model = %v, want m1", cfg["model"])
 	}
+}
+
+// CodexPrefsFromConfig is the inverse of toConfig: only whitelisted keys are
+// read, enum values validated, and the bool normalized to "true"/"".
+func TestCodexPrefsFromConfig(t *testing.T) {
+	cfg := map[string]interface{}{
+		"model_reasoning_effort":            "high",
+		"model_reasoning_summary":           "detailed",
+		"model_verbosity":                   "low",
+		"model_supports_reasoning_summaries": true,
+		// Unrelated keys are ignored — they must not leak into prefs.
+		"model":            "tingly/codex",
+		"model_provider":   "tingly-box",
+		"approval_policy":  "on-request",
+		"unknown_user_key": "whatever",
+	}
+	prefs := CodexPrefsFromConfig(cfg)
+	assert.Equal(t, "high", prefs.ModelReasoningEffort)
+	assert.Equal(t, "detailed", prefs.ModelReasoningSummary)
+	assert.Equal(t, "low", prefs.ModelVerbosity)
+	assert.Equal(t, "true", prefs.ModelSupportsReasoningSummaries)
+}
+
+// Enum values outside the allowed set are dropped (forward-compatible,
+// injection-safe) — they do not surface as an invalid option in the form.
+func TestCodexPrefsFromConfig_DropsInvalidEnum(t *testing.T) {
+	cfg := map[string]interface{}{
+		"model_reasoning_effort":  "ultra", // not a valid effort
+		"model_reasoning_summary": "concise",
+		"model_verbosity":         7, // wrong type
+		// false / non-"true" → empty (not opted in)
+		"model_supports_reasoning_summaries": false,
+	}
+	prefs := CodexPrefsFromConfig(cfg)
+	assert.Empty(t, prefs.ModelReasoningEffort)
+	assert.Equal(t, "concise", prefs.ModelReasoningSummary)
+	assert.Empty(t, prefs.ModelVerbosity)
+	assert.Empty(t, prefs.ModelSupportsReasoningSummaries)
+}
+
+func TestCodexPrefsFromConfig_Empty(t *testing.T) {
+	prefs := CodexPrefsFromConfig(map[string]interface{}{})
+	require.NotNil(t, prefs)
+	assert.Empty(t, prefs.ModelReasoningEffort)
+}
+
+// toConfig and CodexPrefsFromConfig must round-trip: any prefs we can write
+// must read back identical. Pins the forward/inverse pair against drift.
+func TestCodexPrefs_RoundTrip(t *testing.T) {
+	cases := []*CodexPrefs{
+		{},
+		DefaultCodexPrefs(),
+		{ModelReasoningEffort: "high", ModelReasoningSummary: "detailed", ModelVerbosity: "low", ModelSupportsReasoningSummaries: "true"},
+		{ModelReasoningEffort: "none", ModelReasoningSummary: "none"},
+		{ModelSupportsReasoningSummaries: "true"},
+	}
+	for i, original := range cases {
+		out := CodexPrefsFromConfig(original.toConfig())
+		assert.Equal(t, original, out, "round-trip mismatch at case %d", i)
+	}
+}
+
+// ReadCodexConfig reports the tingly-managed state and infers writeCatalog from
+// the presence of model_catalog_json.
+func TestReadCodexConfig_AppliedConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	codexDir := filepath.Join(home, ".codex")
+	require.NoError(t, os.MkdirAll(codexDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(`
+model_provider = "tingly-box"
+model_catalog_json = "/x/tingly-model-catalog.json"
+model_reasoning_effort = "high"
+`), 0644))
+
+	prefs, writeCatalog, exists, err := ReadCodexConfig()
+	require.NoError(t, err)
+	assert.True(t, exists, "tingly-managed config should report exists=true")
+	assert.True(t, writeCatalog, "model_catalog_json present → writeCatalog=true")
+	assert.Equal(t, "high", prefs.ModelReasoningEffort)
+}
+
+// A config.toml with no tingly footprint reads as not-applied, even if it has
+// reasoning prefs from some other setup — those are not tingly-owned state.
+func TestReadCodexConfig_NonTinglyNotApplied(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	codexDir := filepath.Join(home, ".codex")
+	require.NoError(t, os.MkdirAll(codexDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(`
+model = "gpt-5"
+model_reasoning_effort = "high"
+`), 0644))
+
+	_, writeCatalog, exists, err := ReadCodexConfig()
+	require.NoError(t, err)
+	assert.False(t, exists, "expected exists=false for a non-tingly config")
+	assert.False(t, writeCatalog, "expected writeCatalog=false when no model_catalog_json")
+}
+
+// Missing file is not an error — first-time setup returns defaults + not-applied.
+func TestReadCodexConfig_MissingFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	prefs, writeCatalog, exists, err := ReadCodexConfig()
+	require.NoError(t, err)
+	assert.False(t, exists, "expected exists=false when no config.toml")
+	assert.False(t, writeCatalog, "expected writeCatalog=false when no config.toml")
+	// Defaults returned so the form has a starting value.
+	assert.Equal(t, "medium", prefs.ModelReasoningEffort)
 }

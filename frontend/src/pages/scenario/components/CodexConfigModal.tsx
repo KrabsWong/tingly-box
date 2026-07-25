@@ -2,7 +2,7 @@ import { Alert, Box, Button, Checkbox, CircularProgress, Dialog, DialogActions, 
 import React from 'react';
 import { InfoOutlined, RestartAlt } from '@/components/icons';
 import CodeBlock from '@/components/CodeBlock';
-import CodexQuickConfig, { type CodexPrefs, defaultCodexPrefs } from './CodexQuickConfig';
+import CodexQuickConfig, { type CodexPrefs, defaultCodexPrefs, mergeSavedCodexPrefs } from './CodexQuickConfig';
 import Context1MChangeBanner from './Context1MChangeBanner';
 import { shouldIgnoreDialogClose } from '@/components/dialogClose';
 import { api } from '@/services/api';
@@ -75,17 +75,52 @@ const CodexConfigModal: React.FC<CodexConfigModalProps> = ({
     const [catalogJson, setCatalogJson] = React.useState<string>('');
     const [previewModels, setPreviewModels] = React.useState<string[]>([]);
 
+    // True while the applied-config readback is in flight, so the Quick tab
+    // can show a spinner instead of flashing the defaults before the saved
+    // values land. Mirrors ClaudeCodeConfigModal's isConfigLoading.
+    const [isConfigLoading, setIsConfigLoading] = React.useState(false);
+
     // Apply configuration state
     const [isApplying, setIsApplying] = React.useState(false);
 
-    // Seed defaults on open.
+    // On open, restore the prefs/writeCatalog previously applied to
+    // ~/.codex/config.toml; first-time users (nothing applied yet) fall back to
+    // defaults. Mirrors ClaudeCodeConfigModal's open-effect hydration so the
+    // form no longer resets the user's last applied values on every open.
+    //
+    // pendingContext1MChange is in the deps so reopening after a 1M toggle
+    // re-hydrates fresh state, but it does NOT branch the body: Codex's 1M
+    // setting only affects the catalog's context window (generated at preview
+    // time), never the reasoning prefs edited here — so a 1M toggle must not
+    // skip the applied-config readback the way it used to.
     React.useEffect(() => {
-        if (!open) return;
-        setPrefs(defaultCodexPrefs());
-        setAuthMode('apikey');
-        setSelectedOAuthProvider('');
-        setCodexOAuthProviders([]);
-    }, [open]);
+        if (!open) {
+            setPrefs(defaultCodexPrefs());
+            setWriteCatalog(true);
+            setAuthMode('apikey');
+            setSelectedOAuthProvider('');
+            setCodexOAuthProviders([]);
+            setIsConfigLoading(false);
+            return;
+        }
+        let active = true;
+        setIsConfigLoading(true);
+        void api.getAppliedCodexConfig().then(result => {
+            if (!active) return;
+            if (result?.success && result.exists) {
+                setPrefs(mergeSavedCodexPrefs(result.preferences || {}));
+                setWriteCatalog(result.writeCatalog !== false);
+            } else {
+                setPrefs(defaultCodexPrefs());
+                setWriteCatalog(true);
+            }
+        }).finally(() => {
+            if (active) setIsConfigLoading(false);
+        });
+        return () => {
+            active = false;
+        };
+    }, [open, pendingContext1MChange]);
 
     // Fetch Codex OAuth providers only when the picker is actually shown (direct
     // or hybrid) — no network cost for the default gateway path. Direct mode
@@ -417,7 +452,13 @@ EOF`;
                         </FormControl>
                     </Box>
                 )}
-                {authMode !== 'chatgpt' && mainTab === 'quick' && (
+                {authMode !== 'chatgpt' && mainTab === 'quick' && isConfigLoading && (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+                        <CircularProgress size={28} />
+                    </Box>
+                )}
+
+                {authMode !== 'chatgpt' && mainTab === 'quick' && !isConfigLoading && (
                     <CodexQuickConfig
                         prefs={prefs}
                         setPrefs={setPrefs}
