@@ -2,6 +2,8 @@ package bot
 
 import (
 	"strings"
+
+	"github.com/tingly-dev/tingly-box/internal/data/db"
 )
 
 // Output format constants for bot messages
@@ -28,7 +30,7 @@ const (
 const (
 	AgentNameTB        = "@tb" // Tingly-Box short name
 	AgentNameCC        = "@cc" // Claude Code short name
-	AgentNameTinglyBox = "tingly-box"
+	AgentNameTinglyBox = db.DefaultChatAgent
 	AgentNameClaude    = "claude"
 )
 

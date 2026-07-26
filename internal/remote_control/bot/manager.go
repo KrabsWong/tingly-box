@@ -28,13 +28,9 @@ import (
 // consumers in order until one claims, so the catch-all (remote_agent) sits
 // last.
 //
-// chatStore is owned by the Manager and shared by every bot it runs — see
-// Manager.sharedChatStore. This function must not close it.
+// chatStore is injected into the Manager and shared by every bot it runs —
+// see Manager.SetChatStore. This function must not close it.
 func runBotWithSettings(ctx context.Context, setting BotSetting, chatStore ChatStoreInterface, consumers []Consumer, pairing *PairingManager, auditLog *audit.Logger, channels *channel.Registry) error {
-	if chatStore == nil {
-		return fmt.Errorf("chat store is required")
-	}
-
 	// Create platform-specific auth config
 	authConfig := buildAuthConfig(setting)
 	platform := imbot.Platform(setting.Platform)
@@ -208,21 +204,17 @@ type Manager struct {
 	mu        sync.RWMutex
 	running   map[string]*runningBot // uuid -> runningBot
 	store     SettingsStore
-	dataPath  string            // Data path for JSON chat store (replaces dbPath)
 	consumers []Consumer        // Supply each bot's inbound behavior, in dispatch order (the decoupling seam)
 	pairing   *PairingManager   // Pairing-code (TOFU) manager
 	audit     *audit.Logger     // Audit logger for security events
 	channels  *channel.Registry // Remote channel registry for /tingly/:scenario routing (optional)
 
-	// chatStore is the ONE chat store every bot in this manager shares.
-	// It must not be per-bot: the JSON store loads the file once at open
-	// and thereafter rewrites it whole from its own in-memory map, so two
-	// stores over the same path silently clobber each other — bot B's next
-	// write restores the snapshot it read at startup, erasing whatever bot A
-	// persisted in between. See .design/remote-storage.md (P0-1).
-	chatStoreOnce sync.Once
-	chatStore     ChatStoreInterface
-	chatStoreErr  error
+	// chatStore is the ONE chat store every bot in this manager shares, and
+	// it is injected rather than opened here — the manager does not get to
+	// know where chats live. Sharing is not an optimization: a per-bot store
+	// is how concurrent bots used to erase each other's chats.
+	// See .design/remote-storage.md.
+	chatStore ChatStoreInterface
 }
 
 // NewManager creates a new bot manager with a settings store and the
@@ -278,62 +270,38 @@ func (m *Manager) AuditLogger() *audit.Logger {
 	return m.audit
 }
 
-// ChatStore returns the manager's shared chat store, opening it on first use.
+// ChatStore returns the chat store shared by every bot this manager runs.
 //
-// The store is owned by the Manager and shared with every bot it runs — the
-// caller must NOT close it. Opening a second store over the same file would
-// reintroduce the clobbering described on Manager.chatStore.
+// The store is not owned here — whoever injected it (the StoreManager, in the
+// server) closes it. Callers must not.
 func (m *Manager) ChatStore() (ChatStoreInterface, error) {
 	m.mu.RLock()
-	dataPath := m.dataPath
-	m.mu.RUnlock()
-	return m.sharedChatStore(dataPath)
-}
-
-// sharedChatStore lazily opens the one chat store shared by all bots. Lazy
-// rather than eager because SetDataPath runs after NewManager, and a manager
-// whose bots never start should not create the file at all.
-//
-// dataPath is a parameter rather than read from m here because Start calls
-// this while already holding m.mu, and m.mu is not reentrant.
-func (m *Manager) sharedChatStore(dataPath string) (ChatStoreInterface, error) {
-	if dataPath == "" {
-		return nil, fmt.Errorf("data path not configured")
+	defer m.mu.RUnlock()
+	if m.chatStore == nil {
+		return nil, fmt.Errorf("chat store not configured")
 	}
-
-	m.chatStoreOnce.Do(func() {
-		store, err := NewChatStoreJSON(dataPath)
-		if err != nil {
-			m.chatStoreErr = fmt.Errorf("failed to create chat store: %w", err)
-			return
-		}
-		m.chatStore = store
-	})
-	return m.chatStore, m.chatStoreErr
+	return m.chatStore, nil
 }
 
-// SetDataPath sets the data path for JSON chat store operations. It must be
-// called before the first bot starts: the shared chat store is opened once
-// and later changes to the path do not reopen it.
-func (m *Manager) SetDataPath(dataPath string) {
+// SetChatStore injects the chat store every bot will share. Call it before
+// starting any bot; Start fails without one.
+func (m *Manager) SetChatStore(store ChatStoreInterface) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.dataPath = dataPath
-}
-
-// Close releases manager-owned resources. It stops nothing — call StopAll
-// first — and only flushes and closes the shared chat store.
-func (m *Manager) Close() error {
-	if m.chatStore == nil {
-		return nil
-	}
-	return m.chatStore.Close()
+	m.chatStore = store
 }
 
 // Start starts a bot by UUID
 func (m *Manager) Start(parentCtx context.Context, uuid string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Refuse to run a bot that cannot persist anything, before doing any
+	// other work: a bot with no chat store silently forgets every binding
+	// and pairing, which is worse than not starting.
+	if m.chatStore == nil {
+		return fmt.Errorf("chat store not configured")
+	}
 
 	// Check if already running or stopping
 	if rb, exists := m.running[uuid]; exists {
@@ -428,10 +396,7 @@ func (m *Manager) Start(parentCtx context.Context, uuid string) error {
 	//
 	// Every bot shares the manager's one chat store; opening a per-bot store
 	// here is what used to make concurrent bots erase each other's writes.
-	chatStore, err := m.sharedChatStore(m.dataPath)
-	if err != nil {
-		return err
-	}
+	chatStore := m.chatStore
 
 	// Create cancellable context for this bot
 	ctx, cancel := context.WithCancel(parentCtx)

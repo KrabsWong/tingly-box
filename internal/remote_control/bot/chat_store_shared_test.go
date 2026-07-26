@@ -1,62 +1,19 @@
 package bot
 
 import (
-	"path/filepath"
+	"context"
 	"testing"
 )
 
-// TestConcurrentStoresClobber characterizes the hazard the shared-store fix
-// exists to avoid. It is not testing desired behavior — it pins WHY a chat
-// store must never be opened twice over one file, so that anyone tempted to
-// reintroduce a per-bot store sees the cost spelled out.
-//
-// The JSON store loads the file once at open and thereafter rewrites it whole
-// from its own in-memory map. Two stores over one path therefore hold
-// divergent snapshots, and the second one to write silently erases the first
-// one's rows.
-func TestConcurrentStoresClobber(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "chats.json")
-
-	// Two stores opened over the same file, as two bots used to do.
-	botA, err := NewChatStoreJSON(path)
-	if err != nil {
-		t.Fatalf("open store A: %v", err)
-	}
-	botB, err := NewChatStoreJSON(path)
-	if err != nil {
-		t.Fatalf("open store B: %v", err)
-	}
-
-	if err := botA.BindProject("chat-a", "telegram", "/proj/a", "owner-a"); err != nil {
-		t.Fatalf("bind on A: %v", err)
-	}
-	// B never saw A's write, so its own write restores B's startup snapshot.
-	if err := botB.BindProject("chat-b", "feishu", "/proj/b", "owner-b"); err != nil {
-		t.Fatalf("bind on B: %v", err)
-	}
-
-	fresh, err := NewChatStoreJSON(path)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	chat, err := fresh.GetChat("chat-a")
-	if err != nil {
-		t.Fatalf("get chat-a: %v", err)
-	}
-	if chat != nil {
-		t.Fatal("expected the documented clobber; two stores over one file " +
-			"no longer lose writes, so Manager may not need to share one — " +
-			"re-read .design/remote-storage.md P0-1 before changing this")
-	}
-}
-
-// TestManagerChatStoreIsShared pins the P0-1 fix: every caller — and so every
-// bot the manager runs — gets the same store instance, not a fresh one per
-// call. Before it, runBotWithSettings opened a store per bot over a single
-// shared path and concurrent bots erased each other's chats.
+// TestManagerChatStoreIsShared pins the invariant that every bot a manager
+// runs talks to the same chat store. It used to open one per bot over a shared
+// JSON file, and concurrent bots erased each other's chats; the store is now
+// injected, so sharing is structural rather than something to remember.
 func TestManagerChatStoreIsShared(t *testing.T) {
+	store := openStore(t, t.TempDir())
+
 	m := NewManager(nil)
-	m.SetDataPath(filepath.Join(t.TempDir(), "chats.json"))
+	m.SetChatStore(store)
 
 	first, err := m.ChatStore()
 	if err != nil {
@@ -67,11 +24,9 @@ func TestManagerChatStoreIsShared(t *testing.T) {
 		t.Fatalf("second ChatStore: %v", err)
 	}
 	if first != second {
-		t.Fatal("ChatStore returned distinct instances; bots would clobber each other")
+		t.Fatal("ChatStore returned distinct instances; bots would not share state")
 	}
 
-	// A write through one handle is visible through the other, because they
-	// are the same store.
 	if err := first.BindProject("chat-1", "telegram", "/proj", "owner"); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
@@ -82,22 +37,17 @@ func TestManagerChatStoreIsShared(t *testing.T) {
 	if !ok || path != "/proj" {
 		t.Errorf("GetProjectPath = (%q, %v), want (%q, true)", path, ok, "/proj")
 	}
-
-	if err := m.Close(); err != nil {
-		t.Errorf("Close: %v", err)
-	}
 }
 
-// TestManagerChatStoreRequiresDataPath keeps the "not configured" error path
-// intact — Start relies on it to fail loudly rather than run a bot with no
-// persistence.
-func TestManagerChatStoreRequiresDataPath(t *testing.T) {
+// TestManagerRequiresChatStore keeps the failure loud: a bot must not run
+// without persistence, and Start is the last place to catch that.
+func TestManagerRequiresChatStore(t *testing.T) {
 	m := NewManager(nil)
+
 	if _, err := m.ChatStore(); err == nil {
-		t.Fatal("expected an error when no data path is configured")
+		t.Error("expected an error when no chat store is configured")
 	}
-	// Close on a manager that never opened a store is a no-op, not a panic.
-	if err := m.Close(); err != nil {
-		t.Errorf("Close on unopened store: %v", err)
+	if err := m.Start(context.Background(), "some-uuid"); err == nil {
+		t.Error("expected Start to fail without a chat store")
 	}
 }

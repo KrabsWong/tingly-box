@@ -3,7 +3,6 @@ package imbot
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -30,7 +29,6 @@ type BotManager struct {
 	sessionMgr   *session.Manager
 	agentService *agentboot.AgentService
 	tbClient     tbclient.TBClient
-	dataPath     string
 	config       *config.Config
 }
 
@@ -63,16 +61,17 @@ func NewBotManager(ctx context.Context, cfg *config.Config) (*BotManager, error)
 		return nil, fmt.Errorf("imbot settings store is nil")
 	}
 
-	// Get data path for chat store
-	dataPath := getDataPath(cfg.ConfigDir)
-
-	// Create session manager
-	sessionStorePath := filepath.Join(cfg.ConfigDir, "bot_sessions.json")
-	sessionStore, err := session.NewSessionStoreJSON(sessionStorePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create session store: %w", err)
+	// Chats and sessions live in the shared database alongside bot settings.
+	// Any leftover JSON files were already imported by the StoreManager when
+	// it opened the database.
+	chatStore := sm.RemoteChats()
+	if chatStore == nil {
+		return nil, fmt.Errorf("remote chat store is nil")
 	}
-
+	sessionStore := sm.RemoteSessions()
+	if sessionStore == nil {
+		return nil, fmt.Errorf("remote session store is nil")
+	}
 	sessionMgr := session.NewManager(session.Config{
 		Timeout:          30 * 60, // 30 minutes
 		MessageRetention: 7 * 24 * time.Hour,
@@ -100,7 +99,7 @@ func NewBotManager(ctx context.Context, cfg *config.Config) (*BotManager, error)
 
 	// Create internal bot manager
 	internalMgr := bot.NewManager(store, notifyConsumer, remoteAgentConsumer)
-	internalMgr.SetDataPath(dataPath)
+	internalMgr.SetChatStore(chatStore)
 
 	bm := &BotManager{
 		manager:      internalMgr,
@@ -108,7 +107,6 @@ func NewBotManager(ctx context.Context, cfg *config.Config) (*BotManager, error)
 		sessionMgr:   sessionMgr,
 		agentService: agentService,
 		tbClient:     tbClient,
-		dataPath:     dataPath,
 		config:       cfg,
 	}
 
@@ -116,11 +114,6 @@ func NewBotManager(ctx context.Context, cfg *config.Config) (*BotManager, error)
 
 	logrus.Info("BotManager initialized successfully")
 	return bm, nil
-}
-
-// getDataPath returns the data path for bot chat store.
-func getDataPath(configDir string) string {
-	return filepath.Join(configDir, "bot_chats.json")
 }
 
 // StartBot starts a single bot by UUID.
@@ -366,13 +359,6 @@ func (bm *BotManager) Shutdown() {
 		bm.sessionMgr.Stop()
 	}
 
-	// Flush and close the chat store shared by all bots.
-	if bm.manager != nil {
-		if err := bm.manager.Close(); err != nil {
-			logrus.WithError(err).Warn("Failed to close chat store")
-		}
-	}
-
 	logrus.Info("BotManager shutdown complete")
 }
 
@@ -431,10 +417,13 @@ func (bm *BotManager) PairingManager() *bot.PairingManager {
 	return bm.manager.PairingManager()
 }
 
-// ChatStore opens a read-only view of the shared bot chat store. The caller
-// must Close it. Used by the GET /bots/:bot/chats API to list the chats a
-// bot can reach (so callers of /notify and /interact can discover the
-// channel-native chat_id those endpoints require).
+// ChatStore returns the chat store shared by every running bot.
+//
+// The store is owned by the StoreManager and must NOT be closed by callers:
+// closing it would pull persistence out from under every running bot. Used by
+// the GET /bots/:bot/chats API to list the chats a bot can reach (so callers
+// of /notify and /interact can discover the channel-native chat_id those
+// endpoints require).
 func (bm *BotManager) ChatStore() (bot.ChatStoreInterface, error) {
 	if bm == nil || bm.manager == nil {
 		return nil, fmt.Errorf("bot manager not initialized")

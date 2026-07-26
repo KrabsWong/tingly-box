@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/tingly-dev/tingly-box/internal/constant"
+	"github.com/tingly-dev/tingly-box/remote/session"
 )
 
 // StoreManager manages all database stores with a shared GORM DB instance.
@@ -31,6 +32,8 @@ type StoreManager struct {
 	modelStore         *ModelStore
 	apiTokenStore      *APITokenStore
 	taskStore          *TaskStore
+	remoteChatStore    *RemoteChatStore
+	remoteSessionStore *RemoteSessionStore
 }
 
 // StoreManagerConfig holds configuration for StoreManager initialization.
@@ -159,6 +162,9 @@ func (sm *StoreManager) initStores() error {
 	if err := sm.initTaskStore(); err != nil {
 		errs = append(errs, fmt.Errorf("task store: %w", err))
 	}
+	if err := sm.initRemoteStores(); err != nil {
+		errs = append(errs, fmt.Errorf("remote stores: %w", err))
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("failed to initialize stores: %v", errs)
@@ -274,6 +280,50 @@ func (sm *StoreManager) initTaskStore() error {
 	return nil
 }
 
+// initRemoteStores initializes the remote-control chat and session stores.
+// These replace the JSON files the remote subsystem used to keep beside the
+// database; see .design/remote-storage.md.
+func (sm *StoreManager) initRemoteStores() error {
+	if err := sm.db.AutoMigrate(
+		&RemoteChatRecord{},
+		&RemoteSessionRecord{},
+	); err != nil {
+		return err
+	}
+	// Session transcripts are files, not rows — see session.Transcript.
+	transcript, err := session.NewTranscript(constant.GetRemoteTranscriptDir(sm.baseDir))
+	if err != nil {
+		return fmt.Errorf("open transcript store: %w", err)
+	}
+	sm.remoteChatStore = NewRemoteChatStore(sm.db)
+	sm.remoteSessionStore = NewRemoteSessionStore(sm.db, transcript)
+
+	// Migrating here, rather than from whichever feature happens to construct
+	// a store first, is what makes every entry point — server, standalone CLI
+	// bot, `remote pair revoke` — see the same migrated data.
+	if err := importLegacyRemoteJSON(sm.baseDir, sm.remoteChatStore, sm.remoteSessionStore); err != nil {
+		// Best effort: the legacy files are left in place for the next start.
+		logrus.WithError(err).Error("Failed to import legacy remote JSON stores; leaving files in place")
+	}
+	return nil
+}
+
+// RemoteChats returns the RemoteChatStore (thread-safe).
+// Returns nil if the store is not initialized or after Close() has been called.
+func (sm *StoreManager) RemoteChats() *RemoteChatStore {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.remoteChatStore
+}
+
+// RemoteSessions returns the RemoteSessionStore (thread-safe).
+// Returns nil if the store is not initialized or after Close() has been called.
+func (sm *StoreManager) RemoteSessions() *RemoteSessionStore {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.remoteSessionStore
+}
+
 // Stats returns the StatsStore (thread-safe).
 // Returns nil if the store is not initialized or after Close() has been called.
 func (sm *StoreManager) Stats() *StatsStore {
@@ -374,6 +424,8 @@ func (sm *StoreManager) Close() error {
 	sm.modelStore = nil
 	sm.apiTokenStore = nil
 	sm.taskStore = nil
+	sm.remoteChatStore = nil
+	sm.remoteSessionStore = nil
 	sm.db = nil
 
 	logrus.Info("StoreManager: Closed all stores")
@@ -386,21 +438,24 @@ func (sm *StoreManager) HealthCheck() (*HealthStatus, error) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	status := &HealthStatus{
-		TotalStores: 8,
-		StoreStatus: make(map[string]string),
+	// Check each store. Keep in sync with the fields, initStores and Close —
+	// the set of stores is unfortunately spelled out in four places.
+	stores := map[string]interface{}{
+		"stats":          sm.statsStore,
+		"usage":          sm.usageStore,
+		"provider":       sm.providerStore,
+		"toolConfig":     sm.toolConfigStore,
+		"imbotSettings":  sm.imbotSettingsStore,
+		"model":          sm.modelStore,
+		"apiToken":       sm.apiTokenStore,
+		"tasks":          sm.taskStore,
+		"remoteChats":    sm.remoteChatStore,
+		"remoteSessions": sm.remoteSessionStore,
 	}
 
-	// Check each store
-	stores := map[string]interface{}{
-		"stats":         sm.statsStore,
-		"usage":         sm.usageStore,
-		"provider":      sm.providerStore,
-		"toolConfig":    sm.toolConfigStore,
-		"imbotSettings": sm.imbotSettingsStore,
-		"model":         sm.modelStore,
-		"apiToken":      sm.apiTokenStore,
-		"tasks":         sm.taskStore,
+	status := &HealthStatus{
+		TotalStores: len(stores),
+		StoreStatus: make(map[string]string),
 	}
 
 	for name, store := range stores {

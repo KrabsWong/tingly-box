@@ -36,21 +36,24 @@ type Config struct {
 
 // Session represents an execution session
 type Session struct {
-	ID             string                 // Unique session identifier
-	ChatID         string                 // NEW: Bound chat ID
-	Agent          string                 // NEW: Bound agent type ("claude", "tingly-box")
-	Project        string                 // NEW: Bound project path
-	Status         Status                 // Current session status
-	Request        string                 // User's request payload
-	Response       string                 // Claude Code response summary
-	Error          string                 // Error message if failed
-	CreatedAt      time.Time              // Session creation timestamp
-	LastActivity   time.Time              // Last activity timestamp
-	ExpiresAt      time.Time              // Session expiration timestamp
-	Context        map[string]interface{} // Request context for continued communication
-	Messages       []Message              // Chat message history
-	PermissionMode string                 // Claude CLI permission mode: "default", "plan", "auto", "acceptEdits", "dontAsk", "bypassPermissions"
+	ID             string    // Unique session identifier
+	ChatID         string    // NEW: Bound chat ID
+	Agent          string    // NEW: Bound agent type ("claude", "tingly-box")
+	Project        string    // NEW: Bound project path
+	Status         Status    // Current session status
+	Request        string    // User's request payload
+	Response       string    // Claude Code response summary
+	Error          string    // Error message if failed
+	CreatedAt      time.Time // Session creation timestamp
+	LastActivity   time.Time // Last activity timestamp
+	ExpiresAt      time.Time // Session expiration timestamp
+	PermissionMode string    // Claude CLI permission mode: "default", "plan", "auto", "acceptEdits", "dontAsk", "bypassPermissions"
 }
+
+// Note: a session's message history is deliberately NOT a field here. It lives
+// in an append-only transcript alongside the session index and is fetched on
+// demand (Manager.GetMessages), so a conversation's text is never carried
+// through every status update, listing, or retention sweep. See Transcript.
 
 // Message represents a chat message within a session
 type Message struct {
@@ -120,12 +123,6 @@ func (m *Manager) CreateWith(chatID, agent, project string) *Session {
 		CreatedAt:    now,
 		LastActivity: now,
 		ExpiresAt:    now.Add(m.config.Timeout),
-		Context:      make(map[string]interface{}),
-	}
-
-	// Store project_path in context for backward compatibility
-	if project != "" {
-		session.Context["project_path"] = project
 	}
 
 	m.sessions[session.ID] = session
@@ -163,10 +160,6 @@ func (m *Manager) CreateWithID(id, chatID, agent, project string) *Session {
 		CreatedAt:    now,
 		LastActivity: now,
 		ExpiresAt:    time.Time{}, // persistent: caller will drive lifecycle
-		Context:      make(map[string]interface{}),
-	}
-	if project != "" {
-		sess.Context["project_path"] = project
 	}
 	m.sessions[id] = sess
 	logrus.Debugf("Session resumed-bind: %s (chat=%s, agent=%s, project=%s)",
@@ -384,46 +377,47 @@ func (m *Manager) GetRequest(id string) (string, bool) {
 	return session.Request, true
 }
 
-// SetContext stores context data for a session
-func (m *Manager) SetContext(id string, key string, value interface{}) bool {
-	return m.Update(id, func(s *Session) {
-		s.Context[key] = value
-	})
-}
-
-// AppendMessage adds a message to a session
+// AppendMessage adds a message to a session's transcript.
+//
+// The append goes straight to the store rather than through Update: the
+// transcript is append-only and lives outside the session index, so a message
+// costs one O_APPEND write instead of rewriting the session record.
 func (m *Manager) AppendMessage(id string, msg Message) bool {
-	return m.Update(id, func(s *Session) {
-		s.Messages = append(s.Messages, msg)
-	})
+	m.mu.Lock()
+	session, exists := m.sessions[id]
+	if exists {
+		session.LastActivity = time.Now()
+	}
+	store := m.store
+	m.mu.Unlock()
+
+	if !exists || store == nil {
+		return exists
+	}
+	if err := store.AppendMessage(id, msg); err != nil {
+		logrus.WithError(err).WithField("session", id).Warn("Failed to append session message")
+		return false
+	}
+	return true
 }
 
-// GetMessages retrieves messages for a session
+// GetMessages retrieves a session's messages, reading the transcript on
+// demand — history is not held in memory for every live session.
 func (m *Manager) GetMessages(id string) ([]Message, bool) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	_, exists := m.sessions[id]
+	store := m.store
+	m.mu.RUnlock()
 
-	session, exists := m.sessions[id]
-	if !exists {
+	if !exists || store == nil {
+		return nil, exists
+	}
+	msgs, err := store.Messages(id)
+	if err != nil {
+		logrus.WithError(err).WithField("session", id).Warn("Failed to read session messages")
 		return nil, false
 	}
-
-	// Return copy of messages slice
-	return append([]Message{}, session.Messages...), true
-}
-
-// GetContext retrieves context data for a session
-func (m *Manager) GetContext(id string, key string) (interface{}, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	session, exists := m.sessions[id]
-	if !exists {
-		return nil, false
-	}
-
-	value, exists := session.Context[key]
-	return value, exists
+	return msgs, true
 }
 
 // cleanupLoop periodically removes expired sessions
@@ -466,16 +460,15 @@ func (m *Manager) cleanupExpired() {
 	}
 }
 
-// Stop halts the background loops and closes the store. Safe to call more
-// than once — shutdown paths can overlap, and closing stopCh twice would
-// panic.
+// Stop halts the background loops. Safe to call more than once — shutdown
+// paths can overlap, and closing stopCh twice would panic.
+//
+// It does not close the store: the manager does not own it (the StoreManager
+// does), and every write is already committed by the time it returns.
 func (m *Manager) Stop() {
 	m.stopOnce.Do(func() {
 		close(m.stopCh)
 		m.wg.Wait()
-		if m.store != nil {
-			_ = m.store.Close()
-		}
 	})
 }
 

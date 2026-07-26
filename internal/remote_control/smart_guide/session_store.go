@@ -1,8 +1,6 @@
 package smart_guide
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,6 +8,8 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/sirupsen/logrus"
+
+	"github.com/tingly-dev/tingly-box/pkg/fs"
 )
 
 // SessionStore persists Smart Guide conversation history as native Anthropic
@@ -34,47 +34,13 @@ func NewSessionStore(dataDir string) (*SessionStore, error) {
 	return &SessionStore{dir: dataDir}, nil
 }
 
-// safeChatID reports whether a chat ID can be used verbatim as a filename:
-// ASCII letters, digits, underscore and hyphen only, and non-empty.
-//
-// This deliberately excludes '.', so "." and ".." can never survive.
-func safeChatID(chatID string) bool {
-	if chatID == "" {
-		return false
-	}
-	for _, r := range chatID {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case r == '_' || r == '-':
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-// fileKey maps a platform chat ID to a filesystem-safe basename.
-//
-// Chat IDs come straight from the IM platform and are not filename-safe:
-// Feishu chat IDs carry punctuation, WhatsApp JIDs contain '@' and '/', and a
-// hostile ID could be "../../something". Joining one into a path unchecked is
-// a directory traversal on both read and write.
-//
-// IDs that are already safe pass through verbatim so existing files (Telegram
-// and Discord IDs are numeric) keep resolving with no migration. Anything else
-// is replaced by a SHA-256 digest of the ID, which is stable, collision-free
-// in practice, and cannot escape the directory.
-func fileKey(chatID string) string {
-	if safeChatID(chatID) {
-		return chatID
-	}
-	sum := sha256.Sum256([]byte(chatID))
-	return "h-" + hex.EncodeToString(sum[:])
-}
-
 // path returns the on-disk file for a chat's history.
+//
+// The chat ID goes through fs.SafeFileKey because it comes straight from the IM
+// platform and is not filename-safe: Feishu ids carry punctuation and WhatsApp
+// JIDs contain '@' and '/'.
 func (s *SessionStore) path(chatID string) string {
-	return filepath.Join(s.dir, fileKey(chatID)+"-smartguide.json")
+	return filepath.Join(s.dir, fs.SafeFileKey(chatID)+"-smartguide.json")
 }
 
 // Load returns the stored history for a chat, or an empty slice if none exists.

@@ -616,8 +616,9 @@ func (h *Handler) SetChannelRegistry(reg *channel.Registry) {
 	h.botMgr.SetChannelRegistry(reg)
 }
 
-// ChatStore opens a read-only view of the shared bot chat store (caller must
-// Close). Used by the notify module to implement GET /bots/:bot/chats.
+// ChatStore returns the chat store shared by every running bot. It is owned
+// by the StoreManager — do not Close it. Used by the notify module to
+// implement GET /bots/:bot/chats.
 func (h *Handler) ChatStore() (bot.ChatStoreInterface, error) {
 	if h.botMgr == nil {
 		return nil, fmt.Errorf("bot manager not initialized")

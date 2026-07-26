@@ -189,12 +189,15 @@ func TestStoreManager_HealthCheck(t *testing.T) {
 		t.Errorf("HealthCheck() returned unhealthy: %+v", status)
 	}
 
-	if status.TotalStores != 8 {
-		t.Errorf("TotalStores = %d, want 8", status.TotalStores)
+	// Every store the manager initializes must be reported on — the count is
+	// derived from the checked set precisely so adding a store cannot silently
+	// leave it out of the health report.
+	if status.TotalStores != len(status.StoreStatus) {
+		t.Errorf("TotalStores = %d, want %d (one per reported store)", status.TotalStores, len(status.StoreStatus))
 	}
 
-	if status.HealthyStores != 8 {
-		t.Errorf("HealthyStores = %d, want 8", status.HealthyStores)
+	if status.HealthyStores != status.TotalStores {
+		t.Errorf("HealthyStores = %d, want %d", status.HealthyStores, status.TotalStores)
 	}
 
 	if status.UnhealthyStores != 0 {
@@ -204,7 +207,7 @@ func TestStoreManager_HealthCheck(t *testing.T) {
 	expectedStores := []string{
 		"stats", "usage", "provider",
 		"toolConfig", "imbotSettings", "model", "apiToken",
-		"tasks",
+		"tasks", "remoteChats", "remoteSessions",
 	}
 	for _, name := range expectedStores {
 		if status.StoreStatus[name] != HealthStatusOK {
@@ -233,8 +236,12 @@ func TestStoreManager_HealthCheckAfterClose(t *testing.T) {
 		t.Error("HealthCheck() should return unhealthy after Close()")
 	}
 
-	if status.UnhealthyStores != 8 {
-		t.Errorf("UnhealthyStores = %d, want 8", status.UnhealthyStores)
+	// After Close every store is nil, so all of them report unhealthy.
+	if status.UnhealthyStores != status.TotalStores {
+		t.Errorf("UnhealthyStores = %d, want %d (all of them)", status.UnhealthyStores, status.TotalStores)
+	}
+	if status.HealthyStores != 0 {
+		t.Errorf("HealthyStores = %d, want 0", status.HealthyStores)
 	}
 }
 

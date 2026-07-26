@@ -39,31 +39,8 @@ func TestFileKeyContainsTraversal(t *testing.T) {
 	}
 }
 
-// TestFileKeyPreservesSafeIDs keeps existing on-disk files resolving: Telegram
-// and Discord chat IDs are numeric, and hashing them would orphan every stored
-// history at upgrade.
-func TestFileKeyPreservesSafeIDs(t *testing.T) {
-	for _, id := range []string{"123456789", "-1001234567890", "chat_42", "AbC-123"} {
-		if got := fileKey(id); got != id {
-			t.Errorf("fileKey(%q) = %q, want it unchanged", id, got)
-		}
-	}
-}
-
-// TestFileKeyIsInjectiveForUnsafeIDs guards against two different chats
-// sharing one history file, which would leak one user's conversation into
-// another's.
-func TestFileKeyIsInjectiveForUnsafeIDs(t *testing.T) {
-	ids := []string{"a/b", "a.b", "a@b", "../a", "a b", "用户1", "用户2"}
-	seen := make(map[string]string, len(ids))
-	for _, id := range ids {
-		key := fileKey(id)
-		if prev, dup := seen[key]; dup {
-			t.Errorf("fileKey(%q) collides with fileKey(%q) = %q", id, prev, key)
-		}
-		seen[key] = id
-	}
-}
+// Note: the id-to-filename mapping itself is fs.SafeFileKey, tested in
+// pkg/fs. What matters here is that this store routes through it.
 
 // TestSaveLoadRoundTripsUnsafeID checks the store still works end-to-end for
 // an ID that has to be hashed, and that the file lands owner-only.

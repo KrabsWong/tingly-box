@@ -25,6 +25,7 @@ Remote 的状态散落在四种载体上，只有 bot 设置进了主库：
 | Chat（项目绑定、配对、白名单、bash cwd、当前 agent、agent state） | `pkg/jsonstore` 整文件 | `~/.tingly-box/bot_chats.json` | 多实例各持内存副本，整文件覆盖 |
 | Session（执行会话 + 消息历史） | `pkg/jsonstore` 整文件 | `~/.tingly-box/bot_sessions.json` | 更新只置 dirty，不落盘 |
 | SmartGuide 对话历史 | 裸 `os.WriteFile` | `<dataDir>/sessions/<chatID>-smartguide.json` | 每 chat 一个文件，0644 |
+| Chat.AgentState / Session.Context | 随宿主结构 | 同上 | **零调用方，已删除** |
 | Bot 设置 | SQLite / GORM ✅ | `db/tingly.db` → `imbot_settings` | 单连接 + WAL |
 | Scenario bindings | SQLite 里的 JSON text 列 | `imbot_settings.scenarios` | 读-改-写整个 blob |
 | Pairing code | 纯内存 | `imbot/security` | 重启即失 |
@@ -133,12 +134,36 @@ append 一条消息要重新 marshal 整个 sessions 文件 → 消息数增长�
 
 ## 3. 设计原则
 
-1. **单库单连接。** 不再新造 store，并入已有的 `internal/data/db.StoreManager`
-   （单 `*gorm.DB` + WAL + busy_timeout + AutoMigrate）。remote 不再自己持有文件路径。
-2. **一份状态一个家。** 关系用行和索引表达，不用 blob 嵌套。
-3. **JSON 不是禁忌，JSON 文件当数据库才是。** 真正开放的字段
-   （binding options、session context）继续用 JSON 列 —— 那是「值」，不是「表」。
+**最重要的一条：按访问模式选介质，不是「全进 SQLite」。**
+
+原来的缺陷不是「用了文件」，而是「**一个**文件装所有会话，并且每次写整体重写」。
+per-session 的追加文件没有任何一条这样的毛病。所以分界线是：
+
+| | 去 SQLite | 去文件 |
+|---|---|---|
+| 形态 | 小、有界、字段固定 | 大、无界、只追加 |
+| 访问 | 按条件查询、排序、join、扫表清理 | 写一次、整体读、从不按内容查 |
+| 例子 | 会话**索引**（绑定、状态、时间戳）、chat 状态 | 会话 **transcript**、SmartGuide 对话历史 |
+
+把 transcript 塞进 SQLite 的代价是实打实的：每次追加变成一次对全产品共享库的事务，
+库文件随对话文本无界膨胀（而没有任何查询用得上这些文本），
+用户也失去了 `tail` / `grep` / 附到 bug 报告里的能力。
+而 tingly-box 恰恰要和 Claude Code 的 on-disk session 对齐 ——
+`Manager.CreateWithID` 就是为了让 remote 会话 id 和 Claude 的 session_id 一致，
+从而支持 `--resume`。两半对话理应是同一种产物。
+
+其余原则：
+
+1. **单库单连接。** 需要进库的部分并入已有的 `internal/data/db.StoreManager`
+   （单 `*gorm.DB` + WAL + busy_timeout + AutoMigrate）。
+2. **一份状态一个家。** 同一个事实不要有两处表示。
+3. **SQLite 支持 JSON，不必强行展平。** 真正开放或只整体读写的字段
+   （binding options、chat 的 project history）用 JSON 列就好 ——
+   拆成表只有在真的要按它查询时才划算。
 4. **每张表都要有出口。** schema 落地的同时给 API + UI，否则只是把黑箱换了个格式。
+5. **死代码直接删，不要给它搬家。** 迁移时逐个确认调用方；发现零调用方的字段
+   （`Chat.AgentState`、`Session.Context`）就删掉，而不是费力给它找新介质 ——
+   否则等于把历史包袱重新实现一遍。
 
 ## 4. 目标 schema
 
@@ -173,23 +198,8 @@ remote_sessions
   status             TEXT          idx(status)
   request / response / error  TEXT
   permission_mode    TEXT
-  context            JSON          -- 开放字段，保持 JSON 列
   created_at / last_activity / expires_at
-  idx(chat_id, agent, project, last_activity DESC)   -- FindByChatAgentProject 一次索引查询
-
-remote_session_messages           -- 取代 Session.Messages []Message
-  session_id         TEXT          idx(session_id, seq)
-  seq                INTEGER
-  role / content / summary  TEXT
-  created_at         DATETIME
-  PK(session_id, seq)              -- append 变 INSERT，retention 变 DELETE WHERE
-
-remote_agent_state                -- 取代 Chat.AgentState + <chatID>-smartguide.json
-  chat_id            TEXT
-  agent              TEXT
-  state              JSON/BLOB
-  updated_at
-  PK(chat_id, agent)               -- 顺带消灭 P0-3 的路径穿越
+  idx(chat_id, agent, project, last_activity DESC)   -- FindByChatAgentProject 的冷路径
 
 remote_bindings                   -- 取代 imbot_settings.scenarios JSON 列
   bot_uuid           TEXT          idx(bot_uuid)
@@ -207,6 +217,22 @@ remote_audit                      -- 取代内存环形缓冲
 
 `Resolver.Resolve` 从「遍历所有 bot × parse blob」变成
 `WHERE scenario = ? AND enabled IS NOT FALSE`。
+
+### 不进库的部分
+
+```
+<configDir>/remote/transcripts/<session-id>.jsonl   -- 会话 transcript
+  每行一条 {"Role":...,"Content":...,"Summary":...,"Timestamp":...}
+  O_APPEND 追加；会话间零争用；可 tail/grep
+  session-id 不安全时哈希（/resume 的 id 来自用户输入）
+
+<dataDir>/sessions/<chatID>-smartguide.json         -- SmartGuide 对话历史
+  anthropic message 数组，单 chat 可能 MB 级
+  P0 已修掉路径穿越与 0644 权限
+```
+
+两者都是「写一次、整体读、从不按内容查」的无界数据，留在文件里是正确的，
+不是待办。数据库里只保留能定位到它们的索引。
 
 ## 5. 抽象与依赖方向
 
@@ -246,15 +272,75 @@ CLI 的 `remote run`（`internal/command/remote.go` 的 standalone 路径，单�
 与 server 同时操作同一份 `bot_chats.json` 时仍会互相覆盖 —— jsonstore 没有文件锁，
 也没有写前重读。这个只有换到 SQLite（WAL + busy_timeout）才真正解决。
 
-**P1 · 落表**
-- schema + AutoMigrate + importer
-- ChatStore / SessionStore 切 SQLite 实现，`ChatStoreInterface` 签名不变，现有测试全绿
-- 消息拆到 `remote_session_messages`
+**P1 · 落表** ✅ 已完成
+- `remote_chats` / `remote_sessions` 两张表 + AutoMigrate，
+  并入 `StoreManager`（`RemoteChats()` / `RemoteSessions()`）
+- 一次性 importer（`migrations.ImportRemoteJSONStores`），旧文件重命名 `.migrated`
+- `ChatStoreInterface` 签名不变；`Manager` 改为**注入** store，不再持有文件路径 ——
+  P0 的「共享单实例」从此是结构性的，不是要靠人记住的约定
+- 消息**不进库**：改为 per-session 的 append-only JSONL
+  （`<configDir>/remote/transcripts/<id>.jsonl`），O(1) 追加、按需读取；
+  `Session` 不再内联 `Messages`，`List()` 预热 manager 时不会拖出全部对话文本
+- CLI 两条路径（`remote pair revoke`、standalone bot）也接到同一个库上，
+  **跨进程覆盖随之消失**（P0 遗留问题在此关闭）
+- `pkg/jsonstore` 与两个 JSON store 实现全部删除（零调用方）
 
-**P2 · 拆 blob**
-- `ProjectHistory` / `AgentState` / `scenarios` → 独立表
-- `BotSetting` 与 `db.Settings` 合并
-- 废弃 `pkg/jsonstore`（届时零调用方）
+收敛（评审后）：
+- 删掉 `Chat.AgentState` 和 `Session.Context` —— 逐个确认后都是**零生产调用方**。
+  前者是「同一类状态三个家」里的一个，后者只装 `project_path`，
+  而 `Project` 已经是独立列。删掉比搬家正确。
+- 文件名净化收敛成 `pkg/fs.SafeFileKey`，原来 transcript 和 SmartGuide 各写了一份。
+- 删掉 `remote_open.go` 这套平行开库路径，CLI 与测试统一走已有的
+  `db.NewStoreManager`；两个 store 的 `owned` 所有权标志随之消失，`Close()` 变成纯 no-op。
+- 修正一处过度包装：session 索引的价值**不是**「一次索引查询」——
+  `Manager.FindBy` 先扫内存 map，store 查询只是冷路径。真实理由是
+  小的可变状态 + 跨进程并发写 + P3 需要列表。
+
+代码评审后的修正：
+- **迁移下沉到 `StoreManager.initRemoteStores`。** 原来挂在 `NewBotManager` 上，
+  于是只有 server 路径会迁移 —— 用户在启动 server 之前跑
+  `tingly-box remote pair revoke`，会读到一张空表而 `bot_chats.json` 就在旁边。
+  存储生命周期的拥有者才该触发迁移。（这也是 importer 从 `migrations` 包
+  移进 `db` 包的原因：`migrations` import `db`，反向会成环。）
+- **迁移对崩溃可重放。** 先写 transcript、最后写索引行 —— 索引行才是
+  「已导入」的标记，中途挂掉就没有行，下次整体重做；反过来会永久留下
+  一个被标记为已导入、但历史被截断的会话。
+- **四处「GetOrCreate 然后 Update」折叠成一个事务**（`mutate`）。原来每次绑定/
+  配对/白名单/切 agent 都是两个事务、读两遍行，新建时还写两遍（第一次立刻被覆盖）。
+- **启动预热加了边界**：`List()` 跳过 closed/expired。`Manager.Close` 会留下
+  closed 行且永不删除，原来每次启动都要全部载入。行为不变 —— `FindBy` 本就
+  忽略这两种状态，`GetOrLoad` 仍能按 id 取到任何会话。
+- `ImportChat` 保留原 `UpdatedAt`（与 session 的 `Import` 对称），
+  否则迁移后所有 chat 在新的列表 UI 里显示为同一时刻活跃。
+- 删除：`ChatStoreInterface.Close()`（两个实现都是 no-op，所有权靠注释维持）、
+  `ListWhitelistedGroups`（无生产调用，匿名 struct 声明了三遍）、
+  `ErrStoreNotInitialized` / `ErrChatNotFound`（随 JSON store 一起死了）、
+  `HealthCheck` 漏掉的两个新 store（`TotalStores` 改为从被检查集合推导）。
+
+**已知取舍（评审提出，故意不改）**：单条入站消息现在会对同一 chat 行发出
+约 12 次 SELECT（旧的 jsonstore 从内存 map 直接读）。绝对开销在本地 SQLite +
+消息级流量下可忽略。两种修法都不可取：加缓存会破坏这次刚修好的跨进程可见性，
+把 `*Chat` 一路传下去要改十来个 diff 之外的文件。留待 P3 做 API 时一并处理。
+- GORM 的 struct `Updates` 会跳过零值 —— `RemoveFromWhitelist` / `ClearPaired`
+  这类「把标志位关掉」的写入会静默失败。统一改走 `OnConflict{UpdateAll}` upsert。
+- `Set` 会刷新 `LastActivity`，直接用于导入会把所有休眠会话变成「刚活跃」，
+  打乱 `FindByChatAgentProject` 的排序和 retention。另开不改时间戳的 `Import` 路径。
+
+**P2 · 收尾**
+- `scenarios` JSON blob → `remote_bindings` 表。这个值得拆，
+  因为 `Resolver.Resolve` 真的要按 (scenario, event) 跨 bot 查询。
+- `BotSetting` 与 `db.Settings` 合并（消除已漂移的重复结构体）
+- **`Chat` 移到中立包（评审提出的最深一条）。** 现在 `Chat` 住在 `db` 里、
+  `bot.Chat` 是别名，纯粹为了破环。而 session 那半边做对了：`session.Session`
+  留在 `remote/session`，由 `db` import 它 —— 实现依赖领域。chat 之所以反了，
+  只因为 `bot` 已经 import `db`，而那个 import 又只是为了 `db.Settings`
+  的类型断言（正是上面这条要消灭的东西）。代价已经具体：`DefaultChatAgent`
+  与 `PushProjectHistory` 这些领域逻辑住进了存储包。
+  正解是本文档 §5 说的 `remote/store` 中立包，与 `remote/session` 对称。
+
+**明确不做**（按第 3 节的分界线，这些留在原地是对的，不是待办）：
+- `ProjectHistory` 拆表 —— 只整体读写、上限 20 条，JSON 列足够
+- session transcript / SmartGuide 历史进库 —— 无界、只追加、从不按内容查
 
 **P3 · 出口**（真正兑现 UX 动机）
 - `GET /api/v1/remote/chats`、`/remote/chats/:id`、`/remote/sessions`
