@@ -359,9 +359,18 @@ func (bm *BotManager) Shutdown() {
 	logrus.Info("BotManager shutting down...")
 	bm.StopAll()
 
-	// Close session store
+	// Stop the session manager's background loops and flush its store. This
+	// used to be a no-op comment, which meant the session store was never
+	// closed on the server path.
 	if bm.sessionMgr != nil {
-		// Session manager cleanup if needed
+		bm.sessionMgr.Stop()
+	}
+
+	// Flush and close the chat store shared by all bots.
+	if bm.manager != nil {
+		if err := bm.manager.Close(); err != nil {
+			logrus.WithError(err).Warn("Failed to close chat store")
+		}
 	}
 
 	logrus.Info("BotManager shutdown complete")

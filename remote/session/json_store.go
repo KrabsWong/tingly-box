@@ -44,7 +44,13 @@ func (s *SessionStoreJSON) Get(sessionID string) (*Session, error) {
 	return s.store.Get(sessionID), nil
 }
 
-// Set stores a session
+// Set stores a session and persists it immediately.
+//
+// The write must be synchronous: jsonstore.Set only flips a dirty flag, so
+// without the flush here nothing a session does after creation — status
+// transitions, the response, appended messages — reaches disk until the
+// process shuts down cleanly. A crash then loses every update and leaves the
+// stored sessions frozen in "pending". See .design/remote-storage.md (P0-2).
 func (s *SessionStoreJSON) Set(sessionID string, sess *Session) error {
 	if s == nil || s.store == nil || sess == nil {
 		return nil
@@ -53,16 +59,21 @@ func (s *SessionStoreJSON) Set(sessionID string, sess *Session) error {
 	// Update timestamp
 	sess.LastActivity = time.Now().UTC()
 
-	return s.store.Set(sessionID, sess)
+	if err := s.store.Set(sessionID, sess); err != nil {
+		return err
+	}
+	return s.store.ForceSave()
 }
 
-// Delete removes a session
+// Delete removes a session and persists the removal immediately.
 func (s *SessionStoreJSON) Delete(sessionID string) error {
 	if s == nil || s.store == nil {
 		return nil
 	}
-	s.store.Delete(sessionID)
-	return nil
+	if !s.store.Delete(sessionID) {
+		return nil
+	}
+	return s.store.ForceSave()
 }
 
 // List returns all sessions

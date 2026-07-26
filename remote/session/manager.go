@@ -66,6 +66,7 @@ type Manager struct {
 	sessions  map[string]*Session
 	config    Config
 	stopCh    chan struct{}
+	stopOnce  sync.Once
 	wg        sync.WaitGroup
 	startTime time.Time
 	store     SessionStore // Use interface instead of *MessageStore
@@ -132,10 +133,6 @@ func (m *Manager) CreateWith(chatID, agent, project string) *Session {
 		session.ID, chatID, agent, project, session.ExpiresAt.Format(time.RFC3339))
 	if m.store != nil {
 		_ = m.store.Set(session.ID, session)
-		// Force immediate write to disk
-		if jsonStore, ok := m.store.(*SessionStoreJSON); ok {
-			_ = jsonStore.ForceSave()
-		}
 	}
 
 	return session
@@ -176,9 +173,6 @@ func (m *Manager) CreateWithID(id, chatID, agent, project string) *Session {
 		id, chatID, agent, project)
 	if m.store != nil {
 		_ = m.store.Set(id, sess)
-		if jsonStore, ok := m.store.(*SessionStoreJSON); ok {
-			_ = jsonStore.ForceSave()
-		}
 	}
 	return sess
 }
@@ -472,13 +466,17 @@ func (m *Manager) cleanupExpired() {
 	}
 }
 
-// Stop stops the cleanup goroutine
+// Stop halts the background loops and closes the store. Safe to call more
+// than once — shutdown paths can overlap, and closing stopCh twice would
+// panic.
 func (m *Manager) Stop() {
-	close(m.stopCh)
-	m.wg.Wait()
-	if m.store != nil {
-		_ = m.store.Close()
-	}
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+		m.wg.Wait()
+		if m.store != nil {
+			_ = m.store.Close()
+		}
+	})
 }
 
 // Stats returns session statistics by status
