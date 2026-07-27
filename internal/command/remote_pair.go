@@ -2,7 +2,6 @@ package command
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/tingly-dev/tingly-box/internal/data/db"
 	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
@@ -48,11 +47,12 @@ func RemotePairRevoke(appManager *AppManager, botUUID, chatID string) error {
 	if cfg == nil {
 		return fmt.Errorf("global config not available")
 	}
-	chatStore, err := bot.NewChatStoreJSON(filepath.Join(cfg.ConfigDir, "bot_chats.json"))
+	sm, err := db.NewStoreManager(cfg.ConfigDir)
 	if err != nil {
-		return fmt.Errorf("open chat store: %w", err)
+		return fmt.Errorf("open store manager: %w", err)
 	}
-	defer chatStore.Close()
+	defer sm.Close()
+	chatStore := sm.RemoteChats()
 
 	if !chatStore.IsChatPaired(chatID, botUUID) {
 		fmt.Printf("Chat %s is not paired with bot %s.\n", chatID, botUUID)

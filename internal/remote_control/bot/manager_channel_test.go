@@ -54,7 +54,13 @@ func newChannelTestManager(t *testing.T, uuid, scenarios string) (*bot.Manager, 
 	m := bot.NewManager(store,
 		bot.NewNotifyConsumer(),
 		bot.NewRemoteAgentConsumer(sessionMgr, svc, nil, store))
-	m.SetDataPath(t.TempDir() + "/chats.json")
+	sm, err := db.NewStoreManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store manager: %v", err)
+	}
+	t.Cleanup(func() { _ = sm.Close() })
+	chatStore := sm.RemoteChats()
+	m.SetChatStore(chatStore)
 	m.SetChannelRegistry(registry)
 
 	return m, store, registry, tr

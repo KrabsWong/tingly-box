@@ -18,7 +18,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/data/db"
 )
 
-// runBotWithSettings starts a bot using JSON file storage for chat state.
+// runBotWithSettings starts a bot against the caller-supplied chat store.
 // The host owns the bot's CHANNEL — the send/prompt surface: the shared
 // IMPrompter, the remote.channel.Channel registration, and the routing of
 // prompt replies — because the channel is a property of a running bot, not of
@@ -27,14 +27,10 @@ import (
 // messages go to the host's prompt-reply router first, then through the
 // consumers in order until one claims, so the catch-all (remote_agent) sits
 // last.
-func runBotWithSettings(ctx context.Context, setting BotSetting, dataPath string, consumers []Consumer, pairing *PairingManager, auditLog *audit.Logger, channels *channel.Registry) error {
-	// Create a JSON-based chat store
-	chatStore, err := NewChatStoreJSON(dataPath)
-	if err != nil {
-		return fmt.Errorf("failed to create chat store: %w", err)
-	}
-	defer chatStore.Close()
-
+//
+// chatStore is injected into the Manager and shared by every bot it runs —
+// see Manager.SetChatStore. This function must not close it.
+func runBotWithSettings(ctx context.Context, setting BotSetting, chatStore ChatStoreInterface, consumers []Consumer, pairing *PairingManager, auditLog *audit.Logger, channels *channel.Registry) error {
 	// Create platform-specific auth config
 	authConfig := buildAuthConfig(setting)
 	platform := imbot.Platform(setting.Platform)
@@ -62,7 +58,7 @@ func runBotWithSettings(ctx context.Context, setting BotSetting, dataPath string
 	for k, v := range imbot.AuthOptions(setting.Platform, setting.Auth) {
 		options[k] = v
 	}
-	err = manager.AddBot(&imbot.Config{
+	err := manager.AddBot(&imbot.Config{
 		UUID:     setting.UUID,
 		Platform: platform,
 		Enabled:  true,
@@ -208,11 +204,17 @@ type Manager struct {
 	mu        sync.RWMutex
 	running   map[string]*runningBot // uuid -> runningBot
 	store     SettingsStore
-	dataPath  string            // Data path for JSON chat store (replaces dbPath)
 	consumers []Consumer        // Supply each bot's inbound behavior, in dispatch order (the decoupling seam)
 	pairing   *PairingManager   // Pairing-code (TOFU) manager
 	audit     *audit.Logger     // Audit logger for security events
 	channels  *channel.Registry // Remote channel registry for /tingly/:scenario routing (optional)
+
+	// chatStore is the ONE chat store every bot in this manager shares, and
+	// it is injected rather than opened here — the manager does not get to
+	// know where chats live. Sharing is not an optimization: a per-bot store
+	// is how concurrent bots used to erase each other's chats.
+	// See .design/remote-storage.md.
+	chatStore ChatStoreInterface
 }
 
 // NewManager creates a new bot manager with a settings store and the
@@ -268,30 +270,38 @@ func (m *Manager) AuditLogger() *audit.Logger {
 	return m.audit
 }
 
-// ChatStore opens (and the caller must Close) a chat store backed by the
-// manager's data path. Used by the CLI to read/clear pairings without
-// touching a running bot's store.
+// ChatStore returns the chat store shared by every bot this manager runs.
+//
+// The store is not owned here — whoever injected it (the StoreManager, in the
+// server) closes it. Callers must not.
 func (m *Manager) ChatStore() (ChatStoreInterface, error) {
 	m.mu.RLock()
-	dataPath := m.dataPath
-	m.mu.RUnlock()
-	if dataPath == "" {
-		return nil, fmt.Errorf("data path not configured")
+	defer m.mu.RUnlock()
+	if m.chatStore == nil {
+		return nil, fmt.Errorf("chat store not configured")
 	}
-	return NewChatStoreJSON(dataPath)
+	return m.chatStore, nil
 }
 
-// SetDataPath sets the data path for JSON chat store operations
-func (m *Manager) SetDataPath(dataPath string) {
+// SetChatStore injects the chat store every bot will share. Call it before
+// starting any bot; Start fails without one.
+func (m *Manager) SetChatStore(store ChatStoreInterface) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.dataPath = dataPath
+	m.chatStore = store
 }
 
 // Start starts a bot by UUID
 func (m *Manager) Start(parentCtx context.Context, uuid string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Refuse to run a bot that cannot persist anything, before doing any
+	// other work: a bot with no chat store silently forgets every binding
+	// and pairing, which is worse than not starting.
+	if m.chatStore == nil {
+		return fmt.Errorf("chat store not configured")
+	}
 
 	// Check if already running or stopping
 	if rb, exists := m.running[uuid]; exists {
@@ -383,7 +393,10 @@ func (m *Manager) Start(parentCtx context.Context, uuid string) error {
 	// SmartGuide routing-rule sync is a remote_agent concern and now lives in
 	// the inbound consumer (NewBotHandler ensures the rule when it builds the
 	// handler), so the lifecycle no longer touches the TBClient here.
-	dataPath := m.dataPath
+	//
+	// Every bot shares the manager's one chat store; opening a per-bot store
+	// here is what used to make concurrent bots erase each other's writes.
+	chatStore := m.chatStore
 
 	// Create cancellable context for this bot
 	ctx, cancel := context.WithCancel(parentCtx)
@@ -394,7 +407,7 @@ func (m *Manager) Start(parentCtx context.Context, uuid string) error {
 	pairing := m.pairing
 	auditLog := m.audit
 	channels := m.channels
-	go m.runBotSupervised(ctx, uuid, s, dataPath, mounted, pairing, auditLog, channels, doneChan)
+	go m.runBotSupervised(ctx, uuid, s, chatStore, mounted, pairing, auditLog, channels, doneChan)
 
 	logrus.WithField("uuid", uuid).WithField("name", name).WithField("platform", platform).Info("Bot started")
 	return nil
@@ -409,7 +422,7 @@ func (m *Manager) runBotSupervised(
 	ctx context.Context,
 	uuid string,
 	s BotSetting,
-	dataPath string,
+	chatStore ChatStoreInterface,
 	consumers []Consumer,
 	pairing *PairingManager,
 	auditLog *audit.Logger,
@@ -440,7 +453,7 @@ func (m *Manager) runBotSupervised(
 		}
 	}()
 
-	if err := runBotWithSettings(ctx, s, dataPath, consumers, pairing, auditLog, channels); err != nil {
+	if err := runBotWithSettings(ctx, s, chatStore, consumers, pairing, auditLog, channels); err != nil {
 		logrus.WithError(err).WithField("uuid", uuid).Warn("Bot stopped with error")
 	}
 	logrus.WithField("uuid", uuid).Info("Bot stopped")

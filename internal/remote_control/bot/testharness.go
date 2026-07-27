@@ -10,6 +10,7 @@ import (
 	"github.com/tingly-dev/tingly-box/agentboot/claude"
 	"github.com/tingly-dev/tingly-box/agentboot/claude/fixture"
 	"github.com/tingly-dev/tingly-box/imbot"
+	"github.com/tingly-dev/tingly-box/internal/data/db"
 	"github.com/tingly-dev/tingly-box/internal/remote_control/bot/feature"
 	"github.com/tingly-dev/tingly-box/remote/audit"
 	"github.com/tingly-dev/tingly-box/remote/session"
@@ -80,11 +81,12 @@ func BootForTest(t *testing.T, manager *imbot.Manager, setting BotSetting, opts 
 		opt.DataDir = t.TempDir()
 	}
 
-	chatStorePath := filepath.Join(opt.DataDir, "chats.json")
-	chatStore, err := NewChatStoreJSON(chatStorePath)
+	sm, err := db.NewStoreManager(opt.DataDir)
 	if err != nil {
-		t.Fatalf("BootForTest: chat store: %v", err)
+		t.Fatalf("BootForTest: store manager: %v", err)
 	}
+	t.Cleanup(func() { _ = sm.Close() })
+	chatStore := sm.RemoteChats()
 
 	sessionMgr := session.NewManager(session.Config{
 		Timeout:          10 * time.Minute,
@@ -143,11 +145,10 @@ func BootForTest(t *testing.T, manager *imbot.Manager, setting BotSetting, opts 
 		Audit:        auditLog,
 		DataDir:      opt.DataDir,
 		Manager:      manager,
-		cleanup: func() {
-			_ = chatStore.Close()
-		},
 	}
-	t.Cleanup(h.cleanup)
+	if h.cleanup != nil {
+		t.Cleanup(h.cleanup)
+	}
 	return h
 }
 

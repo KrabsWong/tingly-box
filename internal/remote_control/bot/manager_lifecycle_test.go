@@ -93,7 +93,13 @@ func newLifecycleManager(t *testing.T) (*bot.Manager, string, *tingly.InProcessT
 
 	consumer := bot.NewRemoteAgentConsumer(sessionMgr, svc, nil, store)
 	m := bot.NewManager(store, consumer)
-	m.SetDataPath(t.TempDir() + "/chats.json")
+	sm, err := db.NewStoreManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store manager: %v", err)
+	}
+	t.Cleanup(func() { _ = sm.Close() })
+	chatStore := sm.RemoteChats()
+	m.SetChatStore(chatStore)
 
 	return m, uuid, tr
 }
@@ -177,7 +183,13 @@ func TestManager_StopOneBotDoesNotAffectOthers(t *testing.T) {
 
 	consumer := bot.NewRemoteAgentConsumer(sessionMgr, svc, nil, store)
 	m := bot.NewManager(store, consumer)
-	m.SetDataPath(t.TempDir() + "/chats.json")
+	sm, err := db.NewStoreManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store manager: %v", err)
+	}
+	t.Cleanup(func() { _ = sm.Close() })
+	chatStore := sm.RemoteChats()
+	m.SetChatStore(chatStore)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -239,7 +251,13 @@ func TestManager_MountGate_Tingly(t *testing.T) {
 
 	consumer := bot.NewRemoteAgentConsumer(sessionMgr, svc, nil, store)
 	m := bot.NewManager(store, consumer)
-	m.SetDataPath(t.TempDir() + "/chats.json")
+	sm, err := db.NewStoreManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store manager: %v", err)
+	}
+	t.Cleanup(func() { _ = sm.Close() })
+	chatStore := sm.RemoteChats()
+	m.SetChatStore(chatStore)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

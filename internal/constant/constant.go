@@ -73,6 +73,10 @@ const MemoryDirName = "memory"
 
 const ImageDirName = "image"
 
+const RemoteDirName = "remote"
+
+const TranscriptDirName = "transcripts"
+
 // GetTinglyConfDir returns the config directory path (default: ~/.tingly-box)
 func GetTinglyConfDir() string {
 	homeDir, err := fs.GetUserPath()
@@ -104,4 +108,12 @@ func GetDBFile(baseDir string) string {
 // GetImageDir returns the generated-image persistence directory path
 func GetImageDir(baseDir string) string {
 	return filepath.Join(baseDir, ImageDirName)
+}
+
+// GetRemoteTranscriptDir returns the directory holding one append-only
+// transcript file per remote session. The session index lives in the database;
+// the conversation text lives here, where it appends in O(1) and stays
+// greppable. See .design/remote-storage.md.
+func GetRemoteTranscriptDir(baseDir string) string {
+	return filepath.Join(baseDir, RemoteDirName, TranscriptDirName)
 }

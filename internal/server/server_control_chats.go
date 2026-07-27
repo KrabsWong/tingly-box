@@ -31,11 +31,11 @@ func buildBotChatLister(reg *channel.Registry, provider botChatProvider) notifym
 		// A chat-id lock collapses the reachable set to one chat id.
 		lock := provider.ChatIDLock(botUUID)
 
+		// Shared store, owned by the StoreManager — not ours to close.
 		store, err := provider.ChatStore()
 		if err != nil {
 			return nil, err
 		}
-		defer store.Close()
 
 		// ListChats scopes at the source: only records whose Platform field
 		// equals this bot's channel platform are returned, so unattributed or
@@ -75,7 +75,7 @@ func formatChatTime(t time.Time) string {
 }
 
 // botChatProvider is the narrow surface buildBotChatLister needs from the
-// imbot handler: open the shared chat store and look up a bot's chat-id
+// imbot handler: reach the shared chat store and look up a bot's chat-id
 // lock. An interface so the helper is testable without the full imbot.Handler.
 type botChatProvider interface {
 	ChatStore() (bot.ChatStoreInterface, error)

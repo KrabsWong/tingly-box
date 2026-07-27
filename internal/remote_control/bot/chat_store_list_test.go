@@ -1,26 +1,13 @@
 package bot
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
-func newTestChatStore(t *testing.T) *ChatStoreJSON {
+func newTestChatStore(t *testing.T) ChatStoreInterface {
 	t.Helper()
-	tmpDir, err := os.MkdirTemp("", "chat-store-list-test")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
-
-	store, err := NewChatStoreJSON(filepath.Join(tmpDir, "chats.json"))
-	if err != nil {
-		t.Fatalf("NewChatStoreJSON: %v", err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	return store
+	return openStore(t, t.TempDir())
 }
 
 // TestListChats_ScopesToPlatform is the regression guard for cross-platform

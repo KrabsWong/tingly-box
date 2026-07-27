@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -330,12 +329,15 @@ func promptForModelInput(reader *bufio.Reader, prompt string) (string, error) {
 func runStandaloneBot(ctx context.Context, appManager *AppManager, setting db.Settings, dataPath string, provider string, model string) error {
 	botSetting := standaloneBotSetting(setting, provider, model)
 
-	// Create session store (minimal for standalone bot)
-	sessionStorePath := filepath.Join(dataPath, "bot_sessions.json")
-	msgStore, err := session.NewSessionStoreJSON(sessionStorePath)
+	// One store manager for the whole standalone bot: chats and sessions are
+	// both served from it, so opening it twice would put two connection pools
+	// on one SQLite file inside a single process.
+	sm, err := db.NewStoreManager(dataPath)
 	if err != nil {
-		return fmt.Errorf("failed to create session store: %w", err)
+		return fmt.Errorf("failed to open store manager: %w", err)
 	}
+	defer sm.Close()
+	msgStore := sm.RemoteSessions()
 
 	sessionMgr := session.NewManager(session.Config{
 		Timeout:          30 * time.Minute,
@@ -350,11 +352,8 @@ func runStandaloneBot(ctx context.Context, appManager *AppManager, setting db.Se
 		return fmt.Errorf("create agent service: %w", err)
 	}
 
-	// Create chat store path
-	chatStorePath := filepath.Join(dataPath, "bot_chats.json")
-
 	// Run the bot
-	return runBotWithSettingsInternal(ctx, appManager, botSetting, chatStorePath, sessionMgr, agentService)
+	return runBotWithSettingsInternal(ctx, appManager, botSetting, sm.RemoteChats(), sessionMgr, agentService)
 }
 
 func standaloneBotSetting(setting db.Settings, provider, model string) bot.BotSetting {
@@ -379,14 +378,7 @@ func standaloneBotSetting(setting db.Settings, provider, model string) bot.BotSe
 }
 
 // runBotWithSettingsInternal is an internal wrapper that calls the bot runner
-func runBotWithSettingsInternal(ctx context.Context, appManager *AppManager, setting bot.BotSetting, dataPath string, sessionMgr *session.Manager, agentService *agentboot.AgentService) error {
-	// Create a JSON-based chat store
-	chatStore, err := bot.NewChatStoreJSON(dataPath)
-	if err != nil {
-		return fmt.Errorf("failed to create chat store: %w", err)
-	}
-	defer chatStore.Close()
-
+func runBotWithSettingsInternal(ctx context.Context, appManager *AppManager, setting bot.BotSetting, chatStore *db.RemoteChatStore, sessionMgr *session.Manager, agentService *agentboot.AgentService) error {
 	// Create platform-specific auth config
 	authConfig := buildAuthConfigInternal(setting)
 	platform := imbot.Platform(setting.Platform)
@@ -416,14 +408,13 @@ func runBotWithSettingsInternal(ctx context.Context, appManager *AppManager, set
 		}
 	}
 
-	err = manager.AddBot(&imbot.Config{
+	if err := manager.AddBot(&imbot.Config{
 		UUID:     setting.UUID,
 		Platform: platform,
 		Enabled:  true,
 		Auth:     authConfig,
 		Options:  options,
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("failed to start %s bot: %w", setting.Platform, err)
 	}
 

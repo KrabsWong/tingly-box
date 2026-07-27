@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -111,60 +110,9 @@ func TestBuildFooter_OnlyProject(t *testing.T) {
 	}
 }
 
-func TestPushProjectHistory_PrependsAndDedupes(t *testing.T) {
-	chat := &Chat{}
-	pushProjectHistory(chat, "/a")
-	pushProjectHistory(chat, "/b")
-	pushProjectHistory(chat, "/c")
-	pushProjectHistory(chat, "/a") // dedupe — should move to front, not duplicate
-	want := []string{"/a", "/c", "/b"}
-	if len(chat.ProjectHistory) != len(want) {
-		t.Fatalf("history length %d, want %d (%v)", len(chat.ProjectHistory), len(want), chat.ProjectHistory)
-	}
-	for i, w := range want {
-		if chat.ProjectHistory[i] != w {
-			t.Errorf("history[%d] = %q, want %q (%v)", i, chat.ProjectHistory[i], w, chat.ProjectHistory)
-		}
-	}
-	if chat.ProjectPath != "/a" {
-		t.Errorf("ProjectPath = %q, want /a", chat.ProjectPath)
-	}
-}
-
-func TestPushProjectHistory_SeedsLegacyProjectPath(t *testing.T) {
-	chat := &Chat{ProjectPath: "/legacy"} // pre-existing binding from before history
-	pushProjectHistory(chat, "/new")
-	want := []string{"/new", "/legacy"}
-	if len(chat.ProjectHistory) != 2 || chat.ProjectHistory[0] != want[0] || chat.ProjectHistory[1] != want[1] {
-		t.Errorf("history = %v, want %v", chat.ProjectHistory, want)
-	}
-}
-
-func TestPushProjectHistory_EmptyPathIsNoOp(t *testing.T) {
-	chat := &Chat{ProjectPath: "/x", ProjectHistory: []string{"/x"}}
-	pushProjectHistory(chat, "")
-	if chat.ProjectPath != "/x" || len(chat.ProjectHistory) != 1 {
-		t.Errorf("empty path should not mutate state: path=%q history=%v", chat.ProjectPath, chat.ProjectHistory)
-	}
-}
-
-func TestPushProjectHistory_Caps(t *testing.T) {
-	chat := &Chat{}
-	for i := 0; i < projectHistoryCap+5; i++ {
-		pushProjectHistory(chat, fmt.Sprintf("/p%d", i))
-	}
-	if len(chat.ProjectHistory) != projectHistoryCap {
-		t.Errorf("history not capped: got %d, want %d", len(chat.ProjectHistory), projectHistoryCap)
-	}
-}
-
 func TestListChatProjectPaths_FallbackToProjectPath(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewChatStoreJSON(dir + "/chats.json")
-	if err != nil {
-		t.Fatalf("NewChatStoreJSON: %v", err)
-	}
-	defer store.Close()
+	store := openStore(t, dir)
 	// Simulate a legacy chat written before ProjectHistory existed.
 	if err := store.UpsertChat(&Chat{
 		ChatID:      "legacy",
@@ -184,11 +132,7 @@ func TestListChatProjectPaths_FallbackToProjectPath(t *testing.T) {
 
 func TestBindProject_RecordsHistoryPerChat(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewChatStoreJSON(dir + "/chats.json")
-	if err != nil {
-		t.Fatalf("NewChatStoreJSON: %v", err)
-	}
-	defer store.Close()
+	store := openStore(t, dir)
 	if err := store.BindProject("c1", "telegram", "/a", "alice"); err != nil {
 		t.Fatalf("BindProject /a: %v", err)
 	}

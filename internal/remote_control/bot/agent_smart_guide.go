@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/tingly-dev/tingly-box/agentboot"
+	"github.com/tingly-dev/tingly-box/internal/data/db"
 	"github.com/tingly-dev/tingly-box/internal/remote_control/smart_guide"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
@@ -136,7 +137,7 @@ func (e *SmartGuideExecutor) Execute(ctx context.Context, req PreparedRequest) (
 				"newPath": newProjectPath,
 			}).Info("updateProjectFunc called - persisting to chat store")
 			return e.deps.ChatStore.UpdateChat(chatID, func(chat *Chat) {
-				pushProjectHistory(chat, newProjectPath)
+				db.PushProjectHistory(chat, newProjectPath)
 				chat.BashCwd = newProjectPath
 			})
 		},

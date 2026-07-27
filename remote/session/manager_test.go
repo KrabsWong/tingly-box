@@ -181,31 +181,6 @@ func TestManager_SetRequest(t *testing.T) {
 	}
 }
 
-func TestManager_SetContext(t *testing.T) {
-	cfg := Config{Timeout: 30 * time.Minute}
-	mgr := NewManager(cfg, nil)
-	defer mgr.Stop()
-
-	session := mgr.Create()
-
-	mgr.SetContext(session.ID, "key1", "value1")
-	mgr.SetContext(session.ID, "key2", 123)
-
-	value1, exists := mgr.GetContext(session.ID, "key1")
-	if !exists {
-		t.Error("Expected context key1 to exist")
-	}
-
-	if value1 != "value1" {
-		t.Errorf("Expected value1 'value1', got '%v'", value1)
-	}
-
-	value2, _ := mgr.GetContext(session.ID, "key2")
-	if value2 != 123 {
-		t.Errorf("Expected value2 123, got '%v'", value2)
-	}
-}
-
 func TestManager_Stats(t *testing.T) {
 	cfg := Config{Timeout: 30 * time.Minute}
 	mgr := NewManager(cfg, nil)

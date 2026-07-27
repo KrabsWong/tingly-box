@@ -2,7 +2,6 @@ package bot
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -15,11 +14,7 @@ func TestSetPaired_RoundTrip(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	path := filepath.Join(tmpDir, "chats.json")
-	store, err := NewChatStoreJSON(path)
-	if err != nil {
-		t.Fatalf("NewChatStoreJSON: %v", err)
-	}
+	store := openStore(t, tmpDir)
 
 	const (
 		chatID  = "chat-1"
@@ -41,15 +36,8 @@ func TestSetPaired_RoundTrip(t *testing.T) {
 		t.Fatalf("pairing must be scoped to bot UUID")
 	}
 
-	// Survive close/reopen.
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	store2, err := NewChatStoreJSON(path)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	defer store2.Close()
+	// Survive a reopen through an independent connection.
+	store2 := openStore(t, tmpDir)
 	if !store2.IsChatPaired(chatID, botUUID) {
 		t.Fatalf("pairing did not persist across reload")
 	}
@@ -74,11 +62,7 @@ func TestClearPaired_DropsBindingPreservesOtherFields(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	store, err := NewChatStoreJSON(filepath.Join(tmpDir, "chats.json"))
-	if err != nil {
-		t.Fatalf("NewChatStoreJSON: %v", err)
-	}
-	defer store.Close()
+	store := openStore(t, tmpDir)
 
 	const chatID = "chat-2"
 
@@ -147,14 +131,14 @@ func TestBotSetting_IsRequirePairing(t *testing.T) {
 // TestPairingHelpers_isBindCommand exercises the parser used by the gate.
 func TestPairingHelpers_isBindCommand(t *testing.T) {
 	cases := map[string]bool{
-		"/bind":              true,
-		"/bind ":             true,
-		"/bind ABCD-EFGH":    true,
-		"  /bind ABCD":       true, // helper trims internally
-		"/binding":           false,
-		"hello":              false,
-		"/cd /tmp":           false,
-		"/bind\tABCD":        true,
+		"/bind":           true,
+		"/bind ":          true,
+		"/bind ABCD-EFGH": true,
+		"  /bind ABCD":    true, // helper trims internally
+		"/binding":        false,
+		"hello":           false,
+		"/cd /tmp":        false,
+		"/bind\tABCD":     true,
 	}
 	for input, want := range cases {
 		t.Run(input, func(t *testing.T) {

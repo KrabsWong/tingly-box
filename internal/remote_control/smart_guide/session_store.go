@@ -8,6 +8,8 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/sirupsen/logrus"
+
+	"github.com/tingly-dev/tingly-box/pkg/fs"
 )
 
 // SessionStore persists Smart Guide conversation history as native Anthropic
@@ -25,7 +27,7 @@ func NewSessionStore(dataDir string) (*SessionStore, error) {
 	if dataDir == "" {
 		return nil, nil
 	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, err
 	}
 	logrus.WithField("dataDir", dataDir).Info("Created SmartGuide session store (anthropic-native)")
@@ -33,8 +35,12 @@ func NewSessionStore(dataDir string) (*SessionStore, error) {
 }
 
 // path returns the on-disk file for a chat's history.
+//
+// The chat ID goes through fs.SafeFileKey because it comes straight from the IM
+// platform and is not filename-safe: Feishu ids carry punctuation and WhatsApp
+// JIDs contain '@' and '/'.
 func (s *SessionStore) path(chatID string) string {
-	return filepath.Join(s.dir, chatID+"-smartguide.json")
+	return filepath.Join(s.dir, fs.SafeFileKey(chatID)+"-smartguide.json")
 }
 
 // Load returns the stored history for a chat, or an empty slice if none exists.
@@ -76,8 +82,16 @@ func (s *SessionStore) Save(chatID string, messages []anthropic.BetaMessageParam
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(s.path(chatID), data, 0o644); err != nil {
+	// 0600: this file holds the user's full conversation with the model, and
+	// the rest of the remote state files are already owner-only.
+	p := s.path(chatID)
+	if err := os.WriteFile(p, data, 0o600); err != nil {
 		return err
+	}
+	// WriteFile only applies the mode when creating, so tighten files that
+	// were written as 0644 by earlier versions.
+	if err := os.Chmod(p, 0o600); err != nil {
+		logrus.WithError(err).WithField("chatID", chatID).Debug("Failed to tighten SmartGuide session file mode")
 	}
 	logrus.WithFields(logrus.Fields{"chatID": chatID, "msgCount": len(messages)}).Debug("Saved SmartGuide session")
 	return nil
