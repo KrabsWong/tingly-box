@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/internal/remote_control/remoteagent"
+
 	"github.com/tingly-dev/tingly-box/remote/channel"
 	"github.com/tingly-dev/tingly-box/remote/session"
 
@@ -94,7 +96,7 @@ func NewBotManager(ctx context.Context, cfg *config.Config) (*BotManager, error)
 	//  - remote_agent owns the agent/SmartGuide machinery and is the
 	//    inbound catch-all, so it goes last.
 	notifyConsumer := bot.NewNotifyConsumer()
-	remoteAgentConsumer := bot.NewRemoteAgentConsumer(sessionMgr, agentService, tbClient, store)
+	remoteAgentConsumer := remoteagent.NewConsumer(sessionMgr, agentService, tbClient, store)
 
 	// Create internal bot manager
 	internalMgr := bot.NewManager(store, notifyConsumer, remoteAgentConsumer)

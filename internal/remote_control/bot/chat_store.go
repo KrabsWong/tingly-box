@@ -1,18 +1,14 @@
 package bot
 
 import (
-	"strings"
-
 	"github.com/tingly-dev/tingly-box/imbot"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
-	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 
 // BotSetting represents bot configuration with platform-specific auth
 type BotSetting struct {
 	UUID          string            `json:"uuid,omitempty"`           // UUID for bot identification
 	Name          string            `json:"name,omitempty"`           // User-defined name for the bot
-	Token         string            `json:"token,omitempty"`          // Legacy: for backward compatibility
 	Platform      string            `json:"platform"`                 // Platform identifier
 	AuthType      string            `json:"auth_type"`                // Auth type: token, oauth, qr
 	Auth          map[string]string `json:"auth"`                     // Dynamic auth fields based on platform
@@ -48,19 +44,27 @@ type BotSetting struct {
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
-// CCProfileID extracts the Claude Code profile ID from DefaultAgent.
-// Returns "" for the main claude_code scenario (unset, "claude_code", or a
-// value whose base scenario isn't claude_code).
-func (b BotSetting) CCProfileID() string {
-	raw := strings.TrimSpace(b.DefaultAgent)
-	if raw == "" {
-		return ""
+// SettingFromRecord converts a stored db.Settings row into the BotSetting the
+// bot runtime consumes. This is the ONE conversion point — the lifecycle and
+// the dynamic per-message settings refresh both go through it.
+func SettingFromRecord(record db.Settings) BotSetting {
+	return BotSetting{
+		UUID:               record.UUID,
+		Name:               record.Name,
+		Platform:           record.Platform,
+		AuthType:           record.AuthType,
+		Auth:               record.Auth,
+		ProxyURL:           record.ProxyURL,
+		ChatIDLock:         record.ChatIDLock,
+		BashAllowlist:      record.BashAllowlist,
+		DefaultCwd:         record.DefaultCwd,
+		DefaultAgent:       record.DefaultAgent,
+		Enabled:            record.Enabled,
+		Scenarios:          record.Scenarios,
+		SmartGuideProvider: record.SmartGuideProvider,
+		SmartGuideModel:    record.SmartGuideModel,
+		RequirePairing:     record.RequirePairing,
 	}
-	base, profileID := typ.ParseScenarioProfile(typ.RuleScenario(raw))
-	if base != typ.ScenarioClaudeCode {
-		return ""
-	}
-	return profileID
 }
 
 // IsRequirePairing reports whether this bot requires per-chat pairing.

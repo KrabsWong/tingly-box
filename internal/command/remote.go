@@ -11,15 +11,17 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/internal/remote_control/feature"
+	"github.com/tingly-dev/tingly-box/internal/remote_control/remoteagent"
+
 	"github.com/tingly-dev/tingly-box/agentboot"
 	"github.com/tingly-dev/tingly-box/agentboot/claude"
 	"github.com/tingly-dev/tingly-box/imbot"
 	imbotfeishu "github.com/tingly-dev/tingly-box/imbot/platform/feishu"
 	imbottelegram "github.com/tingly-dev/tingly-box/imbot/platform/telegram"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
-	"github.com/tingly-dev/tingly-box/internal/mcp/builtin_server"
+	builtinserver "github.com/tingly-dev/tingly-box/internal/mcp/builtin_server"
 	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot/feature"
 	"github.com/tingly-dev/tingly-box/internal/tbclient"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/remote/session"
@@ -356,24 +358,10 @@ func runStandaloneBot(ctx context.Context, appManager *AppManager, setting db.Se
 }
 
 func standaloneBotSetting(setting db.Settings, provider, model string) bot.BotSetting {
-	return bot.BotSetting{
-		UUID:               setting.UUID,
-		Name:               setting.Name,
-		Token:              setting.Auth["token"],
-		Platform:           setting.Platform,
-		AuthType:           setting.AuthType,
-		Auth:               setting.Auth,
-		ProxyURL:           setting.ProxyURL,
-		ChatIDLock:         setting.ChatIDLock,
-		BashAllowlist:      setting.BashAllowlist,
-		DefaultCwd:         setting.DefaultCwd,
-		DefaultAgent:       setting.DefaultAgent,
-		Enabled:            setting.Enabled,
-		Scenarios:          setting.Scenarios,
-		SmartGuideProvider: provider,
-		SmartGuideModel:    model,
-		RequirePairing:     setting.RequirePairing,
-	}
+	s := bot.SettingFromRecord(setting)
+	s.SmartGuideProvider = provider
+	s.SmartGuideModel = model
+	return s
 }
 
 // runBotWithSettingsInternal is an internal wrapper that calls the bot runner
@@ -440,7 +428,7 @@ func runBotWithSettingsInternal(ctx context.Context, appManager *AppManager, set
 
 	// Register unified message handler
 	// Pass nil as SettingsStore - standalone bots don't have dynamic config updates
-	handler := bot.NewBotHandler(ctx, setting, chatStore, sessionMgr, agentService, directoryBrowser, manager, nil, tbClient, pairing, nil)
+	handler := remoteagent.NewBotHandler(ctx, setting, chatStore, sessionMgr, agentService, directoryBrowser, manager, nil, tbClient, pairing, nil)
 	manager.OnMessage(handler.HandleMessage)
 
 	if err := manager.Start(ctx); err != nil {
