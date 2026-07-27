@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sirupsen/logrus"
 
 	"github.com/tingly-dev/tingly-box/internal/data/db"
 	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
@@ -19,6 +18,17 @@ func resolveRequirePairing(s db.Settings) bool {
 		return *s.RequirePairing
 	}
 	return bot.PlatformDefaultsRequirePairing(s.Platform)
+}
+
+// logPairAudit records a web-UI pairing event through the same
+// security.LogAuditor field shape PairingManager itself uses (via
+// bot.NewLogAuditor), so the imbot.pair.* action family stays consistent
+// whether the event came from a chat command or the web UI.
+func logPairAudit(c *gin.Context, action, uuid, message string) {
+	bot.NewLogAuditor().Info(action, c.GetString("user_id"), c.ClientIP(), message, map[string]interface{}{
+		"bot_uuid": uuid,
+		"by":       "web",
+	})
 }
 
 // GetPairingCode reveals the bot's current TOFU pairing code so the operator
@@ -75,15 +85,7 @@ func (h *Handler) GetPairingCode(c *gin.Context) {
 		return
 	}
 
-	if audit := h.botMgr.AuditLogger(); audit != nil {
-		audit.Info("imbot.pair.reveal", c.GetString("user_id"), c.ClientIP(),
-			"pairing code revealed via web UI",
-			map[string]interface{}{
-				"bot_uuid": uuid,
-				"by":       "web",
-			})
-	}
-	logrus.WithField("uuid", uuid).Info("ImBot pairing code revealed")
+	logPairAudit(c, "imbot.pair.reveal", uuid, "pairing code revealed via web UI")
 
 	c.JSON(http.StatusOK, PairingCodeResponse{
 		Success:   true,
@@ -140,15 +142,7 @@ func (h *Handler) RotatePairingCode(c *gin.Context) {
 		return
 	}
 
-	if audit := h.botMgr.AuditLogger(); audit != nil {
-		audit.Info("imbot.pair.rotate", c.GetString("user_id"), c.ClientIP(),
-			"pairing code rotated via web UI",
-			map[string]interface{}{
-				"bot_uuid": uuid,
-				"by":       "web",
-			})
-	}
-	logrus.WithField("uuid", uuid).Info("ImBot pairing code rotated")
+	logPairAudit(c, "imbot.pair.rotate", uuid, "pairing code rotated via web UI")
 
 	c.JSON(http.StatusOK, PairingCodeResponse{
 		Success:   true,
