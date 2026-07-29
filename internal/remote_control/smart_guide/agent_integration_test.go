@@ -129,6 +129,7 @@ type recordingHandler struct {
 	t           *testing.T
 	mu          sync.Mutex
 	texts       []string
+	thinking    []string
 	toolCalls   []string
 	toolResults []string
 	completed   *CompletionResult
@@ -152,6 +153,13 @@ func (h *recordingHandler) OnMessage(msg any) error {
 			h.texts = append(h.texts, s)
 			if h.t != nil {
 				h.t.Logf("[assistant] %s", s)
+			}
+		}
+	case "thinking":
+		if s, ok := m["message"].(string); ok {
+			h.thinking = append(h.thinking, s)
+			if h.t != nil {
+				h.t.Logf("[thinking] %s", s)
 			}
 		}
 	case "tool_use":
@@ -474,12 +482,15 @@ func TestExecuteWithHandler_MultiTurnTextNotLost(t *testing.T) {
 	assert.Contains(t, joined, "All done — here is the answer.", "final-turn text was lost")
 }
 
-// TestExecuteWithHandler_ThinkingSurfacesWhenNoText is the end-to-end test for
-// the thinking fallback: when a turn produces only a thinking block (no text)
-// the user must still see something. Here the intermediate turn is thinking +
-// tool, and the final turn is thinking only — neither has a text block, so
-// without the fallback the user would receive nothing at all.
-func TestExecuteWithHandler_ThinkingSurfacesWhenNoText(t *testing.T) {
+// TestExecuteWithHandler_ThinkingSurfacesOnItsOwnChannel is the end-to-end test
+// for how reasoning reaches the user. A turn that produces only a thinking block
+// still has to surface something — but as reasoning, not as the reply. It used
+// to be substituted in as assistant text, so a think-then-call-a-tool turn
+// published the model's private deliberation to the chat as if it were the
+// answer. It now arrives as its own message type, which the streaming layer
+// renders marked (and only in verbose mode), and it never becomes the run's
+// final output.
+func TestExecuteWithHandler_ThinkingSurfacesOnItsOwnChannel(t *testing.T) {
 	const model = "thinking-only"
 	mt := newMultiTurnModel(model,
 		turnScript{thinking: "I should look this up first.", toolName: "lookup", toolArgs: map[string]any{"q": "x"}},
@@ -497,10 +508,20 @@ func TestExecuteWithHandler_ThinkingSurfacesWhenNoText(t *testing.T) {
 	assert.True(t, res.IsSuccess())
 	assert.Equal(t, 1, tool.called, "tool should have run once")
 
-	// Both turns' thinking surfaced to the user even though neither had text.
+	// Both turns' reasoning reached the handler, on the thinking channel.
+	assert.Equal(t, []string{
+		"I should look this up first.",
+		"Based on the result, the answer is 42.",
+	}, handler.thinking, "reasoning must still surface, just not as the reply")
+
+	// ...and none of it was delivered as assistant text.
 	joined := handler.joinedText()
-	assert.Contains(t, joined, "I should look this up first.", "intermediate thinking was lost")
-	assert.Contains(t, joined, "Based on the result, the answer is 42.", "final thinking was lost")
-	// The final response is the thinking fallback, not empty.
-	assert.Contains(t, res.Output, "the answer is 42")
+	assert.NotContains(t, joined, "I should look this up first.",
+		"reasoning must not be published as the assistant's message")
+	assert.NotContains(t, joined, "Based on the result, the answer is 42.",
+		"reasoning must not be published as the assistant's message")
+
+	// The run produced no text block, so it has no answer to report. Claiming
+	// the reasoning as the output would make a non-answer look like an answer.
+	assert.Empty(t, res.Output, "reasoning is not the run's final output")
 }

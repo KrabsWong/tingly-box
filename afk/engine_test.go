@@ -75,6 +75,7 @@ type recordingSink struct {
 	toolCalls   []string
 	toolResults []toolResult
 	turnEnds    []turnEnd
+	thinking    []string
 }
 
 type turnEnd struct {
@@ -104,6 +105,12 @@ func (s *recordingSink) OnToolResult(name, result string, isErr bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.toolResults = append(s.toolResults, toolResult{name: name, result: result, isErr: isErr})
+}
+
+func (s *recordingSink) OnThinking(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.thinking = append(s.thinking, text)
 }
 
 func (s *recordingSink) OnTurnEnd(usage anthropic.BetaUsage, stopReason anthropic.BetaStopReason) {
@@ -626,4 +633,111 @@ func TestEngineRun_CacheBreakpointNotPersistedToHistory(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "cache_control",
 		"cache breakpoints belong to the request, not the persisted conversation")
+}
+
+// thinkingToolUseResponse builds an SSE stream for a turn that reasons and then
+// calls a tool, producing no text block at all — the shape that used to publish
+// the model's deliberation to the chat as if it were the reply.
+func thinkingToolUseResponse(thinking, id, name, inputJSON string) string {
+	w := &sseWriter{}
+	w.event("message_start", `{"type":"message_start","message":{"id":"msg_t","type":"message","role":"assistant","model":"test","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}`)
+	w.event("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`)
+	tj, _ := json.Marshal(thinking)
+	w.event("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":%s}}`, tj))
+	w.event("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-abc123"}}`)
+	w.event("content_block_stop", `{"type":"content_block_stop","index":0}`)
+	w.event("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":%q,"name":%q,"input":{}}}`, id, name))
+	pj, _ := json.Marshal(inputJSON)
+	w.event("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":%s}}`, pj))
+	w.event("content_block_stop", `{"type":"content_block_stop","index":1}`)
+	w.event("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":5}}`)
+	w.event("message_stop", `{"type":"message_stop"}`)
+	return w.String()
+}
+
+// TestEngineRun_ThinkingIsNotPresentedAsAnswer is the regression guard: a turn
+// that only reasons and calls a tool must not have its reasoning delivered as
+// assistant text, and must not become the run's final answer.
+func TestEngineRun_ThinkingIsNotPresentedAsAnswer(t *testing.T) {
+	const reasoning = "The user probably means the Paris in France, let me check the weather there."
+
+	var reqCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&reqCount, 1) == 1 {
+			writeSSE(t, w, thinkingToolUseResponse(reasoning, "toolu_1", "get_weather", `{"city":"Paris"}`))
+			return
+		}
+		writeSSE(t, w, textResponse("It is 72F in Paris."))
+	}))
+	defer srv.Close()
+
+	eng, err := NewEngine(Config{
+		BaseURL: srv.URL, APIKey: "dummy-key", Model: "dummy-model",
+		Tools: []Tool{&fakeTool{name: "get_weather", result: "72F"}},
+	})
+	require.NoError(t, err)
+
+	sink := &recordingSink{}
+	_, finalText, err := eng.Run(context.Background(), nil, "weather in Paris?", sink)
+	require.NoError(t, err)
+
+	assert.Equal(t, "It is 72F in Paris.", finalText, "the answer is the text block, never the reasoning")
+	assert.NotContains(t, sink.joinedText(), reasoning, "reasoning must not be delivered as assistant text")
+	assert.Equal(t, []string{"It is 72F in Paris."}, sink.textFrags)
+
+	require.Equal(t, []string{reasoning}, sink.thinking, "reasoning belongs on its own channel")
+}
+
+// TestEngineRun_ThinkingBlocksSurviveHistoryRoundTrip covers replay: thinking
+// blocks must go back to the API exactly as received, signature included. Smart
+// Guide persists history as JSON between turns, so a block that does not
+// survive that round trip is a rejected request on the user's next message.
+func TestEngineRun_ThinkingBlocksSurviveHistoryRoundTrip(t *testing.T) {
+	var reqCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&reqCount, 1) == 1 {
+			writeSSE(t, w, thinkingToolUseResponse("deliberating", "toolu_1", "get_weather", `{"city":"Paris"}`))
+			return
+		}
+		writeSSE(t, w, textResponse("done"))
+	}))
+	defer srv.Close()
+
+	eng, err := NewEngine(Config{
+		BaseURL: srv.URL, APIKey: "dummy-key", Model: "dummy-model",
+		Tools: []Tool{&fakeTool{name: "get_weather", result: "72F"}},
+	})
+	require.NoError(t, err)
+
+	msgs, _, err := eng.Run(context.Background(), nil, "weather?", &recordingSink{})
+	require.NoError(t, err)
+
+	// The assistant turn must retain the thinking block alongside the tool_use.
+	assistant := msgs[1]
+	var thinking *anthropic.BetaThinkingBlockParam
+	for _, b := range assistant.Content {
+		if b.OfThinking != nil {
+			thinking = b.OfThinking
+		}
+	}
+	require.NotNil(t, thinking, "thinking block must stay in history, not be stripped")
+	assert.Equal(t, "deliberating", thinking.Thinking)
+	assert.Equal(t, "sig-abc123", thinking.Signature, "signature is what the API validates on replay")
+
+	// Round-trip through the session store's encoding.
+	data, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	var restored []anthropic.BetaMessageParam
+	require.NoError(t, json.Unmarshal(data, &restored))
+
+	var restoredThinking *anthropic.BetaThinkingBlockParam
+	for _, b := range restored[1].Content {
+		if b.OfThinking != nil {
+			restoredThinking = b.OfThinking
+		}
+	}
+	require.NotNil(t, restoredThinking, "thinking block must survive persistence")
+	assert.Equal(t, "deliberating", restoredThinking.Thinking)
+	assert.Equal(t, "sig-abc123", restoredThinking.Signature,
+		"a dropped signature makes the next turn a 400")
 }

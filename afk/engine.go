@@ -56,6 +56,12 @@ type StreamSink interface {
 	// OnToolResult is called after a tool finishes, with the textual result and
 	// whether it was an error.
 	OnToolResult(name string, result string, isErr bool)
+	// OnThinking is called once per assistant turn that produced reasoning, with
+	// that turn's thinking text. It is deliberately separate from OnText:
+	// reasoning is not an answer, and a sink is free to render it differently or
+	// drop it entirely. Newer models return thinking blocks with empty text by
+	// default, in which case this is not called at all.
+	OnThinking(text string)
 	// OnTurnEnd is called once per assistant turn, after the model stream
 	// closes, with that turn's token accounting and stop reason. Cache fields
 	// on the usage report how much of the prompt was served from the prompt
@@ -388,17 +394,13 @@ func (e *Engine) streamTurn(
 		}
 	}
 
-	// Real text wins over thinking. Fall back to thinking only when the turn
-	// produced no visible text — e.g. extended-thinking-only turns where the
-	// model writes its reasoning in a thinking block then calls a tool.
+	// Only real text blocks are the turn's answer. Reasoning used to be
+	// substituted in when a turn produced no text, which meant a thinking-then-
+	// tool_use turn published the model's private deliberation to the chat as
+	// though it were the reply. It goes to OnThinking instead, and the sink
+	// decides what a "thinking" event is worth showing.
 	turnText := textB.String()
-	usedThinking := false
-	if turnText == "" {
-		if think := thinkB.String(); think != "" {
-			turnText = think
-			usedThinking = true
-		}
-	}
+	thinkText := thinkB.String()
 
 	turnUsage := Usage{}
 	turnUsage.Add(msg.Usage)
@@ -408,15 +410,20 @@ func (e *Engine) streamTurn(
 		"text_len":        len(turnText),
 		"text_blocks":     nText,
 		"thinking_blocks": nThinking,
-		"used_thinking":   usedThinking,
+		"thinking_len":    len(thinkText),
 		"tool_uses":       nToolUse,
 	}).Debug("afk engine: assistant turn complete")
 
-	// Aggregated mode: emit the whole turn's text once, after the stream ends.
-	if sink != nil && !e.streamText && turnText != "" {
-		sink.OnText(turnText)
-	}
 	if sink != nil {
+		// Reasoning first: it is what led to the text and the tool calls that
+		// follow, so emitting it after them would read backwards.
+		if thinkText != "" {
+			sink.OnThinking(thinkText)
+		}
+		// Aggregated mode: emit the whole turn's text once, after the stream ends.
+		if !e.streamText && turnText != "" {
+			sink.OnText(turnText)
+		}
 		sink.OnTurnEnd(msg.Usage, msg.StopReason)
 	}
 	return msg, turnText, nil

@@ -162,10 +162,11 @@ func (a *TinglyBoxAgent) createApprovalCallback(config *AgentConfig) func(contex
 // bot streaming layer already understands. It also counts what it forwarded so
 // ExecuteWithHandler can log (and diagnose) tool-only runs.
 type engineSink struct {
-	handler      StreamHandler
-	iteration    int
-	textMessages int
-	toolCalls    int
+	handler          StreamHandler
+	iteration        int
+	textMessages     int
+	toolCalls        int
+	thinkingMessages int
 
 	// usage accumulates every turn's token accounting for the run, and
 	// lastStopReason records how the final turn ended. Both are reported on the
@@ -226,6 +227,30 @@ func (s *engineSink) OnToolResult(name string, result string, isErr bool) {
 		"name":     name,
 		"result":   result,
 		"is_error": isErr,
+	})
+}
+
+// OnThinking forwards the model's reasoning as its own message type rather than
+// as assistant text. @tb is a chat assistant: its deliberation is not its reply,
+// and posting it as one made a tool-only turn look like a rambling answer. The
+// streaming layer ignores message types it does not render, so this is inert
+// until the bot side chooses to surface it.
+func (s *engineSink) OnThinking(text string) {
+	if text == "" {
+		return
+	}
+	s.thinkingMessages++
+	logrus.WithFields(logrus.Fields{
+		"iteration":    s.iteration,
+		"thinking_len": len(text),
+	}).Debug("SmartGuide sink: assistant thinking")
+	if s.handler == nil {
+		return
+	}
+	s.handler.OnMessage(map[string]interface{}{
+		"type":      "thinking",
+		"message":   text,
+		"iteration": s.iteration,
 	})
 }
 
@@ -312,6 +337,7 @@ func (a *TinglyBoxAgent) ExecuteWithHandler(
 		"history_msgs":  len(messages),
 		"messages_sent": sink.textMessages,
 		"tool_calls":    sink.toolCalls,
+		"thinking_msgs": sink.thinkingMessages,
 		"stop_reason":   sink.lastStopReason,
 	})
 	// A run that produced tool calls but no final text leaves the user with no
