@@ -32,12 +32,20 @@ type EntryType string
 const (
 	// EntryMessage carries one conversation message.
 	EntryMessage EntryType = "message"
+	// EntryCompaction records that the messages before it were replaced by a
+	// summary. The messages themselves stay in the file — the log is
+	// append-only — and the projection skips past them.
+	EntryCompaction EntryType = "compaction"
 )
 
 // Entry is a single record in the log.
 type Entry struct {
 	Type    EntryType                   `json:"type"`
 	Message *anthropic.BetaMessageParam `json:"message,omitempty"`
+	// Summary and Replaced describe an EntryCompaction: the text that stands in
+	// for the first Replaced messages of the conversation as it stood then.
+	Summary  string `json:"summary,omitempty"`
+	Replaced int    `json:"replaced,omitempty"`
 }
 
 // Session is an append-only conversation log backed by one file.
@@ -93,14 +101,61 @@ func Open(path string) (*Session, error) {
 }
 
 // Messages projects the log to the conversation the model sees.
+//
+// A compaction entry hides the messages it replaced and carries its summary
+// into the first message that survived, which is why this is a projection and
+// not a filter: the file keeps everything, the conversation does not.
 func (s *Session) Messages() []anthropic.BetaMessageParam {
 	msgs := make([]anthropic.BetaMessageParam, 0, len(s.entries))
+	summary := ""
 	for _, e := range s.entries {
-		if e.Type == EntryMessage && e.Message != nil {
-			msgs = append(msgs, *e.Message)
+		switch e.Type {
+		case EntryMessage:
+			if e.Message != nil {
+				msgs = append(msgs, *e.Message)
+			}
+		case EntryCompaction:
+			// Only the newest compaction matters: an older one is already
+			// folded into the summary this one was written from.
+			replaced := e.Replaced
+			if replaced > len(msgs) {
+				replaced = len(msgs)
+			}
+			msgs = msgs[replaced:]
+			summary = e.Summary
 		}
 	}
+	if summary != "" && len(msgs) > 0 {
+		msgs = withSummary(msgs, summary)
+	}
 	return msgs
+}
+
+// withSummary prepends the summary to the first surviving message as an extra
+// text block.
+//
+// It rides on a real message rather than becoming one of its own so the
+// transcript keeps alternating roles without inventing a turn that never
+// happened. The first survivor is always a user turn — compaction chooses its
+// boundary that way — so a text block belongs there.
+func withSummary(msgs []anthropic.BetaMessageParam, summary string) []anthropic.BetaMessageParam {
+	out := append([]anthropic.BetaMessageParam(nil), msgs...)
+	first := out[0]
+	content := make([]anthropic.BetaContentBlockParamUnion, 0, len(first.Content)+1)
+	content = append(content, anthropic.NewBetaTextBlock(summary))
+	content = append(content, first.Content...)
+	first.Content = content
+	out[0] = first
+	return out
+}
+
+// AppendCompaction records that the first replaced messages of the conversation
+// as it currently stands are now represented by summary.
+func (s *Session) AppendCompaction(summary string, replaced int) error {
+	if summary == "" || replaced <= 0 {
+		return nil
+	}
+	return s.appendEntries(Entry{Type: EntryCompaction, Summary: summary, Replaced: replaced})
 }
 
 // Len returns the number of messages currently in the log.
@@ -114,6 +169,19 @@ func (s *Session) Append(msgs ...anthropic.BetaMessageParam) error {
 	if len(msgs) == 0 {
 		return nil
 	}
+	entries := make([]Entry, 0, len(msgs))
+	for i := range msgs {
+		m := msgs[i]
+		entries = append(entries, Entry{Type: EntryMessage, Message: &m})
+	}
+	return s.appendEntries(entries...)
+}
+
+// appendEntries writes entries to the end of the log and to the in-memory view.
+func (s *Session) appendEntries(entries ...Entry) error {
+	if len(entries) == 0 {
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return fmt.Errorf("create session dir: %w", err)
 	}
@@ -124,16 +192,15 @@ func (s *Session) Append(msgs ...anthropic.BetaMessageParam) error {
 	}
 	defer func() { _ = f.Close() }()
 
-	for i := range msgs {
-		m := msgs[i]
-		data, err := json.Marshal(Entry{Type: EntryMessage, Message: &m})
+	for _, e := range entries {
+		data, err := json.Marshal(e)
 		if err != nil {
 			return fmt.Errorf("encode session entry: %w", err)
 		}
 		if _, err := f.Write(append(data, '\n')); err != nil {
 			return fmt.Errorf("append session entry: %w", err)
 		}
-		s.entries = append(s.entries, Entry{Type: EntryMessage, Message: &m})
+		s.entries = append(s.entries, e)
 	}
 	return f.Sync()
 }

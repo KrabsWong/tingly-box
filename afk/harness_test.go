@@ -17,10 +17,27 @@ import (
 
 // recordingLog captures what a Harness checkpoints, and when.
 type recordingLog struct {
-	mu       sync.Mutex
-	appended []anthropic.BetaMessageParam
-	batches  [][]anthropic.BetaMessageParam
-	failWith error
+	mu              sync.Mutex
+	appended        []anthropic.BetaMessageParam
+	batches         [][]anthropic.BetaMessageParam
+	compactions     []loggedCompaction
+	failWith        error
+	failCompactWith error
+}
+
+type loggedCompaction struct {
+	summary  string
+	replaced int
+}
+
+func (l *recordingLog) AppendCompaction(summary string, replaced int) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.failCompactWith != nil {
+		return l.failCompactWith
+	}
+	l.compactions = append(l.compactions, loggedCompaction{summary: summary, replaced: replaced})
+	return nil
 }
 
 func (l *recordingLog) Append(msgs ...anthropic.BetaMessageParam) error {

@@ -101,16 +101,17 @@ func (u Usage) LogFields() logrus.Fields {
 
 // Engine runs the ReAct loop against a configured model and toolset.
 type Engine struct {
-	client        anthropic.Client
-	model         string
-	system        string
-	maxTokens     int64
-	temperature   *float64
-	maxIterations int
-	streamText    bool
-	tools         []Tool
-	toolByName    map[string]Tool
-	toolParams    []anthropic.BetaToolUnionParam
+	client          anthropic.Client
+	model           string
+	system          string
+	maxTokens       int64
+	temperature     *float64
+	maxIterations   int
+	streamText      bool
+	compactAtTokens int64
+	tools           []Tool
+	toolByName      map[string]Tool
+	toolParams      []anthropic.BetaToolUnionParam
 }
 
 // Config configures an Engine.
@@ -138,6 +139,11 @@ type Config struct {
 	// engine always consumes the model's HTTP stream either way; this flag only
 	// changes the granularity of the OnText fan-out to the sink.
 	StreamText bool
+	// CompactAtTokens is the measured prompt size at which a run summarizes its
+	// own older history to keep going. Zero uses DefaultCompactAtTokens; a
+	// negative value disables compaction, which means a long enough
+	// conversation eventually fails outright.
+	CompactAtTokens int64
 	// Tools are the callable tools exposed to the model.
 	Tools []Tool
 }
@@ -163,14 +169,15 @@ func NewEngine(cfg Config) (*Engine, error) {
 	client := newClient(cfg.BaseURL, cfg.APIKey)
 
 	e := &Engine{
-		client:        client,
-		model:         cfg.Model,
-		system:        cfg.System,
-		maxTokens:     maxTokens,
-		temperature:   cfg.Temperature,
-		maxIterations: maxIter,
-		streamText:    cfg.StreamText,
-		toolByName:    make(map[string]Tool, len(cfg.Tools)),
+		client:          client,
+		model:           cfg.Model,
+		system:          cfg.System,
+		maxTokens:       maxTokens,
+		temperature:     cfg.Temperature,
+		maxIterations:   maxIter,
+		streamText:      cfg.StreamText,
+		compactAtTokens: cfg.CompactAtTokens,
+		toolByName:      make(map[string]Tool, len(cfg.Tools)),
 	}
 	for _, t := range cfg.Tools {
 		e.registerTool(t)

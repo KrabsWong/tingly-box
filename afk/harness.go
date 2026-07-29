@@ -2,6 +2,7 @@ package afk
 
 import (
 	"context"
+	"math"
 	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -15,6 +16,9 @@ import (
 // front of it.
 type Log interface {
 	Append(msgs ...anthropic.BetaMessageParam) error
+	// AppendCompaction records that the first replaced messages of the
+	// conversation are now represented by summary.
+	AppendCompaction(summary string, replaced int) error
 }
 
 // RunResult is the outcome of one user turn.
@@ -29,6 +33,9 @@ type RunResult struct {
 	Steps     int
 	// Steered counts mid-run messages the user sent that this run picked up.
 	Steered int
+	// Compactions counts how many times this run had to summarize its own
+	// history to keep the prompt inside the budget.
+	Compactions int
 	// Interrupted reports that the run stopped without the model producing a
 	// tool-free answer — cancelled, failed, or out of step budget.
 	Interrupted bool
@@ -217,6 +224,13 @@ func (h *Harness) Run(
 		// before the next model call is risked.
 		h.checkpoint(&pending)
 
+		// Compaction, if the prompt has grown past the budget. This is the only
+		// place it can happen: between steps, where the conversation is
+		// consistent and nothing is mid-flight.
+		if promptTokens(step.Usage) > h.compactAt() {
+			messages = h.compact(ctx, messages, &res)
+		}
+
 		// Steering keeps the run going even when the model was ready to stop:
 		// the user has said something the model has not seen, and ending here
 		// would strand it until they typed again.
@@ -245,6 +259,93 @@ func (h *Harness) Run(
 		"had_text":      res.FinalText != "",
 	}).Warn("afk harness: hit max iterations without a tool-free final answer")
 	return res, nil
+}
+
+// promptTokens is how large the request actually was, as the model reported it.
+// Cached tokens still occupy the context window, so they count here even though
+// they cost almost nothing.
+func promptTokens(u anthropic.BetaUsage) int64 {
+	return u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+}
+
+// compactAt returns the configured prompt-size trigger. A negative setting
+// disables compaction by putting the trigger out of reach.
+func (h *Harness) compactAt() int64 {
+	switch {
+	case h.engine.compactAtTokens < 0:
+		return math.MaxInt64
+	case h.engine.compactAtTokens == 0:
+		return DefaultCompactAtTokens
+	default:
+		return h.engine.compactAtTokens
+	}
+}
+
+// compact replaces the older part of the conversation with a summary, in place,
+// so the next step's request fits.
+//
+// Every failure path returns the conversation untouched. A conversation that is
+// too long still gets one more chance at an answer; one that has been mangled
+// by a half-applied compaction is broken for good.
+func (h *Harness) compact(
+	ctx context.Context,
+	messages []anthropic.BetaMessageParam,
+	res *RunResult,
+) []anthropic.BetaMessageParam {
+	boundary := compactionBoundary(messages, compactKeepMessages)
+	if boundary == 0 {
+		// No clean turn boundary in the tail — the whole recent stretch is one
+		// unbroken tool loop. Cutting inside it would orphan a tool_result from
+		// its tool_use, which is worse than an oversized prompt.
+		logrus.WithField("messages", len(messages)).
+			Warn("afk harness: prompt over budget but no safe compaction boundary")
+		return messages
+	}
+
+	summary, err := h.engine.Summarize(ctx, messages[:boundary])
+	if err != nil {
+		logrus.WithError(err).Warn("afk harness: compaction failed, continuing uncompacted")
+		return messages
+	}
+
+	if h.log != nil {
+		if err := h.log.AppendCompaction(summary, boundary); err != nil {
+			// The log and the live conversation would now disagree about what
+			// the model has seen, and the log is what the next turn is rebuilt
+			// from. Keep them in step by not compacting.
+			logrus.WithError(err).Error("afk harness: could not record compaction, continuing uncompacted")
+			return messages
+		}
+	}
+
+	compacted := append([]anthropic.BetaMessageParam(nil), messages[boundary:]...)
+	compacted = prependSummary(compacted, summary)
+	res.Compactions++
+
+	logrus.WithFields(logrus.Fields{
+		"replaced":  boundary,
+		"kept":      len(messages) - boundary,
+		"summary":   len(summary),
+		"remaining": len(compacted),
+	}).Info("afk harness: compacted conversation")
+	return compacted
+}
+
+// prependSummary attaches the summary to the first kept message as an extra
+// text block, mirroring how the log projects a compaction on reload. The two
+// have to agree: one is what this run keeps using, the other is what the next
+// turn is rebuilt from.
+func prependSummary(msgs []anthropic.BetaMessageParam, summary string) []anthropic.BetaMessageParam {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	first := msgs[0]
+	content := make([]anthropic.BetaContentBlockParamUnion, 0, len(first.Content)+1)
+	content = append(content, anthropic.NewBetaTextBlock(summary))
+	content = append(content, first.Content...)
+	first.Content = content
+	msgs[0] = first
+	return msgs
 }
 
 // close finishes an interrupted run: it restores the alternating-role invariant
