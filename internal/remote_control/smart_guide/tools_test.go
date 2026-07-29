@@ -12,6 +12,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tingly-dev/tingly-box/afk"
+	"github.com/tingly-dev/tingly-box/afk/skill"
 )
 
 // rawArgs marshals a map of tool arguments into the json.RawMessage the new
@@ -233,7 +236,7 @@ func TestBuildTools(t *testing.T) {
 	getStatusFunc := func(chatID string) (*StatusInfo, error) { return nil, nil }
 	updateProjectFunc := func(chatID string, projectPath string) error { return nil }
 
-	tools := BuildTools(executor, "test-chat", getStatusFunc, updateProjectFunc, nil)
+	tools := BuildTools(executor, "test-chat", getStatusFunc, updateProjectFunc, nil, nil)
 	assert.GreaterOrEqual(t, len(tools), 3, "Should build at least 3 tools")
 
 	names := make([]string, 0, len(tools))
@@ -246,11 +249,14 @@ func TestBuildTools(t *testing.T) {
 
 	// send_file is only registered when a SendFile callback is available.
 	assert.NotContains(t, names, "send_file")
+	// Likewise activate_skill: no skills discovered means no tool, rather than
+	// an activator advertising an empty catalog.
+	assert.NotContains(t, names, "activate_skill")
 
 	toolCtx := &ToolContext{
 		SendFile: func(ctx context.Context, path, caption string) error { return nil },
 	}
-	withSend := BuildTools(executor, "test-chat", getStatusFunc, updateProjectFunc, toolCtx)
+	withSend := BuildTools(executor, "test-chat", getStatusFunc, updateProjectFunc, toolCtx, nil)
 	sendNames := make([]string, 0, len(withSend))
 	for _, tl := range withSend {
 		sendNames = append(sendNames, tl.Param().Name)
@@ -504,4 +510,52 @@ func TestReadFileTool_TruncationNoticeUsesAbsoluteLineNumbers(t *testing.T) {
 	require.Contains(t, out, "Output truncated")
 	assert.Contains(t, out, "showing lines 1001-", "line numbers should be absolute, not restarted at 1")
 	assert.Contains(t, out, "offset=3001", "resume point should follow the last line actually shown")
+}
+
+// TestBuildTools_RegistersSkillActivator covers the skill path: when skills are
+// discovered the activator joins the toolset, and its description carries each
+// skill's name and summary. That description is the only place the model can
+// learn what a skill is for — the input enum constrains the name but says
+// nothing about when to reach for it.
+func TestBuildTools_RegistersSkillActivator(t *testing.T) {
+	executor := NewToolExecutor(DefaultBashAllowlist)
+	getStatusFunc := func(chatID string) (*StatusInfo, error) { return nil, nil }
+	updateProjectFunc := func(chatID string, projectPath string) error { return nil }
+
+	skills, err := loadSkillsFromDir(t, "../../../.agents/skills")
+	require.NoError(t, err)
+	require.NotEmpty(t, skills, "repo ships skills under .agents/skills")
+
+	tools := BuildTools(executor, "test-chat", getStatusFunc, updateProjectFunc, nil, skills)
+
+	var activator afk.Tool
+	for _, tl := range tools {
+		if tl.Param().Name == "activate_skill" {
+			activator = tl
+		}
+	}
+	require.NotNil(t, activator, "activate_skill should be registered when skills exist")
+
+	desc := activator.Param().Description.Value
+	for _, s := range skills {
+		assert.Contains(t, desc, s.Name, "each skill name should be listed")
+		if s.Description != "" {
+			assert.Contains(t, desc, s.Description, "each skill description should be listed")
+		}
+	}
+}
+
+// loadSkillsFromDir loads skills from an explicit directory only, so the test
+// does not depend on whatever skills happen to exist in the developer's home.
+func loadSkillsFromDir(t *testing.T, dir string) (skill.Skills, error) {
+	t.Helper()
+	loader, err := skill.NewLoader(&skill.Config{
+		EnableStandardPaths: false,
+		EnableDefaultSkills: true,
+		Paths:               []string{dir},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return loader.Skills(), nil
 }

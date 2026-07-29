@@ -14,7 +14,7 @@ func TestLoader_ClaudeStandard(t *testing.T) {
 		Standard:            ClaudeStandard,
 		EnableStandardPaths: false,
 		EnableDefaultSkills: true,
-		Paths:               []string{"../../../.agent/skills"},
+		Paths:               []string{"../../.agents/skills"},
 	}
 
 	loader, err := NewLoader(cfg)
@@ -107,7 +107,7 @@ func TestLoader_StandardDefaults(t *testing.T) {
 	cfg := &Config{
 		EnableStandardPaths: false,
 		EnableDefaultSkills: true,
-		Paths:               []string{"../../../.agent/skills"},
+		Paths:               []string{"../../.agents/skills"},
 	}
 
 	loader, err := NewLoader(cfg)

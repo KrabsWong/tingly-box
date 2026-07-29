@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/tingly-dev/tingly-box/afk"
+	"github.com/tingly-dev/tingly-box/afk/skill"
 	"github.com/tingly-dev/tingly-box/agentboot"
 )
 
@@ -94,7 +96,7 @@ func NewTinglyBoxAgent(config *AgentConfig) (*TinglyBoxAgent, error) {
 		logrus.WithField("chatID", config.ChatID).Warn("No approver provided - non-whitelisted commands will be denied")
 	}
 
-	tools := BuildTools(executor, config.ChatID, config.GetStatusFunc, config.UpdateProjectFunc, config.ToolCtx)
+	tools := BuildTools(executor, config.ChatID, config.GetStatusFunc, config.UpdateProjectFunc, config.ToolCtx, loadSkills(executor))
 
 	engine, err := afk.NewEngine(afk.Config{
 		BaseURL:       config.BaseURL,
@@ -116,6 +118,41 @@ func NewTinglyBoxAgent(config *AgentConfig) (*TinglyBoxAgent, error) {
 	}).Info("Created SmartGuide agent (anthropic engine)")
 
 	return tb, nil
+}
+
+// loadSkills discovers the skills available to this agent, once, at
+// construction.
+//
+// Deliberately not refreshed per turn even though @tb's working directory
+// floats. The skill catalog is rendered into the activate_skill tool
+// definition, and tools sit at the very front of the prompt: a catalog that
+// changed mid-conversation would invalidate the prompt cache for the entire
+// history on the turn it changed. A stable toolset for the life of the agent is
+// worth more than picking up a skill directory the user walked into — and a new
+// agent is built per session anyway, so a restart or /clear picks up changes.
+//
+// Discovery failures are logged and swallowed: no skills is a normal state, and
+// it must not stop @tb from starting.
+func loadSkills(executor *ToolExecutor) skill.Skills {
+	cfg := &skill.Config{
+		EnableStandardPaths: true,
+		EnableDefaultSkills: true,
+	}
+	// Also look under wherever the chat is currently rooted, which is usually
+	// the user's project and not the directory the gateway happens to run in.
+	if wd := executor.GetWorkingDirectory(); wd != "" {
+		cfg.Paths = []string{
+			filepath.Join(wd, ".claude", "skills"),
+			filepath.Join(wd, ".agents", "skills"),
+		}
+	}
+
+	loader, err := skill.NewLoader(cfg)
+	if err != nil {
+		logrus.WithError(err).Warn("SmartGuide: skill discovery failed, continuing without skills")
+		return nil
+	}
+	return loader.Skills()
 }
 
 // NewTinglyBoxAgentWithSession creates a Smart Guide agent seeded with prior

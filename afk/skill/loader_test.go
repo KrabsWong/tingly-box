@@ -11,7 +11,7 @@ func TestLoader_LoadSkills(t *testing.T) {
 	cfg := &Config{
 		EnableStandardPaths: false, // Disable standard paths for testing
 		EnableDefaultSkills: true,
-		Paths:               []string{"../../../.agent/skills"},
+		Paths:               []string{"../../.agents/skills"},
 	}
 
 	loader, err := NewLoader(cfg)
@@ -50,7 +50,7 @@ func TestActivateSkillTool(t *testing.T) {
 	cfg := &Config{
 		EnableStandardPaths: false, // Disable standard paths for testing
 		EnableDefaultSkills: true,
-		Paths:               []string{"../../../.agent/skills"},
+		Paths:               []string{"../../.agents/skills"},
 	}
 
 	loader, err := NewLoader(cfg)
@@ -85,7 +85,7 @@ func TestSkillToTool(t *testing.T) {
 	cfg := &Config{
 		EnableStandardPaths: false, // Disable standard paths for testing
 		EnableDefaultSkills: true,
-		Paths:               []string{"../../../.agent/skills"},
+		Paths:               []string{"../../.agents/skills"},
 	}
 
 	loader, err := NewLoader(cfg)
@@ -111,7 +111,7 @@ func TestLoader_FilterByTag(t *testing.T) {
 	cfg := &Config{
 		EnableStandardPaths: false, // Disable standard paths for testing
 		EnableDefaultSkills: true,
-		Paths:               []string{"../../../.agent/skills"},
+		Paths:               []string{"../../.agents/skills"},
 	}
 
 	loader, err := NewLoader(cfg)
