@@ -12,6 +12,8 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/sirupsen/logrus"
+
+	"github.com/tingly-dev/tingly-box/afk"
 )
 
 // DefaultBashAllowlist defines the default allowed bash commands. Commands
@@ -146,11 +148,25 @@ func (t *BashTool) execute(ctx context.Context, command string) string {
 	}
 
 	cwd := t.Executor.GetWorkingDirectory()
-	body := strings.TrimRight(output, "\n")
-	if err != nil {
-		return fmt.Sprintf("(cwd: %s)\n%s\n[command exited with error: %v]", cwd, body, err)
+
+	// Truncate only after the trailing pwd line has been stripped above: it is
+	// how this tool tracks the working directory, and tail-truncating first
+	// would cut it off and silently strand the session in the old cwd.
+	//
+	// Keep the tail — a failing command puts its error at the bottom, and the
+	// head of a long build log is the least useful part of it.
+	body := afk.Truncate(strings.TrimRight(output, "\n"), afk.TruncateOptions{KeepTail: true})
+	if body.Truncated {
+		logrus.WithFields(logrus.Fields{
+			"total_lines": body.TotalLines,
+			"kept_lines":  body.KeptLines,
+			"total_bytes": body.TotalBytes,
+		}).Info("BashTool: output truncated")
 	}
-	return fmt.Sprintf("(cwd: %s)\n%s", cwd, body)
+	if err != nil {
+		return fmt.Sprintf("(cwd: %s)\n%s\n[command exited with error: %v]", cwd, body.String(), err)
+	}
+	return fmt.Sprintf("(cwd: %s)\n%s", cwd, body.String())
 }
 
 // isAllowed reports whether baseCmd is in the allowlist. An empty allowlist

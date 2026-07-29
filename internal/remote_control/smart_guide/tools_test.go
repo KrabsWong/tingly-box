@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -408,4 +410,98 @@ func TestToolExecutor_ExecuteBash_NotAllowedCommand(t *testing.T) {
 	_, err := executor.ExecuteBash(context.Background(), "rm", "-rf", "/")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not allowed")
+}
+
+// TestBashTool_TruncatesLongOutput checks that a command producing far more
+// output than the context can hold comes back capped, with the tail retained —
+// a failing command reports its error at the bottom.
+func TestBashTool_TruncatesLongOutput(t *testing.T) {
+	ctx := context.Background()
+	executor := NewToolExecutor([]string{})
+	bashTool := NewBashTool(executor, []string{})
+
+	out, err := bashTool.Call(ctx, rawArgs(t, map[string]any{
+		"command": "for i in $(seq 1 5000); do echo line-$i; done",
+	}))
+	require.NoError(t, err)
+
+	assert.Contains(t, out, "Output truncated", "the model must be told the output was cut")
+	assert.Contains(t, out, "line-5000", "the tail is the part worth keeping")
+	assert.NotContains(t, out, "line-1\n", "the head should have been dropped")
+	assert.Less(t, len(out), 80*1024, "truncated output should stay near the byte cap")
+}
+
+// TestBashTool_TruncationPreservesDirectoryTracking is the ordering guard: the
+// working directory is carried by a pwd line appended to the end of the output,
+// so truncating before stripping it would tail-cut the pwd away and silently
+// strand the session in the previous directory.
+func TestBashTool_TruncationPreservesDirectoryTracking(t *testing.T) {
+	ctx := context.Background()
+
+	rootTempDir := t.TempDir()
+	subDir := filepath.Join(rootTempDir, "sub")
+	require.NoError(t, os.Mkdir(subDir, 0755))
+
+	executor := NewToolExecutor([]string{})
+	executor.SetWorkingDirectory(rootTempDir)
+	bashTool := NewBashTool(executor, []string{})
+
+	// Change directory *and* emit enough output to force truncation.
+	out, err := bashTool.Call(ctx, rawArgs(t, map[string]any{
+		"command": "cd sub && for i in $(seq 1 5000); do echo line-$i; done",
+	}))
+	require.NoError(t, err)
+	require.Contains(t, out, "Output truncated", "this test is meaningless unless truncation fired")
+
+	assert.Equal(t, subDir, executor.GetWorkingDirectory(),
+		"cwd tracking must survive truncation")
+	assert.NotContains(t, out, subDir+"\n"+"[Output truncated",
+		"the pwd marker line must not leak into the visible output")
+}
+
+// TestReadFileTool_TruncatesLargeFile covers the read side: a file well under
+// the 10MB hard limit can still swamp the context, and the notice has to tell
+// the model where to resume.
+func TestReadFileTool_TruncatesLargeFile(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.txt")
+
+	var b strings.Builder
+	for i := 1; i <= 5000; i++ {
+		fmt.Fprintf(&b, "line-%d\n", i)
+	}
+	require.NoError(t, os.WriteFile(path, []byte(b.String()), 0o600))
+
+	tool := NewReadFileTool(NewToolExecutor([]string{}))
+	out, err := tool.Call(ctx, rawArgs(t, map[string]any{"path": path}))
+	require.NoError(t, err)
+
+	assert.Contains(t, out, "line-1\n", "reads keep the head")
+	assert.NotContains(t, out, "line-5000")
+	assert.Contains(t, out, "Output truncated")
+	assert.Contains(t, out, "offset=", "the notice must say how to page onward")
+}
+
+// TestReadFileTool_TruncationNoticeUsesAbsoluteLineNumbers checks the notice
+// accounts for an offset already applied — a 1-based notice would send the
+// model back to re-read lines it already has.
+func TestReadFileTool_TruncationNoticeUsesAbsoluteLineNumbers(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.txt")
+
+	var b strings.Builder
+	for i := 1; i <= 6000; i++ {
+		fmt.Fprintf(&b, "line-%d\n", i)
+	}
+	require.NoError(t, os.WriteFile(path, []byte(b.String()), 0o600))
+
+	tool := NewReadFileTool(NewToolExecutor([]string{}))
+	out, err := tool.Call(ctx, rawArgs(t, map[string]any{"path": path, "offset": 1001}))
+	require.NoError(t, err)
+
+	require.Contains(t, out, "Output truncated")
+	assert.Contains(t, out, "showing lines 1001-", "line numbers should be absolute, not restarted at 1")
+	assert.Contains(t, out, "offset=3001", "resume point should follow the last line actually shown")
 }

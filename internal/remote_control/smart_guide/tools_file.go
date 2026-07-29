@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/sirupsen/logrus"
+
 	"github.com/tingly-dev/tingly-box/afk"
 )
 
@@ -94,7 +96,32 @@ func (t *ReadFileTool) Call(ctx context.Context, rawInput json.RawMessage) (stri
 	if p.Offset > 0 || p.Limit > 0 {
 		content = sliceLines(content, p.Offset, p.Limit)
 	}
-	return content, nil
+
+	// The 10MB stat check above only rejects the extreme case; a 2MB file still
+	// passes it and would swamp the context. Keep the head, which is the half
+	// that follows from reading at an offset, and let the notice point the model
+	// at offset/limit for the rest.
+	out := afk.Truncate(content, afk.TruncateOptions{})
+	if out.Truncated {
+		logrus.WithFields(logrus.Fields{
+			"path":        resolved,
+			"total_lines": out.TotalLines,
+			"kept_lines":  out.KeptLines,
+		}).Info("ReadFileTool: content truncated")
+		// Report absolute line numbers: the slice already started at p.Offset,
+		// so a 1-based notice would send the model back to re-read what it has.
+		start := p.Offset
+		if start < 1 {
+			start = 1
+		}
+		return out.Text + "\n\n" + fmt.Sprintf(
+			"[Output truncated: showing lines %d-%d of the %d selected (%d of %d bytes). "+
+				"Re-read with offset=%d to continue from where this stops.]",
+			start, start+out.KeptLines-1, out.TotalLines, out.KeptBytes, out.TotalBytes,
+			start+out.KeptLines,
+		), nil
+	}
+	return out.Text, nil
 }
 
 // sliceLines returns the lines of content selected by a 1-based offset and a max
