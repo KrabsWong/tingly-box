@@ -1,5 +1,18 @@
 # Smart Guide: in-house ReAct loop on the official Anthropic SDK
 
+> **Shipped and since extended.** This is the historical record of how `afk/`
+> came to exist and why it is anthropic-first. For what the runtime looks like
+> now — the step/harness/session split, checkpoints, steering, compaction — see
+> [`afk.md`](./afk.md).
+>
+> The framing below calls the Claude-Code redesign the north star. That is no
+> longer true: it has been superseded, for the reasons recorded at the top of
+> [`smart-guide-on-claude-code.md`](./smart-guide-on-claude-code.md). The
+> anthropic-first decisions in this document held up and are now the foundation,
+> not a down payment.
+>
+> Original framing follows.
+>
 > Pre-launch, low-risk replacement of the `tingly-agentscope` runtime.
 > The Claude-Code-based redesign (`.design/smart-guide-on-claude-code.md`) is
 > the north star but too large to land before launch. This plan ships a stable
