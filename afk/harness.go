@@ -2,6 +2,7 @@ package afk
 
 import (
 	"context"
+	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/sirupsen/logrus"
@@ -26,6 +27,8 @@ type RunResult struct {
 	FinalText string
 	Usage     Usage
 	Steps     int
+	// Steered counts mid-run messages the user sent that this run picked up.
+	Steered int
 	// Interrupted reports that the run stopped without the model producing a
 	// tool-free answer — cancelled, failed, or out of step budget.
 	Interrupted bool
@@ -40,11 +43,88 @@ type RunResult struct {
 type Harness struct {
 	engine *Engine
 	log    Log
+
+	mu      sync.Mutex
+	running bool
+	queued  []string
 }
 
 // NewHarness builds a Harness over an engine. log may be nil.
 func NewHarness(e *Engine, log Log) *Harness {
 	return &Harness{engine: e, log: log}
+}
+
+// Steer hands the running turn an additional message from the user, to be
+// delivered at the next checkpoint. It reports whether a run was there to take
+// it; false means the caller should start a normal run instead.
+//
+// This is the difference between a chat and a batch job. People send follow-ups
+// while the agent is still working — "wait, not that directory", "also check the
+// logs" — and the alternative to accepting them is rejecting them as
+// concurrent, which asks the user to sit still and watch.
+//
+// It is safe to call from another goroutine while Run is executing; that is the
+// only way it is ever called.
+func (h *Harness) Steer(text string) bool {
+	if text == "" {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.running {
+		return false
+	}
+	h.queued = append(h.queued, text)
+	return true
+}
+
+// drainSteering removes and returns any queued messages.
+func (h *Harness) drainSteering() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	q := h.queued
+	h.queued = nil
+	return q
+}
+
+// setRunning marks the run active so Steer knows there is something to steer.
+// Anything still queued when a run ends is dropped: it belonged to a turn that
+// is over, and replaying it into the next one would answer a stale question.
+func (h *Harness) setRunning(v bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.running = v
+	if !v {
+		h.queued = nil
+	}
+}
+
+// injectSteering merges steering messages into the tail of a step's output.
+//
+// Where it lands depends on what the step ended with, because the transcript
+// has to keep alternating. After a step that called tools the tail is a user
+// turn carrying tool results, so the text joins that message rather than
+// starting a second user turn beside it. After a step that only produced text
+// the tail is an assistant turn, and a fresh user message is exactly right.
+func injectSteering(stepMsgs []anthropic.BetaMessageParam, steering []string) []anthropic.BetaMessageParam {
+	blocks := make([]anthropic.BetaContentBlockParamUnion, 0, len(steering))
+	for _, s := range steering {
+		blocks = append(blocks, anthropic.NewBetaTextBlock(s))
+	}
+
+	out := append([]anthropic.BetaMessageParam(nil), stepMsgs...)
+	if n := len(out); n > 0 && out[n-1].Role == anthropic.BetaMessageParamRoleUser {
+		last := out[n-1]
+		// Copy the content slice: it is shared with the caller's view of the
+		// conversation, and appending in place could write through to it.
+		merged := make([]anthropic.BetaContentBlockParamUnion, 0, len(last.Content)+len(blocks))
+		merged = append(merged, last.Content...)
+		merged = append(merged, blocks...)
+		last.Content = merged
+		out[n-1] = last
+		return out
+	}
+	return append(out, anthropic.NewBetaUserMessage(blocks...))
 }
 
 // interruptedNote is appended when a run ends without the model replying.
@@ -69,6 +149,9 @@ func (h *Harness) Run(
 	sink StreamSink,
 ) (RunResult, error) {
 	e := h.engine
+
+	h.setRunning(true)
+	defer h.setRunning(false)
 
 	messages := append([]anthropic.BetaMessageParam(nil), history...)
 	userMsg := anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(userText))
@@ -105,8 +188,18 @@ func (h *Harness) Run(
 			return res, err
 		}
 
-		messages = append(messages, step.Messages...)
-		pending = append(pending, step.Messages...)
+		// Checkpoint. Steering is merged into the step's output before anything
+		// is recorded, so the log and the in-memory conversation never disagree
+		// about what the model was shown.
+		stepMsgs := step.Messages
+		steering := h.drainSteering()
+		if len(steering) > 0 {
+			stepMsgs = injectSteering(stepMsgs, steering)
+			res.Steered += len(steering)
+		}
+
+		messages = append(messages, stepMsgs...)
+		pending = append(pending, stepMsgs...)
 		res.Steps++
 		res.Usage.Add(step.Usage)
 		if step.Text != "" {
@@ -117,11 +210,19 @@ func (h *Harness) Run(
 			"step":       i,
 			"turn_text":  len(step.Text),
 			"tool_calls": step.ToolCalls,
+			"steering":   len(steering),
 		}).Debug("afk harness: step complete")
 
-		// Checkpoint: the step is done and its messages are well-formed, so
-		// they can be made durable before the next model call is risked.
+		// The step's messages are well-formed now, so they can be made durable
+		// before the next model call is risked.
 		h.checkpoint(&pending)
+
+		// Steering keeps the run going even when the model was ready to stop:
+		// the user has said something the model has not seen, and ending here
+		// would strand it until they typed again.
+		if len(steering) > 0 {
+			continue
+		}
 
 		if !step.NeedsAnotherStep {
 			res.Messages = messages

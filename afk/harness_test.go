@@ -275,3 +275,252 @@ func (c *cancellingTool) Call(ctx context.Context, raw json.RawMessage) (string,
 	c.cancel()
 	return c.result, nil
 }
+
+// steeringTool steers the harness from inside a tool call, which is exactly
+// when a real follow-up arrives: the model has committed to tools and the user
+// is watching it work.
+type steeringTool struct {
+	name    string
+	result  string
+	harness func() *Harness
+	texts   []string
+	fired   int32
+}
+
+func (s *steeringTool) Param() anthropic.BetaToolParam {
+	return anthropic.BetaToolParam{
+		Name:        s.name,
+		Description: anthropic.String("steers mid-run"),
+		InputSchema: anthropic.BetaToolInputSchemaParam{
+			Properties: map[string]any{"city": map[string]any{"type": "string"}},
+		},
+	}
+}
+
+func (s *steeringTool) Call(ctx context.Context, raw json.RawMessage) (string, error) {
+	if atomic.AddInt32(&s.fired, 1) == 1 {
+		for _, txt := range s.texts {
+			s.harness().Steer(txt)
+		}
+	}
+	return s.result, nil
+}
+
+// lastUserText concatenates the text blocks of the last user message in a
+// request body captured from the wire.
+func lastUserText(t *testing.T, body map[string]any) string {
+	t.Helper()
+	msgs, _ := body["messages"].([]any)
+	require.NotEmpty(t, msgs)
+	last, _ := msgs[len(msgs)-1].(map[string]any)
+	blocks, _ := last["content"].([]any)
+	var out string
+	for _, b := range blocks {
+		bm, _ := b.(map[string]any)
+		if bm["type"] == "text" {
+			s, _ := bm["text"].(string)
+			out += s
+		}
+	}
+	return out
+}
+
+// TestHarness_SteeringReachesTheModelOnTheNextStep is the point of the feature:
+// a message sent while the agent is working is delivered on the next model
+// call, instead of being rejected as a concurrent request.
+func TestHarness_SteeringReachesTheModelOnTheNextStep(t *testing.T) {
+	srv := &capturingServer{respond: func(n int) string {
+		if n == 1 {
+			return toolUseResponse("toolu_1", "get_weather", `{"city":"Paris"}`)
+		}
+		return textResponse("switched to Lyon")
+	}}
+	ts := httptest.NewServer(srv.handler(t))
+	defer ts.Close()
+
+	var h *Harness
+	tool := &steeringTool{
+		name: "get_weather", result: "72F",
+		harness: func() *Harness { return h },
+		texts:   []string{"actually, make it Lyon"},
+	}
+	eng, err := NewEngine(Config{BaseURL: ts.URL, APIKey: "k", Model: "m", Tools: []Tool{tool}})
+	require.NoError(t, err)
+	h = NewHarness(eng, nil)
+
+	res, err := h.Run(context.Background(), nil, "weather in Paris?", &recordingSink{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Steered)
+
+	// The second request carries the steering text.
+	require.Len(t, srv.bodies, 2)
+	assert.Contains(t, lastUserText(t, srv.body(1)), "actually, make it Lyon",
+		"the follow-up must reach the model on the next step")
+}
+
+// After a tool step the transcript already ends on a user turn carrying tool
+// results, so steering has to join that message rather than start a second user
+// turn beside it — consecutive user messages are rejected by the API.
+func TestHarness_SteeringMergesIntoToolResultTurn(t *testing.T) {
+	srv := &capturingServer{respond: func(n int) string {
+		if n == 1 {
+			return toolUseResponse("toolu_1", "get_weather", `{"city":"Paris"}`)
+		}
+		return textResponse("ok")
+	}}
+	ts := httptest.NewServer(srv.handler(t))
+	defer ts.Close()
+
+	var h *Harness
+	tool := &steeringTool{
+		name: "get_weather", result: "72F",
+		harness: func() *Harness { return h },
+		texts:   []string{"and check the humidity"},
+	}
+	eng, err := NewEngine(Config{BaseURL: ts.URL, APIKey: "k", Model: "m", Tools: []Tool{tool}})
+	require.NoError(t, err)
+	h = NewHarness(eng, nil)
+
+	res, err := h.Run(context.Background(), nil, "weather?", &recordingSink{})
+	require.NoError(t, err)
+
+	// user, assistant(tool_use), user(tool_result + steering), assistant
+	require.Len(t, res.Messages, 4)
+	merged := res.Messages[2]
+	assert.Equal(t, anthropic.BetaMessageParamRoleUser, merged.Role)
+	require.Len(t, merged.Content, 2, "steering joins the tool_result message")
+	assert.NotNil(t, merged.Content[0].OfToolResult)
+	require.NotNil(t, merged.Content[1].OfText)
+	assert.Equal(t, "and check the humidity", merged.Content[1].OfText.Text)
+
+	// Roles alternate: no two user messages in a row anywhere.
+	for i := 1; i < len(res.Messages); i++ {
+		assert.NotEqual(t, res.Messages[i-1].Role, res.Messages[i].Role,
+			"roles must alternate at index %d", i)
+	}
+}
+
+// Steering that lands after a text-only step is a follow-up: the model was
+// about to stop, and the run must continue instead of stranding the message
+// until the user types again.
+func TestHarness_SteeringAfterTextStepContinuesTheRun(t *testing.T) {
+	var reqCount int32
+	steered := make(chan struct{})
+
+	srv := &capturingServer{respond: func(n int) string {
+		return textResponse("reply " + string(rune('0'+n)))
+	}}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&reqCount, 1)
+		srv.handler(t)(w, r)
+	}))
+	defer ts.Close()
+
+	eng, err := NewEngine(Config{BaseURL: ts.URL, APIKey: "k", Model: "m"})
+	require.NoError(t, err)
+	h := NewHarness(eng, nil)
+
+	// Steer from a sink callback, which fires while the first step is still in
+	// flight — the model produced text and the run is about to end.
+	sink := &steeringSink{onText: func() {
+		select {
+		case <-steered:
+		default:
+			h.Steer("one more thing")
+			close(steered)
+		}
+	}}
+
+	res, err := h.Run(context.Background(), nil, "hi", sink)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, res.Steered)
+	assert.Equal(t, 2, res.Steps, "the run continues rather than stopping on the text step")
+	assert.Equal(t, int32(2), atomic.LoadInt32(&reqCount))
+
+	// user, assistant, user(steering), assistant
+	require.Len(t, res.Messages, 4)
+	assert.Equal(t, anthropic.BetaMessageParamRoleUser, res.Messages[2].Role)
+	assert.Equal(t, "one more thing", res.Messages[2].Content[0].OfText.Text)
+}
+
+// Steering is durable: what the model was shown is what lands in the log.
+func TestHarness_SteeringIsCheckpointed(t *testing.T) {
+	srv := &capturingServer{respond: func(n int) string {
+		if n == 1 {
+			return toolUseResponse("toolu_1", "get_weather", `{"city":"Paris"}`)
+		}
+		return textResponse("done")
+	}}
+	ts := httptest.NewServer(srv.handler(t))
+	defer ts.Close()
+
+	var h *Harness
+	tool := &steeringTool{
+		name: "get_weather", result: "72F",
+		harness: func() *Harness { return h },
+		texts:   []string{"remember this"},
+	}
+	eng, err := NewEngine(Config{BaseURL: ts.URL, APIKey: "k", Model: "m", Tools: []Tool{tool}})
+	require.NoError(t, err)
+	log := &recordingLog{}
+	h = NewHarness(eng, log)
+
+	res, err := h.Run(context.Background(), nil, "weather?", &recordingSink{})
+	require.NoError(t, err)
+
+	require.Equal(t, len(res.Messages), log.count(),
+		"the log must match what the model was shown, steering included")
+	var found bool
+	for _, m := range log.appended {
+		for _, b := range m.Content {
+			if b.OfText != nil && b.OfText.Text == "remember this" {
+				found = true
+			}
+		}
+	}
+	assert.True(t, found, "steering text must be persisted, not just sent")
+}
+
+// Steering outside a run is refused so the caller starts a normal turn instead
+// of dropping the user's message on the floor.
+func TestHarness_SteerOutsideRunIsRefused(t *testing.T) {
+	eng, err := NewEngine(Config{BaseURL: "http://unused", APIKey: "k", Model: "m"})
+	require.NoError(t, err)
+	h := NewHarness(eng, nil)
+
+	assert.False(t, h.Steer("nobody home"), "no run means nothing to steer")
+	assert.False(t, h.Steer(""), "an empty message is not steering")
+}
+
+// A run that ends must not leave queued text behind to be replayed into the
+// next turn, where it would answer a question nobody is asking any more.
+func TestHarness_QueuedSteeringIsDroppedWhenTheRunEnds(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeSSE(t, w, textResponse("done"))
+	}))
+	defer srv.Close()
+
+	eng, err := NewEngine(Config{BaseURL: srv.URL, APIKey: "k", Model: "m"})
+	require.NoError(t, err)
+	h := NewHarness(eng, nil)
+
+	_, err = h.Run(context.Background(), nil, "hi", &recordingSink{})
+	require.NoError(t, err)
+
+	assert.False(t, h.Steer("too late"), "the run is over; this should start a new turn")
+	assert.Empty(t, h.drainSteering())
+}
+
+// steeringSink runs a callback when the model produces text.
+type steeringSink struct {
+	recordingSink
+	onText func()
+}
+
+func (s *steeringSink) OnText(delta string) {
+	s.recordingSink.OnText(delta)
+	if s.onText != nil {
+		s.onText()
+	}
+}

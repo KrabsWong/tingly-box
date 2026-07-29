@@ -414,6 +414,16 @@ func (a *TinglyBoxAgent) ExecuteWithHandler(
 	return result, nil
 }
 
+// Steer delivers a message to the turn this agent is currently running, to be
+// picked up at its next checkpoint. It reports whether there was a run to take
+// it; false means the caller should start a normal turn.
+func (a *TinglyBoxAgent) Steer(text string) bool {
+	if a == nil || a.harness == nil {
+		return false
+	}
+	return a.harness.Steer(text)
+}
+
 // History returns the agent's current conversation history (native beta params).
 func (a *TinglyBoxAgent) History() []anthropic.BetaMessageParam {
 	return a.history

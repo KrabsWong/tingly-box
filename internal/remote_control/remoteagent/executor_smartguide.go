@@ -163,6 +163,13 @@ func (e *SmartGuideExecutor) Execute(ctx context.Context, req PreparedRequest) e
 		return err
 	}
 
+	// Register the agent as this chat's steerable execution, so a message the
+	// user sends while the turn is still running is delivered into it instead of
+	// being rejected as concurrent.
+	if e.deps.Executions != nil {
+		e.deps.Executions.setSteerable(req.HCtx.ChatID, agent)
+	}
+
 	// Set working directory from BashCwd (preferred) or projectPath (fallback)
 	// This ensures bash cd changes are persisted across agent executions
 	workingDir, hasWD, _ := e.deps.ChatStore.GetBashCwd(req.HCtx.ChatID)
