@@ -56,6 +56,41 @@ type StreamSink interface {
 	// OnToolResult is called after a tool finishes, with the textual result and
 	// whether it was an error.
 	OnToolResult(name string, result string, isErr bool)
+	// OnTurnEnd is called once per assistant turn, after the model stream
+	// closes, with that turn's token accounting and stop reason. Cache fields
+	// on the usage report how much of the prompt was served from the prompt
+	// cache, which is the only way to tell whether cache breakpoints are
+	// actually landing.
+	OnTurnEnd(usage anthropic.BetaUsage, stopReason anthropic.BetaStopReason)
+}
+
+// Usage accumulates token counts across the turns of a single run. The engine
+// keeps one per Run for its run-level log line; callers that need a per-run
+// total for their own reporting can accumulate the OnTurnEnd values the same
+// way instead of re-deriving the arithmetic.
+type Usage struct {
+	InputTokens              int64
+	OutputTokens             int64
+	CacheReadInputTokens     int64
+	CacheCreationInputTokens int64
+}
+
+// Add folds one turn's usage into the accumulator.
+func (u *Usage) Add(t anthropic.BetaUsage) {
+	u.InputTokens += t.InputTokens
+	u.OutputTokens += t.OutputTokens
+	u.CacheReadInputTokens += t.CacheReadInputTokens
+	u.CacheCreationInputTokens += t.CacheCreationInputTokens
+}
+
+// LogFields renders the accumulator for structured logging.
+func (u Usage) LogFields() logrus.Fields {
+	return logrus.Fields{
+		"input_tokens":   u.InputTokens,
+		"output_tokens":  u.OutputTokens,
+		"cache_read":     u.CacheReadInputTokens,
+		"cache_creation": u.CacheCreationInputTokens,
+	}
 }
 
 // Engine runs the ReAct loop against a configured model and toolset.
@@ -162,6 +197,7 @@ func (e *Engine) Run(
 	messages = append(messages, anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(userText)))
 
 	var finalText string
+	var runUsage Usage
 
 	logrus.WithFields(logrus.Fields{
 		"model":         e.model,
@@ -182,6 +218,7 @@ func (e *Engine) Run(
 		if err != nil {
 			return messages, finalText, err
 		}
+		runUsage.Add(msg.Usage)
 		messages = append(messages, msg.ToParam())
 		if turnText != "" {
 			finalText = turnText
@@ -203,10 +240,10 @@ func (e *Engine) Run(
 
 		if len(toolUses) == 0 {
 			// No tools requested — this is the final answer.
-			logrus.WithFields(logrus.Fields{
+			logrus.WithFields(runUsage.LogFields()).WithFields(logrus.Fields{
 				"iterations": i + 1,
 				"final_len":  len(finalText),
-			}).Debug("afk engine: run complete (final answer)")
+			}).Info("afk engine: run complete (final answer)")
 			return messages, finalText, nil
 		}
 
@@ -217,7 +254,7 @@ func (e *Engine) Run(
 	// Loop exhausted while still requesting tools. If no text was ever produced
 	// the caller (and user) would otherwise see nothing despite many tool calls,
 	// so log loudly with enough context to debug.
-	logrus.WithFields(logrus.Fields{
+	logrus.WithFields(runUsage.LogFields()).WithFields(logrus.Fields{
 		"model":         e.model,
 		"maxIterations": e.maxIterations,
 		"final_len":     len(finalText),
@@ -303,7 +340,9 @@ func (e *Engine) streamTurn(
 		}
 	}
 
-	logrus.WithFields(logrus.Fields{
+	turnUsage := Usage{}
+	turnUsage.Add(msg.Usage)
+	logrus.WithFields(turnUsage.LogFields()).WithFields(logrus.Fields{
 		"model":           e.model,
 		"stop_reason":     msg.StopReason,
 		"text_len":        len(turnText),
@@ -316,6 +355,9 @@ func (e *Engine) streamTurn(
 	// Aggregated mode: emit the whole turn's text once, after the stream ends.
 	if sink != nil && !e.streamText && turnText != "" {
 		sink.OnText(turnText)
+	}
+	if sink != nil {
+		sink.OnTurnEnd(msg.Usage, msg.StopReason)
 	}
 	return msg, turnText, nil
 }

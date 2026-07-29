@@ -166,6 +166,14 @@ type engineSink struct {
 	iteration    int
 	textMessages int
 	toolCalls    int
+
+	// usage accumulates every turn's token accounting for the run, and
+	// lastStopReason records how the final turn ended. Both are reported on the
+	// completion log line and in the executor Result metadata: @tb runs on the
+	// user's own gateway quota, so "what did that turn cost, and how much of it
+	// was served from cache" has to be answerable per run.
+	usage          afk.Usage
+	lastStopReason anthropic.BetaStopReason
 }
 
 func (s *engineSink) OnText(delta string) {
@@ -221,6 +229,18 @@ func (s *engineSink) OnToolResult(name string, result string, isErr bool) {
 	})
 }
 
+func (s *engineSink) OnTurnEnd(usage anthropic.BetaUsage, stopReason anthropic.BetaStopReason) {
+	s.usage.Add(usage)
+	s.lastStopReason = stopReason
+	logrus.WithFields(logrus.Fields{
+		"iteration":   s.iteration,
+		"stop_reason": stopReason,
+		"input":       usage.InputTokens,
+		"output":      usage.OutputTokens,
+		"cache_read":  usage.CacheReadInputTokens,
+	}).Debug("SmartGuide sink: turn end")
+}
+
 // ExecuteWithHandler runs one user turn through the ReAct engine, streaming
 // intermediate output to the handler and reporting completion. It returns an
 // agentboot.Result for compatibility with the executor layer.
@@ -271,6 +291,11 @@ func (a *TinglyBoxAgent) ExecuteWithHandler(
 	result.Output = finalText
 	result.ExitCode = 0
 	result.Duration = duration
+	result.Metadata["input_tokens"] = sink.usage.InputTokens
+	result.Metadata["output_tokens"] = sink.usage.OutputTokens
+	result.Metadata["cache_read_input_tokens"] = sink.usage.CacheReadInputTokens
+	result.Metadata["cache_creation_input_tokens"] = sink.usage.CacheCreationInputTokens
+	result.Metadata["stop_reason"] = string(sink.lastStopReason)
 
 	if handler != nil {
 		handler.OnComplete(&CompletionResult{
@@ -280,13 +305,14 @@ func (a *TinglyBoxAgent) ExecuteWithHandler(
 		})
 	}
 
-	logEntry := logrus.WithFields(logrus.Fields{
+	logEntry := logrus.WithFields(sink.usage.LogFields()).WithFields(logrus.Fields{
 		"duration_ms":   duration.Milliseconds(),
 		"session_id":    toolCtx.SessionID,
 		"final_len":     len(finalText),
 		"history_msgs":  len(messages),
 		"messages_sent": sink.textMessages,
 		"tool_calls":    sink.toolCalls,
+		"stop_reason":   sink.lastStopReason,
 	})
 	// A run that produced tool calls but no final text leaves the user with no
 	// visible reply — surface it at WARN so it is greppable, not buried.

@@ -73,6 +73,12 @@ type recordingSink struct {
 	textFrags   []string
 	toolCalls   []string
 	toolResults []toolResult
+	turnEnds    []turnEnd
+}
+
+type turnEnd struct {
+	usage      anthropic.BetaUsage
+	stopReason anthropic.BetaStopReason
 }
 
 type toolResult struct {
@@ -97,6 +103,12 @@ func (s *recordingSink) OnToolResult(name, result string, isErr bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.toolResults = append(s.toolResults, toolResult{name: name, result: result, isErr: isErr})
+}
+
+func (s *recordingSink) OnTurnEnd(usage anthropic.BetaUsage, stopReason anthropic.BetaStopReason) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.turnEnds = append(s.turnEnds, turnEnd{usage: usage, stopReason: stopReason})
 }
 
 func (s *recordingSink) joinedText() string {
@@ -343,4 +355,80 @@ func TestEngineRun_TextAndStreamedToolNotLost(t *testing.T) {
 	assert.Equal(t, "Here is the answer.", finalText)
 	// Streamed tool input must have reached the tool (not empty {}).
 	assert.JSONEq(t, `{"city":"Paris"}`, string(tool.lastArgs), "streamed tool input was lost")
+}
+
+// usageTextResponse is textResponse with explicit cache accounting on
+// message_start, so tests can assert the cache fields survive the SDK
+// accumulator and reach the sink. Those fields are the only evidence that
+// prompt-cache breakpoints are working, so they must not be dropped.
+func usageTextResponse(inputTokens, cacheRead, cacheCreation int64, text string) string {
+	w := &sseWriter{}
+	w.event("message_start", fmt.Sprintf(`{"type":"message_start","message":{"id":"msg_u","type":"message","role":"assistant","model":"test","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":%d,"output_tokens":1,"cache_read_input_tokens":%d,"cache_creation_input_tokens":%d}}}`, inputTokens, cacheRead, cacheCreation))
+	w.event("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
+	delta, _ := json.Marshal(text)
+	w.event("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":%s}}`, delta))
+	w.event("content_block_stop", `{"type":"content_block_stop","index":0}`)
+	w.event("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":7}}`)
+	w.event("message_stop", `{"type":"message_stop"}`)
+	return w.String()
+}
+
+// TestEngineRun_UsageReported checks that each assistant turn reports its token
+// accounting and stop reason to the sink, including the cache counters.
+func TestEngineRun_UsageReported(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeSSE(t, w, usageTextResponse(100, 80, 20, "cached hello"))
+	}))
+	defer srv.Close()
+
+	eng, err := NewEngine(Config{BaseURL: srv.URL, APIKey: "dummy-key", Model: "dummy-model"})
+	require.NoError(t, err)
+
+	sink := &recordingSink{}
+	_, _, err = eng.Run(context.Background(), nil, "hi", sink)
+	require.NoError(t, err)
+
+	require.Len(t, sink.turnEnds, 1)
+	got := sink.turnEnds[0]
+	assert.Equal(t, int64(100), got.usage.InputTokens)
+	assert.Equal(t, int64(7), got.usage.OutputTokens, "message_delta usage should win for output tokens")
+	assert.Equal(t, int64(80), got.usage.CacheReadInputTokens)
+	assert.Equal(t, int64(20), got.usage.CacheCreationInputTokens)
+	assert.Equal(t, anthropic.BetaStopReason("end_turn"), got.stopReason)
+}
+
+// TestEngineRun_UsageAccumulatesAcrossTurns checks that a tool round-trip
+// reports usage once per assistant turn, and that Usage.Add sums them the way
+// callers are expected to.
+func TestEngineRun_UsageAccumulatesAcrossTurns(t *testing.T) {
+	tool := &fakeTool{name: "get_weather", result: "72F"}
+
+	var reqCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&reqCount, 1) == 1 {
+			writeSSE(t, w, toolUseResponse("toolu_1", "get_weather", `{"city":"Paris"}`))
+			return
+		}
+		writeSSE(t, w, usageTextResponse(200, 150, 0, "nice out"))
+	}))
+	defer srv.Close()
+
+	eng, err := NewEngine(Config{BaseURL: srv.URL, APIKey: "dummy-key", Model: "dummy-model", Tools: []Tool{tool}})
+	require.NoError(t, err)
+
+	sink := &recordingSink{}
+	_, _, err = eng.Run(context.Background(), nil, "weather?", sink)
+	require.NoError(t, err)
+
+	require.Len(t, sink.turnEnds, 2, "one OnTurnEnd per assistant turn")
+	assert.Equal(t, anthropic.BetaStopReason("tool_use"), sink.turnEnds[0].stopReason)
+	assert.Equal(t, anthropic.BetaStopReason("end_turn"), sink.turnEnds[1].stopReason)
+
+	var total Usage
+	for _, te := range sink.turnEnds {
+		total.Add(te.usage)
+	}
+	assert.Equal(t, int64(201), total.InputTokens, "1 from the tool turn + 200 from the final turn")
+	assert.Equal(t, int64(12), total.OutputTokens, "5 from the tool turn + 7 from the final turn")
+	assert.Equal(t, int64(150), total.CacheReadInputTokens)
 }
