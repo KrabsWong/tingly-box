@@ -169,7 +169,64 @@ func NewEngine(cfg Config) (*Engine, error) {
 	for _, t := range cfg.Tools {
 		e.registerTool(t)
 	}
+	// Static-prefix cache breakpoint. The request renders as tools -> system ->
+	// messages, and a breakpoint caches everything up to and including its own
+	// block, so one breakpoint on the system prompt covers the tools too. Only
+	// when there is no system prompt do we fall back to marking the last tool,
+	// which is otherwise redundant with it.
+	if cfg.System == "" && len(e.toolParams) > 0 {
+		if last := e.toolParams[len(e.toolParams)-1].OfTool; last != nil {
+			last.CacheControl = anthropic.NewBetaCacheControlEphemeralParam()
+		}
+	}
 	return e, nil
+}
+
+// withConversationCacheBreakpoint returns messages with an ephemeral cache
+// breakpoint on the final content block, so the whole conversation so far is
+// cached and the next request reads it back.
+//
+// The breakpoint rolls forward every request rather than being pinned once.
+// That is not just for coverage: a breakpoint only searches backwards a bounded
+// number of content blocks for an existing cache entry, and a single tool-heavy
+// turn can append more blocks than that window — a pinned breakpoint would go
+// silently cold exactly on the runs that cost the most.
+//
+// It copies the tail rather than writing in place. The blocks are pointers into
+// the caller's history, which Smart Guide persists verbatim; an in-place write
+// would leak breakpoints into the stored session, and a reloaded conversation
+// carrying more than the per-request breakpoint limit is rejected outright.
+func withConversationCacheBreakpoint(messages []anthropic.BetaMessageParam) []anthropic.BetaMessageParam {
+	if len(messages) == 0 {
+		return messages
+	}
+	last := messages[len(messages)-1]
+	if len(last.Content) == 0 {
+		return messages
+	}
+
+	blocks := append([]anthropic.BetaContentBlockParamUnion(nil), last.Content...)
+	tail := blocks[len(blocks)-1]
+	switch {
+	case tail.OfText != nil:
+		b := *tail.OfText
+		b.CacheControl = anthropic.NewBetaCacheControlEphemeralParam()
+		blocks[len(blocks)-1] = anthropic.BetaContentBlockParamUnion{OfText: &b}
+	case tail.OfToolResult != nil:
+		b := *tail.OfToolResult
+		b.CacheControl = anthropic.NewBetaCacheControlEphemeralParam()
+		blocks[len(blocks)-1] = anthropic.BetaContentBlockParamUnion{OfToolResult: &b}
+	default:
+		// Some other block type ends the turn. Skipping it costs a cache write,
+		// not correctness — the static prefix breakpoint still applies.
+		return messages
+	}
+
+	out := append([]anthropic.BetaMessageParam(nil), messages...)
+	lastCopy := last
+	lastCopy.Content = blocks
+	out[len(out)-1] = lastCopy
+	return out
 }
 
 // registerTool adds a tool to the engine's dispatch table and param list.
@@ -275,10 +332,13 @@ func (e *Engine) streamTurn(
 	params := anthropic.BetaMessageNewParams{
 		Model:     anthropic.Model(e.model),
 		MaxTokens: e.maxTokens,
-		Messages:  messages,
+		Messages:  withConversationCacheBreakpoint(messages),
 	}
 	if e.system != "" {
-		params.System = []anthropic.BetaTextBlockParam{{Text: e.system}}
+		params.System = []anthropic.BetaTextBlockParam{{
+			Text:         e.system,
+			CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
+		}}
 	}
 	if e.temperature != nil {
 		params.Temperature = anthropic.Float(*e.temperature)

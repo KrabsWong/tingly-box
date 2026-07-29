@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -431,4 +432,198 @@ func TestEngineRun_UsageAccumulatesAcrossTurns(t *testing.T) {
 	assert.Equal(t, int64(201), total.InputTokens, "1 from the tool turn + 200 from the final turn")
 	assert.Equal(t, int64(12), total.OutputTokens, "5 from the tool turn + 7 from the final turn")
 	assert.Equal(t, int64(150), total.CacheReadInputTokens)
+}
+
+// capturingServer records the decoded request bodies the engine sends, so tests
+// can assert on cache_control placement in the actual wire payload.
+type capturingServer struct {
+	mu       sync.Mutex
+	bodies   []map[string]any
+	respond  func(n int) string
+	reqCount int
+}
+
+func (c *capturingServer) handler(t *testing.T) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(raw, &body))
+
+		c.mu.Lock()
+		c.bodies = append(c.bodies, body)
+		c.reqCount++
+		n := c.reqCount
+		c.mu.Unlock()
+
+		writeSSE(t, w, c.respond(n))
+	}
+}
+
+func (c *capturingServer) body(i int) map[string]any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bodies[i]
+}
+
+// lastBlockCacheControl returns the cache_control of the final content block of
+// the final message in a captured request body, or nil when absent.
+func lastBlockCacheControl(t *testing.T, body map[string]any) map[string]any {
+	t.Helper()
+	msgs, ok := body["messages"].([]any)
+	require.True(t, ok, "request should carry messages")
+	require.NotEmpty(t, msgs)
+	last, ok := msgs[len(msgs)-1].(map[string]any)
+	require.True(t, ok)
+	blocks, ok := last["content"].([]any)
+	require.True(t, ok, "last message content should be a block list")
+	require.NotEmpty(t, blocks)
+	tail, ok := blocks[len(blocks)-1].(map[string]any)
+	require.True(t, ok)
+	cc, _ := tail["cache_control"].(map[string]any)
+	return cc
+}
+
+// TestEngineRun_CachesStaticPrefix checks the system prompt carries a cache
+// breakpoint. Rendering order is tools -> system -> messages and a breakpoint
+// covers everything up to its own block, so this one breakpoint caches the
+// tools too — which is why the tools themselves carry none.
+func TestEngineRun_CachesStaticPrefix(t *testing.T) {
+	srv := &capturingServer{respond: func(int) string { return textResponse("hi") }}
+	ts := httptest.NewServer(srv.handler(t))
+	defer ts.Close()
+
+	eng, err := NewEngine(Config{
+		BaseURL: ts.URL, APIKey: "dummy-key", Model: "dummy-model",
+		System: "you are a helpful guide",
+		Tools:  []Tool{&fakeTool{name: "get_weather", result: "72F"}},
+	})
+	require.NoError(t, err)
+
+	_, _, err = eng.Run(context.Background(), nil, "hi", &recordingSink{})
+	require.NoError(t, err)
+
+	body := srv.body(0)
+	system, ok := body["system"].([]any)
+	require.True(t, ok, "system should render as a block list")
+	require.Len(t, system, 1)
+	sysBlock := system[0].(map[string]any)
+	cc, ok := sysBlock["cache_control"].(map[string]any)
+	require.True(t, ok, "system block should carry a cache breakpoint")
+	assert.Equal(t, "ephemeral", cc["type"])
+
+	tools, ok := body["tools"].([]any)
+	require.True(t, ok)
+	require.Len(t, tools, 1)
+	_, hasCC := tools[0].(map[string]any)["cache_control"]
+	assert.False(t, hasCC, "system breakpoint already covers tools; marking them too would waste a breakpoint")
+}
+
+// TestEngineRun_CachesToolsWhenNoSystemPrompt covers the fallback: with no
+// system prompt there is no block to carry the static-prefix breakpoint, so it
+// moves to the last tool.
+func TestEngineRun_CachesToolsWhenNoSystemPrompt(t *testing.T) {
+	srv := &capturingServer{respond: func(int) string { return textResponse("hi") }}
+	ts := httptest.NewServer(srv.handler(t))
+	defer ts.Close()
+
+	eng, err := NewEngine(Config{
+		BaseURL: ts.URL, APIKey: "dummy-key", Model: "dummy-model",
+		Tools: []Tool{
+			&fakeTool{name: "first", result: "a"},
+			&fakeTool{name: "second", result: "b"},
+		},
+	})
+	require.NoError(t, err)
+
+	_, _, err = eng.Run(context.Background(), nil, "hi", &recordingSink{})
+	require.NoError(t, err)
+
+	tools, ok := srv.body(0)["tools"].([]any)
+	require.True(t, ok)
+	require.Len(t, tools, 2)
+	_, firstHasCC := tools[0].(map[string]any)["cache_control"]
+	assert.False(t, firstHasCC, "only the final tool should close the cached prefix")
+	cc, ok := tools[1].(map[string]any)["cache_control"].(map[string]any)
+	require.True(t, ok, "last tool should carry the static-prefix breakpoint")
+	assert.Equal(t, "ephemeral", cc["type"])
+}
+
+// TestEngineRun_RollingConversationBreakpoint checks the conversation
+// breakpoint lands on the final block of every request and moves forward as the
+// conversation grows — a pinned breakpoint would fall out of the lookback
+// window on tool-heavy runs and stop being read.
+func TestEngineRun_RollingConversationBreakpoint(t *testing.T) {
+	srv := &capturingServer{respond: func(n int) string {
+		if n == 1 {
+			return toolUseResponse("toolu_1", "get_weather", `{"city":"Paris"}`)
+		}
+		return textResponse("nice out")
+	}}
+	ts := httptest.NewServer(srv.handler(t))
+	defer ts.Close()
+
+	eng, err := NewEngine(Config{
+		BaseURL: ts.URL, APIKey: "dummy-key", Model: "dummy-model",
+		System: "guide", Tools: []Tool{&fakeTool{name: "get_weather", result: "72F"}},
+	})
+	require.NoError(t, err)
+
+	_, _, err = eng.Run(context.Background(), nil, "weather?", &recordingSink{})
+	require.NoError(t, err)
+
+	// Request 1 ends with the user's text block; request 2 ends with the
+	// tool_result block. Both must carry the breakpoint.
+	first := lastBlockCacheControl(t, srv.body(0))
+	require.NotNil(t, first, "user text block should carry the rolling breakpoint")
+	assert.Equal(t, "ephemeral", first["type"])
+
+	second := lastBlockCacheControl(t, srv.body(1))
+	require.NotNil(t, second, "tool_result block should carry the rolling breakpoint")
+	assert.Equal(t, "ephemeral", second["type"])
+
+	// The breakpoint moved rather than accumulating: exactly one block in the
+	// second request carries cache_control.
+	msgs := srv.body(1)["messages"].([]any)
+	marked := 0
+	for _, m := range msgs {
+		for _, b := range m.(map[string]any)["content"].([]any) {
+			if _, ok := b.(map[string]any)["cache_control"]; ok {
+				marked++
+			}
+		}
+	}
+	assert.Equal(t, 1, marked, "stale breakpoints must not accumulate across a run")
+}
+
+// TestEngineRun_CacheBreakpointNotPersistedToHistory is the load-bearing one:
+// the returned history is persisted verbatim by Smart Guide and replayed on the
+// next turn. If breakpoints were written into it in place they would accumulate
+// across turns and eventually exceed the per-request limit, failing the request.
+func TestEngineRun_CacheBreakpointNotPersistedToHistory(t *testing.T) {
+	srv := &capturingServer{respond: func(n int) string {
+		if n == 1 {
+			return toolUseResponse("toolu_1", "get_weather", `{"city":"Paris"}`)
+		}
+		return textResponse("nice out")
+	}}
+	ts := httptest.NewServer(srv.handler(t))
+	defer ts.Close()
+
+	eng, err := NewEngine(Config{
+		BaseURL: ts.URL, APIKey: "dummy-key", Model: "dummy-model",
+		System: "guide", Tools: []Tool{&fakeTool{name: "get_weather", result: "72F"}},
+	})
+	require.NoError(t, err)
+
+	msgs, _, err := eng.Run(context.Background(), nil, "weather?", &recordingSink{})
+	require.NoError(t, err)
+
+	// Round-trip the returned history the way the session store does, and check
+	// no cache_control survived into it.
+	data, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "cache_control",
+		"cache breakpoints belong to the request, not the persisted conversation")
 }
