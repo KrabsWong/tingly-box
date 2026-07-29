@@ -243,87 +243,81 @@ func (e *Engine) registerTool(t Tool) {
 	e.toolParams = append(e.toolParams, anthropic.BetaToolUnionParam{OfTool: &p})
 }
 
-// Run executes the ReAct loop. It appends the user prompt to history, then
-// streams/executes until the model produces a final answer (no tool_use) or the
-// iteration budget is reached.
+// StepResult is everything one step produced.
 //
-// history is the prior conversation as native SDK beta message params (may be
-// empty). It returns the full updated message slice (history + this exchange)
-// so the caller can persist it, plus the final assistant text.
+// A step is one model call plus the tool batch that call requested. It is the
+// unit the loop above it advances in, and the unit persistence and steering
+// hang off — which is why it reports its own output rather than mutating a
+// shared conversation slice.
+type StepResult struct {
+	// Messages are what this step appends to the conversation: the assistant
+	// turn, followed by a user turn carrying tool results when tools ran.
+	Messages []anthropic.BetaMessageParam
+	// Text is this step's assistant text, empty for a tool-only step.
+	Text string
+	// Usage and StopReason are the model's accounting for this step.
+	Usage      anthropic.BetaUsage
+	StopReason anthropic.BetaStopReason
+	// ToolCalls is how many tools this step invoked.
+	ToolCalls int
+	// NeedsAnotherStep reports that the model asked for tools. Their results
+	// are already in Messages, and the model has to be shown them, so the run
+	// is not finished no matter what else this step produced.
+	NeedsAnotherStep bool
+}
+
+// Step runs one model call against the given conversation and executes whatever
+// tools it requests. It does not mutate messages; the caller decides what to do
+// with the result.
+func (e *Engine) Step(
+	ctx context.Context,
+	messages []anthropic.BetaMessageParam,
+	sink StreamSink,
+) (StepResult, error) {
+	msg, turnText, err := e.streamTurn(ctx, messages, sink)
+	if err != nil {
+		return StepResult{}, err
+	}
+
+	res := StepResult{
+		Messages:   []anthropic.BetaMessageParam{msg.ToParam()},
+		Text:       turnText,
+		Usage:      msg.Usage,
+		StopReason: msg.StopReason,
+	}
+
+	// Collect tool_use blocks from the SDK-native content slice.
+	var toolUses []anthropic.BetaContentBlockUnion
+	for _, block := range msg.Content {
+		if block.Type == "tool_use" {
+			toolUses = append(toolUses, block)
+		}
+	}
+	if len(toolUses) == 0 {
+		return res, nil
+	}
+
+	results := e.dispatchTools(ctx, toolUses, sink)
+	res.Messages = append(res.Messages, anthropic.NewBetaUserMessage(results...))
+	res.ToolCalls = len(toolUses)
+	res.NeedsAnotherStep = true
+	return res, nil
+}
+
+// Run executes a whole user turn and returns the updated conversation plus the
+// final assistant text.
+//
+// It is a thin wrapper over a Harness with no log — the loop itself lives
+// there, because everything that needs to act between steps (persistence,
+// steering, compaction) acts at that layer, not inside a model call.
 func (e *Engine) Run(
 	ctx context.Context,
 	history []anthropic.BetaMessageParam,
 	userText string,
 	sink StreamSink,
 ) ([]anthropic.BetaMessageParam, string, error) {
-	messages := append([]anthropic.BetaMessageParam(nil), history...)
-	messages = append(messages, anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(userText)))
-
-	var finalText string
-	var runUsage Usage
-
-	logrus.WithFields(logrus.Fields{
-		"model":         e.model,
-		"history_msgs":  len(history),
-		"prompt_len":    len(userText),
-		"tools":         len(e.tools),
-		"maxIterations": e.maxIterations,
-		"stream_text":   e.streamText,
-	}).Debug("afk engine: run start")
-
-	for i := 0; i < e.maxIterations; i++ {
-		if err := ctx.Err(); err != nil {
-			logrus.WithError(err).WithField("iteration", i).Debug("afk engine: context cancelled")
-			return messages, finalText, err
-		}
-
-		msg, turnText, err := e.streamTurn(ctx, messages, sink)
-		if err != nil {
-			return messages, finalText, err
-		}
-		runUsage.Add(msg.Usage)
-		messages = append(messages, msg.ToParam())
-		if turnText != "" {
-			finalText = turnText
-		}
-
-		// Collect tool_use blocks from the SDK-native content slice.
-		var toolUses []anthropic.BetaContentBlockUnion
-		for _, block := range msg.Content {
-			if block.Type == "tool_use" {
-				toolUses = append(toolUses, block)
-			}
-		}
-
-		logrus.WithFields(logrus.Fields{
-			"iteration": i,
-			"turn_text": len(turnText),
-			"tool_uses": len(toolUses),
-		}).Debug("afk engine: iteration result")
-
-		if len(toolUses) == 0 {
-			// No tools requested — this is the final answer.
-			logrus.WithFields(runUsage.LogFields()).WithFields(logrus.Fields{
-				"iterations": i + 1,
-				"final_len":  len(finalText),
-			}).Info("afk engine: run complete (final answer)")
-			return messages, finalText, nil
-		}
-
-		results := e.dispatchTools(ctx, toolUses, sink)
-		messages = append(messages, anthropic.NewBetaUserMessage(results...))
-	}
-
-	// Loop exhausted while still requesting tools. If no text was ever produced
-	// the caller (and user) would otherwise see nothing despite many tool calls,
-	// so log loudly with enough context to debug.
-	logrus.WithFields(runUsage.LogFields()).WithFields(logrus.Fields{
-		"model":         e.model,
-		"maxIterations": e.maxIterations,
-		"final_len":     len(finalText),
-		"had_text":      finalText != "",
-	}).Warn("afk engine: hit max iterations without a tool-free final answer")
-	return messages, finalText, nil
+	res, err := NewHarness(e, nil).Run(ctx, history, userText, sink)
+	return res.Messages, res.FinalText, err
 }
 
 // streamTurn runs one model call via the Beta Messages API, streaming text to

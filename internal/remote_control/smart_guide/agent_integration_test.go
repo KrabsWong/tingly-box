@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tingly-dev/tingly-box/afk"
+	"github.com/tingly-dev/tingly-box/afk/session"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	anthropicvm "github.com/tingly-dev/tingly-box/vmodel/anthropic"
 	"github.com/tingly-dev/tingly-box/vmodel/virtualserver"
@@ -233,6 +235,9 @@ func rebuildEngineWithTools(t *testing.T, agent *TinglyBoxAgent, baseURL, model 
 	})
 	require.NoError(t, err)
 	agent.engine = eng
+	// The agent runs through its harness, not the engine directly, so a swapped
+	// engine only takes effect once the harness wraps it.
+	agent.harness = afk.NewHarness(eng, nil)
 }
 
 // TestExecuteWithHandler_PlainText drives a no-tool turn and asserts streamed
@@ -524,4 +529,45 @@ func TestExecuteWithHandler_ThinkingSurfacesOnItsOwnChannel(t *testing.T) {
 	// The run produced no text block, so it has no answer to report. Claiming
 	// the reasoning as the output would make a non-answer look like an answer.
 	assert.Empty(t, res.Output, "reasoning is not the run's final output")
+}
+
+// TestExecuteWithHandler_CheckpointsToSessionLog is the end-to-end proof that
+// the wiring is live: a run handed a session log writes to it as steps complete,
+// so a turn interrupted after its tools have already touched the user's machine
+// keeps that work instead of being discarded.
+func TestExecuteWithHandler_CheckpointsToSessionLog(t *testing.T) {
+	const model = "checkpointing"
+	mt := newMultiTurnModel(model,
+		turnScript{text: "Checking.", toolName: "lookup", toolArgs: map[string]any{"q": "x"}},
+		turnScript{text: "All done."},
+	)
+	baseURL := newVModelServer(t, mt)
+
+	logPath := filepath.Join(t.TempDir(), "chat.jsonl")
+	sess, err := session.Open(logPath)
+	require.NoError(t, err)
+
+	tool := &recordingTool{name: "lookup"}
+	agent := newTestAgent(t, baseURL, model, &AgentConfig{ChatID: "cp1"})
+	eng, err := afk.NewEngine(afk.Config{BaseURL: baseURL, APIKey: "test-key", Model: model, Tools: []afk.Tool{tool}})
+	require.NoError(t, err)
+	agent.engine = eng
+	agent.harness = afk.NewHarness(eng, sess)
+
+	handler := &recordingHandler{t: t}
+	_, err = agent.ExecuteWithHandler(context.Background(), "do a thing", &ToolContext{ChatID: "cp1"}, handler)
+	require.NoError(t, err)
+
+	// Read the log back from disk, not from the in-memory session: durability
+	// is the claim being tested.
+	onDisk, err := session.Open(logPath)
+	require.NoError(t, err)
+	logged := onDisk.Messages()
+
+	require.Equal(t, len(agent.History()), len(logged),
+		"everything the run produced should be on disk")
+	require.NotEmpty(t, logged)
+	assert.Equal(t, sdk.BetaMessageParamRoleUser, logged[0].Role, "the prompt is logged too")
+	assert.Equal(t, sdk.BetaMessageParamRoleAssistant, logged[len(logged)-1].Role,
+		"a persisted transcript must be replayable, so it cannot end on a user turn")
 }

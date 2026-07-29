@@ -53,8 +53,23 @@ func (s *SessionStore) legacyPath(chatID string) string {
 	return filepath.Join(s.dir, fs.SafeFileKey(chatID)+"-smartguide.json")
 }
 
-// open loads a chat's log, importing a legacy whole-file session if this is the
-// first time the chat has been opened since the format changed.
+// Open returns a chat's live session log, importing a legacy whole-file session
+// if this is the first time the chat has been opened since the format changed.
+//
+// Callers that want a run to be checkpointed as it progresses hold on to this
+// and hand it to the harness, instead of snapshotting the whole history at the
+// end. A nil store yields a nil session, which the harness reads as "no
+// durability wanted".
+func (s *SessionStore) Open(chatID string) (*session.Session, error) {
+	if s == nil {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.open(chatID)
+}
+
+// open loads a chat's log. Callers must hold s.mu.
 func (s *SessionStore) open(chatID string) (*session.Session, error) {
 	sess, err := session.Open(s.path(chatID))
 	if err != nil {

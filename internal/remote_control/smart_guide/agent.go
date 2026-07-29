@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/tingly-dev/tingly-box/afk"
+	"github.com/tingly-dev/tingly-box/afk/session"
 	"github.com/tingly-dev/tingly-box/afk/skill"
 	"github.com/tingly-dev/tingly-box/agentboot"
 )
@@ -28,6 +29,7 @@ const (
 // tingly-agentscope runtime.
 type TinglyBoxAgent struct {
 	engine   *afk.Engine
+	harness  *afk.Harness
 	config   *SmartGuideConfig
 	executor *ToolExecutor
 
@@ -60,6 +62,11 @@ type AgentConfig struct {
 	// ToolContext for file send capability and cross-path approval. If nil,
 	// the send_file tool is not registered.
 	ToolCtx *ToolContext
+
+	// SessionLog is the chat's append-only conversation log. When set, the run
+	// is checkpointed to it as each step completes, so an interrupted turn keeps
+	// the work it already did. Nil disables mid-run persistence.
+	SessionLog afk.Log
 }
 
 // NewTinglyBoxAgent creates a new Smart Guide agent.
@@ -111,6 +118,10 @@ func NewTinglyBoxAgent(config *AgentConfig) (*TinglyBoxAgent, error) {
 		return nil, fmt.Errorf("failed to build anthropic engine: %w", err)
 	}
 	tb.engine = engine
+	// A nil SessionLog is a typed-nil hazard: afk.Log is an interface, and a nil
+	// *session.Session stored in one is not == nil. Normalize it here so the
+	// harness's "no log" path is actually reachable.
+	tb.harness = afk.NewHarness(engine, normalizeLog(config.SessionLog))
 
 	logrus.WithFields(logrus.Fields{
 		"model":    config.Model,
@@ -118,6 +129,19 @@ func NewTinglyBoxAgent(config *AgentConfig) (*TinglyBoxAgent, error) {
 	}).Info("Created SmartGuide agent (anthropic engine)")
 
 	return tb, nil
+}
+
+// normalizeLog turns a typed-nil session pointer back into a nil interface.
+//
+// Callers naturally write `SessionLog: sess` where sess came from a store that
+// may be disabled and returns (nil, nil). Stored in an interface, that nil
+// pointer is not == nil, so the harness would take the "persist" path and call
+// Append on a nil receiver every checkpoint.
+func normalizeLog(log afk.Log) afk.Log {
+	if sess, ok := log.(*session.Session); ok && sess == nil {
+		return nil
+	}
+	return log
 }
 
 // loadSkills discovers the skills available to this agent, once, at
@@ -327,11 +351,12 @@ func (a *TinglyBoxAgent) ExecuteWithHandler(
 	}
 
 	sink := &engineSink{handler: handler}
-	messages, finalText, err := a.engine.Run(ctx, a.history, prompt, sink)
+	run, err := a.harness.Run(ctx, a.history, prompt, sink)
 	duration := time.Since(startTime)
+	finalText := run.FinalText
 
 	// Persist whatever was produced so a mid-run cancel still advances history.
-	a.history = messages
+	a.history = run.Messages
 
 	if err != nil {
 		result.ExitCode = 1
@@ -371,7 +396,9 @@ func (a *TinglyBoxAgent) ExecuteWithHandler(
 		"duration_ms":   duration.Milliseconds(),
 		"session_id":    toolCtx.SessionID,
 		"final_len":     len(finalText),
-		"history_msgs":  len(messages),
+		"history_msgs":  len(run.Messages),
+		"steps":         run.Steps,
+		"interrupted":   run.Interrupted,
 		"messages_sent": sink.textMessages,
 		"tool_calls":    sink.toolCalls,
 		"thinking_msgs": sink.thinkingMessages,
