@@ -9,6 +9,8 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tingly-dev/tingly-box/afk/session"
 )
 
 // ============================================================================
@@ -272,11 +274,9 @@ func TestSessionStore_Clear(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1, "cleared history should be archived, not deleted")
 
-	archived, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	archived, err := session.Open(filepath.Join(dir, entries[0].Name()))
 	require.NoError(t, err)
-	var archivedMsgs []anthropic.BetaMessageParam
-	require.NoError(t, json.Unmarshal(archived, &archivedMsgs))
-	require.Len(t, archivedMsgs, 1, "archived file should hold the pre-clear history")
+	require.Len(t, archived.Messages(), 1, "archived log should hold the pre-clear history")
 
 	// Clearing a chat with no live history is not an error.
 	require.NoError(t, store.Clear("chat-does-not-exist"))

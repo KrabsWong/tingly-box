@@ -1,0 +1,203 @@
+// Package session persists an agent conversation as an append-only log.
+//
+// The log is JSONL: one entry per line, written with O_APPEND and never
+// rewritten. That is the whole point of the format — a conversation is a
+// sequence of things that happened, and the previous whole-file-rewrite store
+// had to serialize the entire history on every turn and could leave a truncated
+// file if the process died mid-write. Appending a line cannot corrupt the lines
+// before it.
+//
+// Entries are typed rather than bare messages so the log can carry facts that
+// are not themselves conversation — compaction markers being the next one —
+// without changing the file format again.
+package session
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/sirupsen/logrus"
+)
+
+var logger = logrus.WithField("package", "afk.session")
+
+// EntryType discriminates the records in the log.
+type EntryType string
+
+const (
+	// EntryMessage carries one conversation message.
+	EntryMessage EntryType = "message"
+)
+
+// Entry is a single record in the log.
+type Entry struct {
+	Type    EntryType                   `json:"type"`
+	Message *anthropic.BetaMessageParam `json:"message,omitempty"`
+}
+
+// Session is an append-only conversation log backed by one file.
+//
+// It is not safe for concurrent use by multiple goroutines; callers serialize
+// per conversation, which is how chats behave anyway.
+type Session struct {
+	path    string
+	entries []Entry
+}
+
+// Open reads the log at path, creating nothing until something is appended. A
+// missing file is an empty session, not an error — a chat's first turn has no
+// history to read.
+func Open(path string) (*Session, error) {
+	s := &Session{path: path}
+
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return s, nil
+		}
+		return nil, fmt.Errorf("open session %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	// Conversation turns carry tool output, so lines are far larger than
+	// bufio's 64KB default; without this a long turn stops the scan mid-file
+	// and the rest of the conversation silently disappears.
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+
+	for lineNo := 1; scanner.Scan(); lineNo++ {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var e Entry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			// A single unreadable line must not cost the user the rest of the
+			// conversation, which is exactly what the whole-file store did.
+			logger.WithError(err).WithFields(logrus.Fields{
+				"path": path, "line": lineNo,
+			}).Warn("skipping unreadable session entry")
+			continue
+		}
+		s.entries = append(s.entries, e)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read session %s: %w", path, err)
+	}
+	return s, nil
+}
+
+// Messages projects the log to the conversation the model sees.
+func (s *Session) Messages() []anthropic.BetaMessageParam {
+	msgs := make([]anthropic.BetaMessageParam, 0, len(s.entries))
+	for _, e := range s.entries {
+		if e.Type == EntryMessage && e.Message != nil {
+			msgs = append(msgs, *e.Message)
+		}
+	}
+	return msgs
+}
+
+// Len returns the number of messages currently in the log.
+func (s *Session) Len() int { return len(s.Messages()) }
+
+// Append writes messages to the end of the log and to the in-memory view. It is
+// all-or-nothing per call only in the sense that a failed write stops the
+// remaining messages; entries already flushed stay, because that is what an
+// append-only log means.
+func (s *Session) Append(msgs ...anthropic.BetaMessageParam) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+		return fmt.Errorf("create session dir: %w", err)
+	}
+	// 0600: this file is the user's whole conversation with the model.
+	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("open session for append: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	for i := range msgs {
+		m := msgs[i]
+		data, err := json.Marshal(Entry{Type: EntryMessage, Message: &m})
+		if err != nil {
+			return fmt.Errorf("encode session entry: %w", err)
+		}
+		if _, err := f.Write(append(data, '\n')); err != nil {
+			return fmt.Errorf("append session entry: %w", err)
+		}
+		s.entries = append(s.entries, Entry{Type: EntryMessage, Message: &m})
+	}
+	return f.Sync()
+}
+
+// AppendNew treats full as an extension of what is already logged and appends
+// only the part that is not.
+//
+// This is what lets a caller keep handing over the agent's whole history — the
+// shape it already had — while the file grows by a few lines instead of being
+// rewritten. It returns how many messages were added.
+//
+// A full that is shorter than the log means the history was rewritten rather
+// than extended, which nothing does yet. It is refused rather than guessed at:
+// appending a suffix computed from a mismatched base would interleave two
+// different conversations in one file.
+func (s *Session) AppendNew(full []anthropic.BetaMessageParam) (int, error) {
+	have := s.Len()
+	if len(full) < have {
+		logger.WithFields(logrus.Fields{
+			"path": s.path, "logged": have, "given": len(full),
+		}).Warn("refusing to append: history is shorter than the log")
+		return 0, nil
+	}
+	if len(full) == have {
+		return 0, nil
+	}
+	newOnes := full[have:]
+	if err := s.Append(newOnes...); err != nil {
+		return 0, err
+	}
+	return len(newOnes), nil
+}
+
+// Path returns the file backing this session.
+func (s *Session) Path() string { return s.path }
+
+// ImportLegacy seeds an empty log from a whole-file JSON array of messages,
+// the format the previous store wrote. It exists so upgrading does not silently
+// drop every existing conversation; it is a no-op once the log has entries.
+func (s *Session) ImportLegacy(legacyPath string) error {
+	if len(s.entries) > 0 {
+		return nil
+	}
+	data, err := os.ReadFile(legacyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var msgs []anthropic.BetaMessageParam
+	if err := json.Unmarshal(data, &msgs); err != nil {
+		logger.WithError(err).WithField("path", legacyPath).
+			Warn("legacy session unreadable, starting fresh")
+		return nil
+	}
+	if len(msgs) == 0 {
+		return nil
+	}
+	if err := s.Append(msgs...); err != nil {
+		return err
+	}
+	logger.WithFields(logrus.Fields{
+		"from": legacyPath, "to": s.path, "messages": len(msgs),
+	}).Info("imported legacy session into append-only log")
+	return nil
+}
