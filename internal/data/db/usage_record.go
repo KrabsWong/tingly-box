@@ -29,8 +29,12 @@ type UsageRecord struct {
 	InputTokens  int       `gorm:"column:input_tokens;not null"`
 	OutputTokens int       `gorm:"column:output_tokens;not null"`
 	TotalTokens  int       `gorm:"column:total_tokens;index;not null"`
-	// Cache tokens (combined cache creation and read)
+	// CacheInputTokens counts cache-READ hits only. Cache writes are billed
+	// separately (Anthropic cache_creation, OpenAI cache_write_tokens since
+	// gpt-5.6) and are counted in CacheWriteTokens — which is a SUBSET of
+	// InputTokens, not an addition to it.
 	CacheInputTokens int `gorm:"column:cache_input_tokens;default:0"`
+	CacheWriteTokens int `gorm:"column:cache_write_tokens;default:0"`
 	// System tokens (framework overhead, templates, etc.)
 	SystemTokens int    `gorm:"column:system_tokens;default:0"`
 	Status       string `gorm:"column:status;index;not null"` // success, error, partial
@@ -66,8 +70,9 @@ type UsageDailyRecord struct {
 	TotalTokens  int64  `gorm:"column:total_tokens;not null"`
 	InputTokens  int64  `gorm:"column:input_tokens;not null"`
 	OutputTokens int64  `gorm:"column:output_tokens;not null"`
-	// Cache tokens
+	// Cache tokens: reads, then writes (a subset of InputTokens)
 	CacheInputTokens int64 `gorm:"column:cache_input_tokens;default:0"`
+	CacheWriteTokens int64 `gorm:"column:cache_write_tokens;default:0"`
 	// System tokens
 	SystemTokens  int64 `gorm:"column:system_tokens;default:0"`
 	ErrorCount    int64 `gorm:"column:error_count;default:0"`
@@ -93,8 +98,9 @@ type UsageMonthlyRecord struct {
 	TotalTokens  int64  `gorm:"column:total_tokens;not null"`
 	InputTokens  int64  `gorm:"column:input_tokens;not null"`
 	OutputTokens int64  `gorm:"column:output_tokens;not null"`
-	// Cache tokens
+	// Cache tokens: reads, then writes (a subset of InputTokens)
 	CacheInputTokens int64 `gorm:"column:cache_input_tokens;default:0"`
+	CacheWriteTokens int64 `gorm:"column:cache_write_tokens;default:0"`
 	// System tokens
 	SystemTokens int64 `gorm:"column:system_tokens;default:0"`
 	ErrorCount   int64 `gorm:"column:error_count;default:0"`
@@ -213,6 +219,14 @@ func ensureUsageRecordSchema(db *gorm.DB) error {
 // ensureUsageDailySchema rebuilds the usage_daily table when it predates the
 // v2 layout (user_id dimension + streamed/latency sums). The table holds only
 // derived data and is repopulated lazily, so dropping it is safe.
+//
+// A newly summed column does NOT belong in that condition. usage_daily and
+// usage_records migrate together, so a column that is new here is new there
+// too: every historical record contributes 0, which is exactly what
+// AutoMigrate's zero-fill produces. Dropping would discard correct aggregates
+// and force a full re-aggregation over the whole retention window for no gain.
+// Only a column whose SOURCE already carries historical non-zero data — a
+// split or backfill of an existing measure — needs the rebuild.
 func ensureUsageDailySchema(db *gorm.DB) error {
 	m := db.Migrator()
 	if m.HasTable(&UsageDailyRecord{}) && !m.HasColumn(&UsageDailyRecord{}, "user_id") {
@@ -284,6 +298,7 @@ type AggregatedStat struct {
 	InputTokens      int64   `json:"total_input_tokens"`
 	OutputTokens     int64   `json:"total_output_tokens"`
 	CacheInputTokens int64   `json:"cache_input_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
 	SystemTokens     int64   `json:"system_tokens"`
 	AvgInputTokens   float64 `json:"avg_input_tokens"`
 	AvgOutputTokens  float64 `json:"avg_output_tokens"`
@@ -328,6 +343,7 @@ type aggBucket struct {
 	InputTokens      int64
 	OutputTokens     int64
 	CacheInputTokens int64
+	CacheWriteTokens int64
 	SystemTokens     int64
 	ErrorCount       int64
 	StreamedCount    int64
@@ -347,6 +363,7 @@ func (b aggBucket) toAggregatedStat() AggregatedStat {
 		InputTokens:      b.InputTokens,
 		OutputTokens:     b.OutputTokens,
 		CacheInputTokens: b.CacheInputTokens,
+		CacheWriteTokens: b.CacheWriteTokens,
 		SystemTokens:     b.SystemTokens,
 		AvgInputTokens:   avgFloat(float64(b.InputTokens), b.RequestCount),
 		AvgOutputTokens:  avgFloat(float64(b.OutputTokens), b.RequestCount),
@@ -436,6 +453,7 @@ func (us *UsageStore) rawAggBuckets(query UsageStatsQuery, applyLimit bool) ([]a
 		COALESCE(SUM(input_tokens), 0) as input_tokens,
 		COALESCE(SUM(output_tokens), 0) as output_tokens,
 		COALESCE(SUM(cache_input_tokens), 0) as cache_input_tokens,
+		COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens,
 		COALESCE(SUM(system_tokens), 0) as system_tokens,
 		COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) as error_count,
 		COALESCE(SUM(CASE WHEN streamed = true THEN 1 ELSE 0 END), 0) as streamed_count,
@@ -461,6 +479,7 @@ type TimeSeriesData struct {
 	InputTokens      int64   `json:"input_tokens"`
 	OutputTokens     int64   `json:"output_tokens"`
 	CacheInputTokens int64   `json:"cache_input_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
 	SystemTokens     int64   `json:"system_tokens"`
 	ErrorCount       int64   `json:"error_count"`
 	AvgLatencyMs     float64 `json:"avg_latency_ms"`
@@ -516,6 +535,7 @@ func (us *UsageStore) rawTimeSeries(interval string, startTime, endTime time.Tim
 		InputTokens      int64
 		OutputTokens     int64
 		CacheInputTokens int64
+		CacheWriteTokens int64
 		SystemTokens     int64
 		ErrorCount       int64
 		AvgLatency       float64
@@ -530,6 +550,7 @@ func (us *UsageStore) rawTimeSeries(interval string, startTime, endTime time.Tim
 		COALESCE(SUM(input_tokens), 0) as input_tokens,
 		COALESCE(SUM(output_tokens), 0) as output_tokens,
 		COALESCE(SUM(cache_input_tokens), 0) as cache_input_tokens,
+		COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens,
 		COALESCE(SUM(system_tokens), 0) as system_tokens,
 		COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) as error_count,
 		COALESCE(AVG(latency_ms), 0) as avg_latency
@@ -553,6 +574,7 @@ func (us *UsageStore) rawTimeSeries(interval string, startTime, endTime time.Tim
 			InputTokens:      r.InputTokens,
 			OutputTokens:     r.OutputTokens,
 			CacheInputTokens: r.CacheInputTokens,
+			CacheWriteTokens: r.CacheWriteTokens,
 			SystemTokens:     r.SystemTokens,
 			ErrorCount:       r.ErrorCount,
 			AvgLatencyMs:     r.AvgLatency,

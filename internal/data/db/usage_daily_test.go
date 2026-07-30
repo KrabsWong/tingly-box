@@ -39,6 +39,7 @@ func seedUsageRecords(t *testing.T, store *UsageStore, days int) int {
 					InputTokens:      100 + d*10 + h,
 					OutputTokens:     50 + h,
 					CacheInputTokens: 20 * i,
+					CacheWriteTokens: 7 * (d % 3),
 					SystemTokens:     5,
 					Status:           status,
 					LatencyMs:        200 + h*3,
@@ -113,6 +114,7 @@ func TestAggregatedStatsDailyMatchesRaw(t *testing.T) {
 				m.InputTokens != r.InputTokens ||
 				m.OutputTokens != r.OutputTokens ||
 				m.CacheInputTokens != r.CacheInputTokens ||
+				m.CacheWriteTokens != r.CacheWriteTokens ||
 				m.SystemTokens != r.SystemTokens ||
 				m.ErrorCount != r.ErrorCount ||
 				m.StreamedCount != r.StreamedCount {
@@ -213,6 +215,7 @@ func TestTimeSeriesDailyMatchesRaw(t *testing.T) {
 			m.InputTokens != r.InputTokens ||
 			m.OutputTokens != r.OutputTokens ||
 			m.CacheInputTokens != r.CacheInputTokens ||
+			m.CacheWriteTokens != r.CacheWriteTokens ||
 			m.ErrorCount != r.ErrorCount {
 			t.Fatalf("bucket %d mismatch:\nmerged=%+v\nraw=%+v", i, m, r)
 		}
@@ -354,5 +357,110 @@ func TestGetRecordsTotalWithoutFullCount(t *testing.T) {
 	}
 	if len(records) != total || gotTotal != int64(total) {
 		t.Fatalf("full GetRecords = (%d records, total %d), want (%d, %d)", len(records), gotTotal, total, total)
+	}
+}
+
+// TestUpgradeAddingSummedColumnKeepsAggregates covers the real upgrade path
+// for cache_write_tokens. usage_daily and usage_records gain the column in the
+// same migration, so every pre-upgrade record contributes 0 and AutoMigrate's
+// zero-fill IS the correct aggregate. Dropping usage_daily to "recompute" it
+// would discard 14 correct columns and force a full re-aggregation to arrive
+// at the same zeros.
+func TestUpgradeAddingSummedColumnKeepsAggregates(t *testing.T) {
+	sm, err := NewStoreManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStoreManager failed: %v", err)
+	}
+	defer sm.Close()
+	store := sm.Usage()
+
+	// Pre-upgrade traffic: the column does not exist yet, so nothing writes it.
+	seedUsageRecordsWithoutWrites(t, store, 8)
+
+	now := time.Now()
+	start := now.Add(-7 * 24 * time.Hour)
+	if _, _, err := store.timeSeriesFromDaily("day", start, now, nil); err != nil {
+		t.Fatalf("timeSeriesFromDaily failed: %v", err)
+	}
+	var before int64
+	if err := store.db.Model(&UsageDailyRecord{}).Count(&before).Error; err != nil {
+		t.Fatalf("counting usage_daily rows failed: %v", err)
+	}
+	if before == 0 {
+		t.Fatal("expected usage_daily to be populated")
+	}
+
+	// Simulate the pre-v3 schema: neither table has the column.
+	for _, m := range []interface{}{&UsageDailyRecord{}, &UsageRecord{}} {
+		if err := store.db.Migrator().DropColumn(m, "cache_write_tokens"); err != nil {
+			t.Fatalf("DropColumn failed: %v", err)
+		}
+	}
+
+	if err := migrateUsageTables(store.db); err != nil {
+		t.Fatalf("migrateUsageTables failed: %v", err)
+	}
+
+	if !store.db.Migrator().HasTable(&UsageDailyRecord{}) {
+		t.Fatal("usage_daily was dropped; a new summed column must not cost the existing aggregates")
+	}
+	var after int64
+	if err := store.db.Model(&UsageDailyRecord{}).Count(&after).Error; err != nil {
+		t.Fatalf("counting usage_daily rows failed: %v", err)
+	}
+	if after != before {
+		t.Fatalf("aggregate rows changed across the upgrade: before=%d after=%d", before, after)
+	}
+
+	// And the zero-filled column agrees with a raw scan of the same days.
+	merged, handled, err := store.timeSeriesFromDaily("day", start, now, nil)
+	if err != nil || !handled {
+		t.Fatalf("timeSeriesFromDaily after upgrade: handled=%v err=%v", handled, err)
+	}
+	raw, err := store.rawTimeSeries("day", start, now, nil)
+	if err != nil {
+		t.Fatalf("rawTimeSeries failed: %v", err)
+	}
+	if len(merged) != len(raw) {
+		t.Fatalf("bucket count mismatch: merged=%d raw=%d", len(merged), len(raw))
+	}
+	for i := range merged {
+		if merged[i].CacheWriteTokens != raw[i].CacheWriteTokens {
+			t.Fatalf("bucket %d cache_write_tokens mismatch: merged=%d raw=%d",
+				i, merged[i].CacheWriteTokens, raw[i].CacheWriteTokens)
+		}
+		if merged[i].CacheWriteTokens != 0 {
+			t.Fatalf("bucket %d: pre-upgrade traffic cannot have cache writes, got %d",
+				i, merged[i].CacheWriteTokens)
+		}
+	}
+}
+
+// seedUsageRecordsWithoutWrites mirrors seedUsageRecords but leaves
+// CacheWriteTokens unset, standing in for traffic recorded before the column
+// existed.
+func seedUsageRecordsWithoutWrites(t *testing.T, store *UsageStore, days int) {
+	t.Helper()
+	now := time.Now()
+	for d := 0; d < days; d++ {
+		for h := 0; h < 24; h += 5 {
+			rec := &UsageRecord{
+				ProviderUUID:     "prov-a",
+				ProviderName:     "Provider A",
+				Model:            "model-x",
+				Scenario:         "default",
+				UserID:           "admin",
+				Timestamp:        now.Add(-time.Duration(d)*24*time.Hour - time.Duration(h)*time.Hour),
+				InputTokens:      100 + d*10 + h,
+				OutputTokens:     50 + h,
+				CacheInputTokens: 20,
+				SystemTokens:     5,
+				Status:           "success",
+				LatencyMs:        200 + h*3,
+			}
+			if err := store.RecordUsage(rec); err != nil {
+				t.Fatalf("RecordUsage failed: %v", err)
+			}
+		}
 	}
 }

@@ -155,6 +155,15 @@ Layout facts that keep the grid stable:
   those always use the raw table. Extend the schema (and bump the rebuild
   condition in `ensureUsageDailySchema`) if those filters ever need the fast
   path.
+- **Adding a summed column to `usage_daily` does not need a table DROP.**
+  `usage_daily` and `usage_records` migrate together, so a column that is new
+  in the aggregate is new in the source too — every historical record
+  contributes 0, and AutoMigrate's zero-fill is already the correct value.
+  Dropping would discard correct aggregates and force a full re-aggregation to
+  reach the same zeros (`TestUpgradeAddingSummedColumnKeepsAggregates`). The
+  rebuild in `ensureUsageDailySchema` is reserved for a layout change like v2's
+  `user_id` dimension, or for a column whose SOURCE already carries historical
+  non-zero data.
 - Equivalence between the merged path and the raw path is locked in by
   `internal/data/db/usage_daily_test.go`; if you change either side, keep
   those tests green.

@@ -600,7 +600,7 @@ Azure OpenAI 上 gpt-5.6 的 usage **完全不上报 `cache_write_tokens`**，�
 
 `usage_records` / `usage_daily` / `usage_monthly` 都有独立的 `cache_write_tokens` 列，rollup / stats / timeseries 三类查询与 OTel（新增 `cache_write` token_type）全部带上。列语义与 canonical 一致：`cache_input_tokens` 仅表示 read，`cache_write_tokens` 是 `input_tokens` 的**子集**。
 
-> ⚠️ **`usage_daily` 是派生表，加汇总列必须 DROP 重建，不能 AutoMigrate。** AutoMigrate 会把新列补成全 0，已聚合过的日期会永久少报 cache write。`ensureUsageDailySchema` 因此按列存在性检查并整表删除，靠 `usage_records` 惰性重建——和当年 v2 加 `user_id` 是同一套做法。回归测试见 `usage_daily_test.go::TestEnsureUsageDailySchemaDropsStaleAggregates`。
+> ✅ **`usage_daily` 不需要 DROP 重建。** 它和 `usage_records` 在同一次迁移里加列，所以「这里是新列」意味着「那边也是新列」——所有历史记录的写入量都是 0，AutoMigrate 的零填充**恰好就是正确的聚合值**。丢表重建只会扔掉 14 列正确数据，再花一轮全量重聚合算回同样的 0。只有当**源列已有历史非零数据**（拆分/回填一个既存度量）时才需要重建。回归测试见 `usage_daily_test.go::TestUpgradeAddingSummedColumnKeepsAggregates`。
 
 API 侧 `AggregatedStat` / `TimeSeriesData` / `UsageRecordResponse` 三个模型都暴露 `cache_write_tokens`。
 
