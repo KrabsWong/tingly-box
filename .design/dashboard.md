@@ -177,10 +177,11 @@ They surface as annotations on the Input figure instead:
 
 Vocabulary: every previously-"Cache" label is now **Cache Read**, so the word
 means one thing. The write column and the "written" annotations render only
-when there is a non-zero write in the data (`hasCacheWrites`) — pre-gpt-5.6
-models and Azure never report writes, so an always-on column would be a
-permanent wall of zeros. `formatCacheBreakdown` in `chartStyles.ts` owns that
-decision for the stat cards.
+when there is a non-zero write in the data — pre-gpt-5.6 models and Azure
+never report writes, so an always-on column would be a permanent wall of
+zeros. `chartStyles.ts` owns both readings of that policy: `hasCacheWrites`
+for the tables, `formatCacheBreakdown` for the stat cards. A third surface
+should read from there rather than re-derive it.
 
 The Cache Hit Rate formula is unchanged: `read / (read + input)`. Since input
 already contains the writes, a write correctly counts as a miss.

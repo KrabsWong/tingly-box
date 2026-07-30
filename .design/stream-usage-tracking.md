@@ -37,7 +37,7 @@ flowchart TD
     B2 --> C
     B3 --> C
 
-    C["③ canonical &nbsp;*ai.TokenUsage&nbsp;<br/>Input · Output · CacheInput · Reasoning · System"]
+    C["③ canonical &nbsp;*ai.TokenUsage&nbsp;<br/>Input · Output · CacheRead · CacheWrite · Reasoning · System"]
 
     C -->|录制路径| D["assembler.SetUsageFromTokenUsage<br/>→ streamRecorder.Finish<br/>→ assembled anthropic.Message"]
     C -->|计费路径| E["server.trackUsageWithTokenUsage(c, usage, err)"]
@@ -57,7 +57,7 @@ flowchart TD
 
 ## 1. Canonical type：`ai.TokenUsage`
 
-定义：`ai/protocol.go:61`。这是全链路唯一的流通货币——converter / recorder / tracker / DB 之间都传它，避免「每加一个字段就改一圈 `(int, int)` 签名」。
+定义见 `ai/protocol.go`。这是全链路唯一的流通货币——converter / recorder / tracker / DB 之间都传它，避免「每加一个字段就改一圈 `(int, int)` 签名」。
 
 ```go
 type TokenUsage struct {
@@ -284,9 +284,10 @@ tiktoken：默认 `O200kBase`；流前用 `EstimateInputTokensSimple(req)`（`le
 | `HandleAnthropicBeta` | `AnthropicAccumulator.ConsumeBeta` |
 | `AnthropicToOpenAIStreamWithMCPHooks`（`anthropic_to_openai*.go`） | `AnthropicAccumulator.ConsumeBeta`；`Usage()` 返回 `acc.Result()` |
 | `HandleAnthropicBetaToOpenAIResponsesStream` | `AnthropicAccumulator.ConsumeBeta` |
-| `openAIToAnthropicConverter`（`openai_to_anthropic_converter.go` + `_beta`） | `StreamTokenCounter`；`Usage()` 返回 `NewTokenUsageOpenAI(in, out, cacheRead, cacheWrite, reasoning)` |
-| `openai_passthrough.go` | inline：每 chunk 累加 + 估算 fallback 注入 |
-| `openai_{chat,responses}_to_*.go` | inline：`state` 字段双用（同时拼 wire body） |
+| `openAIToAnthropicConverter`（`openai_to_anthropic_converter.go` + `_beta`） | `StreamTokenCounter`；`Usage()` 返回 `NewTokenUsageFull(in, out, cacheRead, cacheWrite, reasoning)` |
+| `openai_passthrough.go` | `chunkHasUsage` + `FromOpenAIChatCompletion`；Responses 侧走 gjson；估算 fallback 注入 |
+| `openai_chat_to_responses_converter.go` | `chunkHasUsage` + `FromOpenAIChatCompletion`；`state` 字段双用（同时拼 wire body） |
+| `openai_responses_to_chat_converter.go` | `FromOpenAIResponses`；终态复用 `chatStreamUsageWire`，只覆盖 `total_tokens` |
 | `google_to_any.go` | inline：Google SDK 无结构化 cache 子字段 |
 
 OpenAI→Anthropic converter 的终态收口在 `emitTerminalEvents()`：从 counter 同步 `GetCounts()` + `GetUpstreamDetails()` 写进 `state`，再发 `message_delta` / `message_stop`，并打一条 **Debug** 总览日志（见 §10）。
@@ -316,9 +317,10 @@ OpenAI→Anthropic converter 的终态收口在 `emitTerminalEvents()`：从 cou
 - `RecordV1Event` / `RecordV1BetaEvent`：处理 `message_start`（msgID/role）、`content_block_*`（攒 text/thinking/tool input）、`message_delta`（stop_reason + 若带 usage 则存 `usageData`，**含 `CacheReadInputTokens`**）
 - `SetUsage(in, out)`：原始计数（简单入口，优先用下面那个）
 - `SetUsageFromTokenUsage(u *ai.TokenUsage)`：canonical 入口
-  - `InputTokens → anthropic.Usage.InputTokens`
+  - `UncachedInputTokens() → anthropic.Usage.InputTokens`（**注意不是 `InputTokens` 直传**：canonical 把写入成本折进了 `InputTokens`，而 Anthropic wire 的 `input_tokens` 不含它，直传会和下一行一起把写入计两次）
   - `OutputTokens → anthropic.Usage.OutputTokens`
   - `CacheInputTokens → anthropic.Usage.CacheReadInputTokens`
+  - `CacheWriteTokens → anthropic.Usage.CacheCreationInputTokens`
   - `ReasoningTokens` 丢弃（Anthropic 无对应字段，已计入 output）
 - `Finish(model, in, out) → *anthropic.Message`：有 `SetUsage*` 数据就用它，否则回退入参
 
@@ -351,11 +353,11 @@ func (sr *streamRecorder) Finish(model string, usage *protocol.TokenUsage)
 
 1. `GetTrackingContext(c)` 取 rule / provider / model / requestModel / scenario / streamed / startTime（任一缺失或 `usage==nil` 直接 return）
 2. 算 latency、status（success / error / canceled）、errorCode
-3. 打一条 **Debug** `"trackUsage: token usage recorded"`，带 `input/output/cache/reasoning/system/total_tokens` + status/streamed/latency
+3. 打一条 **Debug** `"trackUsage: token usage recorded"`，带 `input/output/cache/cache_write/reasoning/system/total_tokens` + status/streamed/latency
 4. `detectCacheHit(usage)` → `SetCacheHit(c, …)`；算 `TTFT` / `TPS`
 5. 分发：
    - `updateServiceStats(rule, provider, model, MetricsData{...})`（内存 stats）
-   - `tokenTracker.RecordUsage(ctx, UsageOptions{... CacheInputTokens, SystemTokens ...})`（OTel）
+   - `tokenTracker.RecordUsage(ctx, UsageOptions{... CacheInputTokens, CacheWriteTokens, SystemTokens ...})`（OTel；`cache_write` 是新增的 token_type，`recordTokens` 对 0 值早退，所以不上报写入的通道不会产生空 timeseries）
    - `recordDetailedUsageWithTokenUsage(...)`（写 DB，见 §6）
    - `reportHealthStatus(...)`；429 时 enterprise 限流告警 hook
 
@@ -382,12 +384,13 @@ func (sr *streamRecorder) Finish(model string, usage *protocol.TokenUsage)
 | `user_id` | 多租户（`not null; default ''`，迁移见下） |
 | `timestamp` | 索引（含 `idx_timestamp_scenario`） |
 | `input_tokens` / `output_tokens` / `total_tokens` | `total = input + output` |
-| `cache_input_tokens` | **合并** cache creation + read（`default 0`） |
+| `cache_input_tokens` | cache **read** 命中（`default 0`；列名是 §6.2 那次合并迁移留下的历史称呼） |
+| `cache_write_tokens` | cache **write**（`default 0`；⊂ `input_tokens`，不另计入 total） |
 | `system_tokens` | 框架开销（`default 0`） |
 | `status` / `error_code` | success / error / partial / canceled |
 | `latency_ms` / `ttft_ms` / `streamed` | 性能 |
 
-聚合表：`UsageDailyRecord`（`usage_daily`）、`UsageMonthlyRecord`（`usage_monthly`）——`RequestCount / TotalTokens / Input / Output / CacheInputTokens / SystemTokens / ErrorCount`，按 `date(timestamp)` 或 `year/month` SUM。
+聚合表：`UsageDailyRecord`（`usage_daily`）、`UsageMonthlyRecord`（`usage_monthly`）——`RequestCount / TotalTokens / Input / Output / CacheInputTokens / CacheWriteTokens / SystemTokens / ErrorCount`，按 `date(timestamp)` 或 `year/month` SUM。`usage_monthly` 目前只建表、无写入方。
 
 ### 6.2 Schema 迁移（`ensureUsageRecordSchema`）
 
@@ -463,15 +466,15 @@ PR #1063 顺手补的端到端 usage 开关，沿用至今。
 
 ```go
 type MockUsage struct {
-    PromptTokens             int64
-    CompletionTokens         int64
-    CachedInputTokens        int64 // OpenAI cached_tokens / Anthropic cache_read
-    CacheCreationInputTokens int64 // Anthropic cache_creation / OpenAI cache_write_tokens
-    ReasoningTokens          int64 // OpenAI only
+    PromptTokens      int64
+    CompletionTokens  int64
+    CachedInputTokens int64 // OpenAI cached_tokens / Anthropic cache_read
+    CacheWriteTokens  int64 // Anthropic cache_creation / OpenAI cache_write_tokens
+    ReasoningTokens   int64 // OpenAI only
 }
 ```
 
-> `CacheCreationInputTokens` 现在两侧都用：Anthropic 渲染成 `cache_creation_input_tokens`，OpenAI 渲染成 `prompt_tokens_details.cache_write_tokens`（Chat）/ `input_tokens_details.cache_write_tokens`（Responses）。字段名保留 Anthropic 措辞是为了不动既有断言。
+> `CacheWriteTokens` 两侧共用：Anthropic 渲染成 `cache_creation_input_tokens`，OpenAI 渲染成 `prompt_tokens_details.cache_write_tokens`（Chat）/ `input_tokens_details.cache_write_tokens`（Responses）——同一笔溢价写入成本的两个 wire 名字。字段名取协议中立的措辞，与同结构的 `CachedInputTokens` 一致。
 
 两个协议的 `MockModelConfig` 都加 `Usage *vmodel.MockUsage`。
 
