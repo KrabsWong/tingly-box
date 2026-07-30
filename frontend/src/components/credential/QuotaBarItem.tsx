@@ -1,11 +1,11 @@
 import React from 'react';
 import { Box, Stack, Tooltip, Typography, tooltipClasses } from '@mui/material';
-import type { UsageWindow } from '@/types/quota';
-import { formatQuotaPercent, formatQuotaUsage } from '@/types/quota';
+import type { QuotaWindow } from '@/types/quota';
+import { formatQuotaPercent, formatQuotaUsage, isCountable } from '@/types/quota';
 import { QUOTA_COLORS, formatNumber } from '../dashboard/chartStyles';
 
 interface QuotaBarItemProps {
-  window: UsageWindow;
+  window: QuotaWindow;
   /**
    * Whether to show detailed info (used/limit, reset time)
    * If false, only shows label, bar, and percent
@@ -29,8 +29,6 @@ interface QuotaBarItemProps {
   tooltipContent?: React.ReactNode;
 }
 
-const formatCompactNumber = formatNumber;
-
 /**
  * Compact inline display of a single quota window.
  * Shows: Label + Bar + Percent, with details in tooltip.
@@ -42,6 +40,11 @@ export function QuotaBarItem({ window, showDetails = false, percentLabel, barCol
     return QUOTA_COLORS.success;
   };
 
+  // A window with no usage figure gets no bar and no percentage. It still has
+  // something to say — a balance, this month's spend, an add-on whose usage
+  // upstream withholds — so the figure it does have takes the bar's place
+  // rather than a green one filled to 0%.
+  const countable = isCountable(window);
   const barColor = forcedBarColor ?? getColor(window.used_percent);
 
   // Format reset time
@@ -63,7 +66,7 @@ export function QuotaBarItem({ window, showDetails = false, percentLabel, barCol
   };
 
   const resetTime = formatResetTime();
-  const detailedInfo = formatQuotaUsage(window, { formatNumber: formatCompactNumber });
+  const detailedInfo = formatQuotaUsage(window, { formatNumber: formatNumber });
 
   const tooltipContent = (
     <Box
@@ -139,8 +142,8 @@ export function QuotaBarItem({ window, showDetails = false, percentLabel, barCol
           {window.label}:
         </Typography>
 
-        {/* Bar */}
-        <Box
+        {/* Bar — only for windows with a proportion to draw */}
+        {countable && <Box
           sx={{
             position: 'relative',
             width: 40,
@@ -169,18 +172,18 @@ export function QuotaBarItem({ window, showDetails = false, percentLabel, barCol
               }}
             />
           </Box>
-        </Box>
+        </Box>}
 
-        {/* Percent / count label */}
+        {/* Percent, or the figure itself when there is no proportion */}
         <Typography
           variant="body2"
           sx={{
-            color: percentLabel ? 'text.secondary' : barColor,
+            color: percentLabel || !countable ? 'text.secondary' : barColor,
             fontSize: '12px',
             whiteSpace: 'nowrap',
           }}
         >
-          {percentLabel ?? formatQuotaPercent(window)}
+          {percentLabel ?? (countable ? formatQuotaPercent(window) : formatQuotaUsage(window))}
         </Typography>
 
         {/* Optional details inline */}

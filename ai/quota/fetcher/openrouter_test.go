@@ -186,3 +186,78 @@ func TestOpenRouterFetcher_Validate(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func openrouterUsage(t *testing.T, response string) *quota.ProviderUsage {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(response))
+	}))
+	t.Cleanup(server.Close)
+
+	usage, err := (&OpenRouterFetcher{}).Fetch(context.Background(),
+		&ai.Provider{UUID: "u", Name: "OpenRouter", Token: "k", APIBase: server.URL})
+	if err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	return usage
+}
+
+func TestOpenRouterKeyLimitIsAResource(t *testing.T) {
+	usage := openrouterUsage(t,
+		`{"data":{"limit":20,"usage":8.1,"usage_monthly":8.1,"creator_user_id":"u1"}}`)
+
+	checkInvariants(t, usage)
+
+	keyLimit := findWindow(t, usage, "key_limit")
+	if keyLimit.EffectiveKind() != quota.WindowKindResource {
+		t.Errorf("key_limit Kind = %q, want resource", keyLimit.EffectiveKind())
+	}
+	if pct, ok := usage.Pct(); !ok || pct < 40.4 || pct > 40.6 {
+		t.Fatalf("Pct() = %v, %v; want ~40.5, true", pct, ok)
+	}
+	// Credits are topped up, not reset, so waiting brings nothing back.
+	if usage.RecoversAt() != nil {
+		t.Error("RecoversAt() should be nil when the binding entry is a credit pool")
+	}
+}
+
+func TestOpenRouterNoKeyLimitMeansUncapped(t *testing.T) {
+	// A bare Limit of 0 was ambiguous: no cap, or a cap we could not read.
+	usage := openrouterUsage(t,
+		`{"data":{"limit":null,"usage":8.1,"usage_monthly":8.1,"creator_user_id":"u1"}}`)
+
+	checkInvariants(t, usage)
+
+	monthly := findWindow(t, usage, "monthly")
+	if !monthly.Unlimited {
+		t.Error("with no key limit there is no cap; the window must say so")
+	}
+	if monthly.Countable() {
+		t.Error("an uncapped window has no usage proportion to contribute")
+	}
+	if pct, ok := usage.Pct(); ok {
+		t.Fatalf("Pct() = %v, %v; want unknown for an uncapped key", pct, ok)
+	}
+}
+
+func TestOpenRouterMonthlySpendNeverPosesAsACap(t *testing.T) {
+	// The key limit caps lifetime usage, not the month, so the monthly window
+	// has no cap even when a key limit is set. Left unflagged it read as
+	// "$8.10 of $0.00" and, being an allowance, sorted ahead of the real one.
+	usage := openrouterUsage(t,
+		`{"data":{"limit":20,"usage":8.1,"usage_monthly":8.1,"creator_user_id":"u1"}}`)
+
+	checkInvariants(t, usage)
+
+	monthly := findWindow(t, usage, "monthly")
+	if monthly.Countable() {
+		t.Error("monthly spend has no cap; it must not contribute a usage figure")
+	}
+	if got := usage.Tightest().Key; got != "key_limit" {
+		t.Errorf("Tightest() = %q; want key_limit, the window that actually has a cap", got)
+	}
+	if usage.Windows[0].Key != "key_limit" {
+		t.Errorf("first window = %q; want key_limit ahead of the uncapped one", usage.Windows[0].Key)
+	}
+}

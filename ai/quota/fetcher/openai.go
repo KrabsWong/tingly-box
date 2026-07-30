@@ -96,7 +96,8 @@ func (f *OpenAIFetcher) Fetch(ctx context.Context, provider *ai.Provider) (*quot
 
 	if resp.StatusCode == http.StatusNotFound {
 		// OpenAI has no unified usage API, so return fallback data.
-		return f.createDefaultUsage(provider), nil
+		return unreadableUsage(provider, quota.ProviderTypeOpenAI,
+			"quota API not available - see the OpenAI dashboard"), nil
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -129,36 +130,20 @@ func (f *OpenAIFetcher) Fetch(ctx context.Context, provider *ai.Provider) (*quot
 		FetchedAt:    now,
 		ExpiresAt:    now.Add(10 * time.Minute), // Cache for 10 minutes.
 		RawResponse:  json.RawMessage(bodyBytes),
-
-		// Cost represents the prepaid balance.
-		Cost: &quota.UsageCost{
-			Used:         totalUsed,
-			Limit:        0, // OpenAI does not provide limit information.
-			CurrencyCode: "USD",
-			Label:        "Prepaid Credits",
-		},
 	}
+
+	// Spend is known but the cap never is, so there is no proportion to
+	// report. Without saying so, a successful fetch that carries no window
+	// reads as an account with nothing used.
+	usage.AddWindow("spend", &quota.UsageWindow{
+		Type:        quota.WindowTypeBalance,
+		Kind:        quota.WindowKindResource,
+		Unknown:     true,
+		Used:        totalUsed,
+		Unit:        quota.UsageUnitCurrency,
+		Label:       "Prepaid Credits",
+		Description: fmt.Sprintf("$%.2f used — OpenAI does not report a limit", totalUsed),
+	})
 
 	return usage, nil
-}
-
-// createDefaultUsage creates fallback quota data when the API is unavailable.
-func (f *OpenAIFetcher) createDefaultUsage(provider *ai.Provider) *quota.ProviderUsage {
-	now := time.Now()
-
-	return &quota.ProviderUsage{
-		ProviderUUID: provider.UUID,
-		ProviderName: provider.Name,
-		ProviderType: quota.ProviderTypeOpenAI,
-		FetchedAt:    now,
-		ExpiresAt:    now.Add(1 * time.Hour), // Cache for one hour.
-
-		// OpenAI does not provide quota limit information.
-		Cost: &quota.UsageCost{
-			Used:         0,
-			Limit:        0,
-			CurrencyCode: "USD",
-			Label:        "Prepaid Credits (see dashboard)",
-		},
-	}
 }

@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	kimiCodeUsageURL       = "https://api.kimi.com/coding/v1/usages"
+	kimiCodeAPIBase        = "https://api.kimi.com/coding/v1"
 	kimiCodeFixedPointCent = 1_000_000
 )
 
@@ -205,12 +205,8 @@ type kimiCodeUsageResponse struct {
 }
 
 func (f *KimiCodeFetcher) Fetch(ctx context.Context, provider *ai.Provider) (*quota.ProviderUsage, error) {
-	url := kimiCodeUsageURL
-	if f.baseURL != "" {
-		url = strings.TrimRight(f.baseURL, "/") + "/usages"
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		endpoint(f.baseURL, kimiCodeAPIBase, "/usages"), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -258,14 +254,15 @@ func (f *KimiCodeFetcher) Fetch(ctx context.Context, provider *ai.Provider) (*qu
 	}
 
 	if used, limit, ok := apiResp.Usage.values(); ok {
-		usage.AddWindow("weekly", 0, &quota.UsageWindow{
-			Type:        quota.WindowTypeWeekly,
-			Used:        used,
-			Limit:       limit,
-			Unit:        quota.UsageUnitCredits,
-			ResetsAt:    apiResp.Usage.resetTime(),
-			Label:       apiResp.Usage.label("Weekly limit"),
-			Description: formatKimiCodeUsage(used, limit),
+		usage.AddWindow("weekly", &quota.UsageWindow{
+			Type:          quota.WindowTypeWeekly,
+			Used:          used,
+			Limit:         limit,
+			Unit:          quota.UsageUnitCredits,
+			ResetsAt:      apiResp.Usage.resetTime(),
+			WindowMinutes: 7 * 24 * 60,
+			Label:         apiResp.Usage.label("Weekly limit"),
+			Description:   formatKimiCodeUsage(used, limit),
 		})
 	}
 
@@ -276,13 +273,17 @@ func (f *KimiCodeFetcher) Fetch(ctx context.Context, provider *ai.Provider) (*qu
 			continue
 		}
 		duration, timeUnit := item.windowDetail()
+		// A limit upstream did not size stays unsized: it comes out as a custom
+		// window that sorts after the sized ones, rather than being labelled
+		// weekly on the strength of a number we made up.
 		windowMinutes := kimiCodeWindowMinutes(duration, timeUnit)
+		windowType := windowTypeForMinutes(windowMinutes)
 		label := detail.label(kimiCodeWindowLabel(duration, timeUnit, index))
 		if item.Scope != "" && detail.Name == "" && detail.Title == "" {
 			label = item.Scope
 		}
-		usage.AddWindow(fmt.Sprintf("limit_%d", index+1), index+1, &quota.UsageWindow{
-			Type:          kimiCodeWindowType(windowMinutes),
+		usage.AddWindow(fmt.Sprintf("limit_%d", index+1), &quota.UsageWindow{
+			Type:          windowType,
 			Used:          used,
 			Limit:         limit,
 			Unit:          quota.UsageUnitCredits,
@@ -314,23 +315,6 @@ func kimiCodeWindowMinutes(duration float64, unit string) int {
 		return int(duration * 24 * 60)
 	default:
 		return int(duration / 60)
-	}
-}
-
-func kimiCodeWindowType(minutes int) quota.WindowType {
-	switch {
-	case minutes <= 0:
-		return quota.WindowTypeCustom
-	case minutes < 24*60:
-		return quota.WindowTypeSession
-	case minutes == 24*60:
-		return quota.WindowTypeDaily
-	case minutes >= 28*24*60:
-		return quota.WindowTypeMonthly
-	case minutes >= 7*24*60:
-		return quota.WindowTypeWeekly
-	default:
-		return quota.WindowTypeCustom
 	}
 }
 
@@ -382,8 +366,11 @@ func addKimiCodeWallet(usage *quota.ProviderUsage, wallet *kimiCodeBoosterWallet
 		currency = "USD"
 	}
 
-	usage.AddWindow("booster", len(usage.Windows), &quota.UsageWindow{
+	// A wallet balance is topped up, not reset, so waiting brings none of it
+	// back. Both halves are known, so the proportion spent is still real.
+	usage.AddWindow("booster", &quota.UsageWindow{
 		Type:        quota.WindowTypeBalance,
+		Kind:        quota.WindowKindResource,
 		Used:        used,
 		Limit:       total,
 		Unit:        quota.UsageUnitCurrency,

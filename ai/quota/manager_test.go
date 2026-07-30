@@ -138,3 +138,22 @@ func BenchmarkInferProviderType(b *testing.B) {
 		_ = inferProviderType(provider)
 	}
 }
+
+func TestUnreadableProvidersReportWhyAndNothingElse(t *testing.T) {
+	// No placeholder window; see Unreadable.
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	usage := Unreadable("u", "n", ProviderTypeCursor, "quota API not available", now, time.Hour)
+
+	if pct, ok := usage.Pct(); ok {
+		t.Fatalf("Pct() = %v, %v; want unknown", pct, ok)
+	}
+	if len(usage.Windows) != 0 {
+		t.Errorf("Windows = %d; want none", len(usage.Windows))
+	}
+	if usage.LastError == "" || usage.LastErrorAt == nil {
+		t.Error("the reason should be recorded")
+	}
+	if !usage.ExpiresAt.Equal(now.Add(time.Hour)) {
+		t.Errorf("ExpiresAt = %v; want the ttl applied to now", usage.ExpiresAt)
+	}
+}

@@ -4,7 +4,6 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"time"
 )
 
@@ -43,6 +42,16 @@ const (
 	WindowTypeCodeReview WindowType = "code_review" // code review quota
 )
 
+// WindowKind distinguishes the two things a quota entry can be. The difference
+// that matters is whether running out resolves itself: an allowance refills at
+// ResetsAt, a resource has to be topped up.
+type WindowKind string
+
+const (
+	WindowKindLimit    WindowKind = "limit"    // periodic allowance (Anthropic 5h/7d, MiniMax daily)
+	WindowKindResource WindowKind = "resource" // standing balance (OpenRouter credit, Kimi booster)
+)
+
 // UsageUnit usage unit enumeration
 type UsageUnit string
 
@@ -63,7 +72,7 @@ type ProviderUsage struct {
 	FetchedAt    time.Time    `json:"fetched_at"`    // fetch time
 	ExpiresAt    time.Time    `json:"expires_at"`    // data expiration time
 
-	// Normalized quota windows for frontend display. Lower tier values are more important and displayed first.
+	// Account-level quota windows, in display order (see NormalizeWindows).
 	Windows []*UsageWindow `json:"windows,omitempty"`
 
 	// Cost information (e.g., monthly costs)
@@ -99,9 +108,8 @@ type UsageBreakdown struct {
 
 // UsageWindow represents a single quota window
 type UsageWindow struct {
-	// Display key and priority tier. Lower tier values are more important and displayed first.
-	Key  string `json:"key,omitempty"`
-	Tier int    `json:"tier,omitempty"`
+	// Display key.
+	Key string `json:"key,omitempty"`
 
 	// Window type identifier
 	Type WindowType `json:"type"` // session, weekly, monthly, daily, custom, balance
@@ -121,6 +129,14 @@ type UsageWindow struct {
 	// Metadata
 	Label       string `json:"label"`       // display label, e.g., "Session Quota"
 	Description string `json:"description"` // description
+
+	// Semantics. Kind says whether running out resolves itself; Unknown and
+	// Unlimited say why UsedPercent should not be read as a usage figure.
+	// Between them they replace the three-way ambiguity of Limit == 0
+	// (unlimited / unknown / no entitlement).
+	Kind      WindowKind `json:"kind,omitempty"`      // defaults to WindowKindLimit, see EffectiveKind()
+	Unknown   bool       `json:"unknown,omitempty"`   // upstream did not report usage; not the same as 0%
+	Unlimited bool       `json:"unlimited,omitempty"` // no cap at all
 
 	// Limit status (optional)
 	Allowed      *bool `json:"allowed,omitempty"`       // whether requests are allowed
@@ -159,56 +175,52 @@ func (w *UsageWindow) CalculateUsedPercent() float64 {
 	return (w.Used / w.Limit) * 100
 }
 
-// NormalizeWindows ensures Windows contains all aggregate quota windows in display order.
-// Lower tier means more important and is rendered first.
-func (p *ProviderUsage) NormalizeWindows() {
-	if p == nil {
+// applyWindowSemantics fills in what the shared layer can derive, so a fetcher
+// only has to state what upstream told it.
+func applyWindowSemantics(window *UsageWindow) {
+	// A balance is a resource by definition. Leaving each fetcher to say so
+	// means one that forgets produces a balance claiming it refills, and
+	// RecoversAt() then promises a recovery that never arrives.
+	if window.Kind == "" && window.Type == WindowTypeBalance {
+		window.Kind = WindowKindResource
+	}
+	// A window with no usage figure must not carry one — a reader that skips
+	// the flags would see a plausible number and trust it.
+	if !window.Countable() {
+		window.UsedPercent = 0
 		return
-	}
-
-	for i, window := range p.Windows {
-		applyWindowDefaults(window, fmt.Sprintf("window_%d", i))
-	}
-
-	sort.SliceStable(p.Windows, func(i, j int) bool {
-		left, right := p.Windows[i], p.Windows[j]
-		if left == nil && right == nil {
-			return false
-		}
-		if left == nil {
-			return false
-		}
-		if right == nil {
-			return true
-		}
-		return left.Tier < right.Tier
-	})
-}
-
-func applyWindowDefaults(window *UsageWindow, key string) {
-	if window == nil {
-		return
-	}
-	if window.Key == "" {
-		window.Key = key
 	}
 	if window.UsedPercent == 0 {
 		window.UsedPercent = window.CalculateUsedPercent()
 	}
 }
 
-// AddWindow adds a quota window with canonical display metadata.
-func (p *ProviderUsage) AddWindow(key string, tier int, window *UsageWindow) *UsageWindow {
+// AddWindow adds an account-level quota window. Display order comes from
+// NormalizeWindows, so callers only name the window.
+func (p *ProviderUsage) AddWindow(key string, window *UsageWindow) *UsageWindow {
 	if p == nil || window == nil {
 		return nil
 	}
 	window.Key = key
-	window.Tier = tier
-	if window.UsedPercent == 0 {
-		window.UsedPercent = window.CalculateUsedPercent()
-	}
+	applyWindowSemantics(window)
 	p.Windows = append(p.Windows, window)
 	return window
+}
+
+// AddBreakdown adds a scoped quota entry (per model, per feature) with the same
+// derivation AddWindow applies, which raw appends to Breakdowns bypass.
+func (p *ProviderUsage) AddBreakdown(key, label, group string, windows ...*UsageWindow) *UsageBreakdown {
+	if p == nil {
+		return nil
+	}
+	for _, w := range windows {
+		if w != nil {
+			applyWindowSemantics(w)
+		}
+	}
+	bd := &UsageBreakdown{Key: key, Label: label, Group: group, Windows: windows}
+	p.Breakdowns = append(p.Breakdowns, bd)
+	return bd
 }
 
 // IsExpired checks if quota data is expired
