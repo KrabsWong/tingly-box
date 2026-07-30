@@ -277,6 +277,7 @@ func newOpenAIVModelDecoder(ctx context.Context, vm openaivm.VirtualModel, req *
 					prompt:     u.PromptTokens,
 					completion: u.CompletionTokens,
 					cached:     u.CachedInputTokens,
+					cacheWrite: u.CacheWriteTokens,
 					reasoning:  u.ReasoningTokens,
 				}
 
@@ -303,10 +304,14 @@ func newOpenAIVModelDecoder(ctx context.Context, vm openaivm.VirtualModel, req *
 					usageMap["prompt_tokens"] = explicitUsage.prompt
 					usageMap["completion_tokens"] = explicitUsage.completion
 					usageMap["total_tokens"] = explicitUsage.prompt + explicitUsage.completion
-					if explicitUsage.cached > 0 {
-						usageMap["prompt_tokens_details"] = map[string]interface{}{
+					if explicitUsage.cached > 0 || explicitUsage.cacheWrite > 0 {
+						details := map[string]interface{}{
 							"cached_tokens": explicitUsage.cached,
 						}
+						if explicitUsage.cacheWrite > 0 {
+							details["cache_write_tokens"] = explicitUsage.cacheWrite
+						}
+						usageMap["prompt_tokens_details"] = details
 					}
 					if explicitUsage.reasoning > 0 {
 						usageMap["completion_tokens_details"] = map[string]interface{}{
@@ -344,7 +349,7 @@ func newOpenAIVModelDecoder(ctx context.Context, vm openaivm.VirtualModel, req *
 }
 
 type openAIUsageCapture struct {
-	prompt, completion, cached, reasoning int64
+	prompt, completion, cached, cacheWrite, reasoning int64
 }
 
 func (d *openAIVModelDecoder) Next() bool {

@@ -8,11 +8,14 @@ import "time"
 // converters / observers can be tested for completeness (cache and
 // reasoning tokens, not just plain prompt/completion).
 type MockUsage struct {
-	PromptTokens             int64 // input_tokens / prompt_tokens
-	CompletionTokens         int64 // output_tokens / completion_tokens
-	CachedInputTokens        int64 // OpenAI prompt_tokens_details.cached_tokens / Anthropic cache_read_input_tokens
-	CacheCreationInputTokens int64 // Anthropic cache_creation_input_tokens (no OpenAI analogue)
-	ReasoningTokens          int64 // OpenAI completion_tokens_details.reasoning_tokens
+	PromptTokens      int64 // input_tokens / prompt_tokens
+	CompletionTokens  int64 // output_tokens / completion_tokens
+	CachedInputTokens int64 // OpenAI prompt_tokens_details.cached_tokens / Anthropic cache_read_input_tokens
+	// CacheWriteTokens renders as Anthropic cache_creation_input_tokens or
+	// OpenAI prompt_tokens_details.cache_write_tokens (gpt-5.6+) — the same
+	// premium-rate write cost under two wire names.
+	CacheWriteTokens int64
+	ReasoningTokens  int64 // OpenAI completion_tokens_details.reasoning_tokens
 }
 
 // SharedMockSpec describes a built-in mock that is identical across
@@ -177,11 +180,11 @@ func SharedDefaultMocks() []SharedMockSpec {
 // sub-packages.
 func StreamTestMockSpecs() []SharedMockSpec {
 	usage := &MockUsage{
-		PromptTokens:             42,
-		CompletionTokens:         17,
-		CachedInputTokens:        11,
-		CacheCreationInputTokens: 5,
-		ReasoningTokens:          9,
+		PromptTokens:      42,
+		CompletionTokens:  17,
+		CachedInputTokens: 11,
+		CacheWriteTokens:  5,
+		ReasoningTokens:   9,
 	}
 	return []SharedMockSpec{
 		{

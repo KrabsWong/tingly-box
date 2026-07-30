@@ -30,26 +30,12 @@ func HandleResponsesToOpenAIChat(hc *protocol.HandleContext, rs *responses.Respo
 		},
 	}
 
+	// The canonical type owns the Chat usage shape; only total_tokens differs,
+	// preferring the value upstream actually reported when it sent one.
 	normalizedUsage := usageconv.FromOpenAIResponses(rs.Usage)
-	totalInputTokens := normalizedUsage.InputTokens + normalizedUsage.CacheInputTokens
-	totalTokens := int(rs.Usage.TotalTokens)
-	if totalTokens == 0 {
-		totalTokens = totalInputTokens + normalizedUsage.OutputTokens
-	}
-	usage := map[string]any{
-		"prompt_tokens":     totalInputTokens,
-		"completion_tokens": normalizedUsage.OutputTokens,
-		"total_tokens":      totalTokens,
-	}
-	if normalizedUsage.CacheInputTokens > 0 {
-		usage["prompt_tokens_details"] = map[string]any{
-			"cached_tokens": normalizedUsage.CacheInputTokens,
-		}
-	}
-	if normalizedUsage.ReasoningTokens > 0 {
-		usage["completion_tokens_details"] = map[string]any{
-			"reasoning_tokens": normalizedUsage.ReasoningTokens,
-		}
+	usage := normalizedUsage.ToOpenAIChatUsageMap()
+	if reported := int(rs.Usage.TotalTokens); reported != 0 {
+		usage["total_tokens"] = reported
 	}
 
 	chatResp := map[string]any{

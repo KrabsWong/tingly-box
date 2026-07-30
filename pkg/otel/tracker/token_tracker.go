@@ -38,10 +38,11 @@ var (
 // the enum is open, so the gateway extends it for cache and system token
 // accounting.
 var (
-	tokenTypeInput     = string(genaiconv.TokenTypeInput)
-	tokenTypeOutput    = string(genaiconv.TokenTypeOutput)
-	tokenTypeCacheRead = "cache_read"
-	tokenTypeSystem    = "system"
+	tokenTypeInput      = string(genaiconv.TokenTypeInput)
+	tokenTypeOutput     = string(genaiconv.TokenTypeOutput)
+	tokenTypeCacheRead  = "cache_read"
+	tokenTypeCacheWrite = "cache_write"
+	tokenTypeSystem     = "system"
 )
 
 // maxErrorTypeAttrLen caps the error.type attribute value. Every distinct
@@ -88,8 +89,14 @@ type UsageOptions struct {
 	// OutputTokens is the number of output/completion tokens consumed
 	OutputTokens int
 
-	// CacheInputTokens is the number of cache-related tokens consumed
+	// CacheInputTokens is the number of cache-READ tokens consumed
 	CacheInputTokens int
+
+	// CacheWriteTokens is the number of tokens written to the prompt cache.
+	// Billed separately (Anthropic cache_creation, OpenAI cache_write_tokens
+	// since gpt-5.6) and already included in InputTokens, so summing the two
+	// would double count.
+	CacheWriteTokens int
 
 	// SystemTokens represents tokens consumed by system-level operations
 	SystemTokens int
@@ -188,6 +195,7 @@ func (tt *TokenTracker) RecordUsage(ctx context.Context, opts UsageOptions) {
 	tt.recordTokens(ctx, commonAttrs, tokenTypeInput, opts.InputTokens)
 	tt.recordTokens(ctx, commonAttrs, tokenTypeOutput, opts.OutputTokens)
 	tt.recordTokens(ctx, commonAttrs, tokenTypeCacheRead, opts.CacheInputTokens)
+	tt.recordTokens(ctx, commonAttrs, tokenTypeCacheWrite, opts.CacheWriteTokens)
 	tt.recordTokens(ctx, commonAttrs, tokenTypeSystem, opts.SystemTokens)
 
 	// Operation duration; the histogram count doubles as the request count,

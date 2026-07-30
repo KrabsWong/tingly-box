@@ -225,7 +225,9 @@ func (c *anthropicToOpenAIConverter) newChunk(delta wire.ChatStreamDelta, finish
 
 // chatStreamUsageWire converts normalized TokenUsage into the Chat Completions
 // stream usage wire shape. Same semantics as usagepkg.ChatUsage: prompt_tokens
-// is the TOTAL (uncached + cached), cached_tokens a reported subset.
+// is the TOTAL (uncached + cached + written), cached_tokens and
+// cache_write_tokens reported, disjoint subsets. Anthropic's
+// cache_creation_input_tokens lands in cache_write_tokens.
 func chatStreamUsageWire(u *protocol.TokenUsage) *wire.ChatStreamUsage {
 	totalInput := u.InputTokens + u.CacheInputTokens
 	su := &wire.ChatStreamUsage{
@@ -233,8 +235,11 @@ func chatStreamUsageWire(u *protocol.TokenUsage) *wire.ChatStreamUsage {
 		CompletionTokens: int64(u.OutputTokens),
 		TotalTokens:      int64(totalInput + u.OutputTokens),
 	}
-	if u.CacheInputTokens > 0 {
-		su.PromptTokensDetails = &wire.ChatStreamPromptTokenDetails{CachedTokens: int64(u.CacheInputTokens)}
+	if u.CacheInputTokens > 0 || u.CacheWriteTokens > 0 {
+		su.PromptTokensDetails = &wire.ChatStreamPromptTokenDetails{
+			CachedTokens:     int64(u.CacheInputTokens),
+			CacheWriteTokens: int64(u.CacheWriteTokens),
+		}
 	}
 	if u.ReasoningTokens > 0 {
 		su.CompletionTokensDetails = &wire.ChatStreamOutputTokenDetails{ReasoningTokens: int64(u.ReasoningTokens)}

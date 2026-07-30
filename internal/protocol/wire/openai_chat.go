@@ -48,8 +48,13 @@ type ChatStreamUsage struct {
 	CompletionTokensDetails *ChatStreamOutputTokenDetails `json:"completion_tokens_details,omitempty"`
 }
 
+// ChatStreamPromptTokenDetails breaks down prompt token categories on a
+// streaming usage chunk. cache_write_tokens is only emitted by gpt-5.6+ and
+// stays omitted for providers that never report it, so downstream can tell
+// "no writes" (explicit 0) apart from "channel does not report writes".
 type ChatStreamPromptTokenDetails struct {
-	CachedTokens int64 `json:"cached_tokens"`
+	CachedTokens     int64 `json:"cached_tokens"`
+	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
 }
 
 type ChatStreamOutputTokenDetails struct {
@@ -113,7 +118,8 @@ type ChatCompletionFunctionWire struct {
 }
 
 // ChatCompletionUsageWire is the usage block in the OpenAI Chat Completions response.
-// prompt_tokens = TOTAL (uncached + cached); cached_tokens is a reported subset.
+// prompt_tokens = TOTAL (uncached + cached + written); cached_tokens and
+// cache_write_tokens are reported, disjoint subsets of it.
 type ChatCompletionUsageWire struct {
 	PromptTokens        int64                            `json:"prompt_tokens"`
 	CompletionTokens    int64                            `json:"completion_tokens"`
@@ -122,6 +128,8 @@ type ChatCompletionUsageWire struct {
 }
 
 // ChatCompletionPromptDetailsWire breaks down prompt token categories.
+// cached_tokens and cache_write_tokens are disjoint subsets of prompt_tokens.
 type ChatCompletionPromptDetailsWire struct {
-	CachedTokens int64 `json:"cached_tokens"`
+	CachedTokens     int64 `json:"cached_tokens"`
+	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
 }

@@ -25,6 +25,19 @@ import (
 // OpenAI Handle Functions
 // ===================================================================
 
+// chunkHasUsage reports whether an OpenAI Chat chunk carries a usage block.
+// Every field that can be the ONLY non-zero one must be listed: a usage chunk
+// reporting nothing but cache writes is real, and omitting cache_write_tokens
+// here would silently drop it. Keep this the single home for that decision —
+// it was previously copy-pasted across three converters, which is exactly how
+// a new usage field gets picked up in some paths and dropped in others.
+func chunkHasUsage(u openai.CompletionUsage) bool {
+	return u.PromptTokens != 0 || u.CompletionTokens != 0 ||
+		u.PromptTokensDetails.CachedTokens != 0 ||
+		u.PromptTokensDetails.CacheWriteTokens != 0 ||
+		u.CompletionTokensDetails.ReasoningTokens != 0
+}
+
 // HandleOpenAIChatStream handles OpenAI chat streaming response.
 // The input-token fallback (used only when the upstream reports no usage) comes
 // from hc.EstimatedInputTokens, so the handler no longer takes the request.
@@ -83,9 +96,7 @@ func HandleOpenAIChatStream(hc *protocol.HandleContext, streamResp *openaistream
 			}
 
 			// Accumulate usage from chunks (if present).
-			if chunk.Usage.PromptTokens != 0 || chunk.Usage.CompletionTokens != 0 ||
-				chunk.Usage.PromptTokensDetails.CachedTokens != 0 ||
-				chunk.Usage.CompletionTokensDetails.ReasoningTokens != 0 {
+			if chunkHasUsage(chunk.Usage) {
 				usage = protocolusage.FromOpenAIChatCompletion(chunk.Usage)
 				hasUsage = true
 			}
@@ -364,6 +375,7 @@ func HandleOpenAIResponsesStream(hc *protocol.HandleContext, stream ResponsesStr
 			promptTokensTotal := int64(0)
 			outputTokens := int64(0)
 			cacheTokens := int64(0)
+			cacheWriteTokens := int64(0)
 			reasoningTokens := int64(0)
 			respUsage := resp.Get("usage")
 			if it := respUsage.Get("input_tokens"); it.Exists() && it.Int() > 0 {
@@ -387,6 +399,12 @@ func HandleOpenAIResponsesStream(hc *protocol.HandleContext, stream ResponsesStr
 						logrus.WithContext(c.Request.Context()).WithError(err).Error("Failed to set cached tokens")
 					}
 				}
+				// gpt-5.6+ reports cache writes here. Unlike cached_tokens it is
+				// left absent when upstream omits it: an absent value means "this
+				// channel does not report writes", which is not the same as zero.
+				if cw := respUsage.Get("input_tokens_details.cache_write_tokens"); cw.Exists() {
+					cacheWriteTokens = cw.Int()
+				}
 			}
 
 			// Codex CLI's ResponseCompleted decoder rejects events whose
@@ -404,8 +422,9 @@ func HandleOpenAIResponsesStream(hc *protocol.HandleContext, stream ResponsesStr
 				}
 			}
 
-			if promptTokensTotal > 0 || outputTokens > 0 || cacheTokens > 0 || reasoningTokens > 0 {
-				usage = protocol.NewTokenUsageFull(int(promptTokensTotal-cacheTokens), int(outputTokens), int(cacheTokens), int(reasoningTokens))
+			if promptTokensTotal > 0 || outputTokens > 0 || cacheTokens > 0 || cacheWriteTokens > 0 || reasoningTokens > 0 {
+				usage = protocol.NewTokenUsageFull(int(promptTokensTotal-cacheTokens), int(outputTokens),
+					int(cacheTokens), int(cacheWriteTokens), int(reasoningTokens))
 			}
 
 			if model := resp.Get("model"); model.Exists() && model.String() != "" {
@@ -562,6 +581,7 @@ func HandleOpenAIResponsesStreamToAnthropic(c *gin.Context, stream ResponsesStre
 		// Extract usage from the event.
 		if evt.Response.Usage.InputTokens > 0 || evt.Response.Usage.OutputTokens > 0 ||
 			evt.Response.Usage.InputTokensDetails.CachedTokens > 0 ||
+			evt.Response.Usage.InputTokensDetails.CacheWriteTokens > 0 ||
 			evt.Response.Usage.OutputTokensDetails.ReasoningTokens > 0 {
 			usage = protocolusage.FromOpenAIResponses(evt.Response.Usage)
 		}

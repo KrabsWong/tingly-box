@@ -280,9 +280,7 @@ func (c *openAIToAnthropicConverter) consumeTokenCounter(chunk *openai.ChatCompl
 	// Fallback: extract usage directly from the chunk when token counter is
 	// unavailable (e.g. constructor failure).  This mirrors the approach used
 	// in openai_passthrough.go for the terminal usage-only chunk.
-	if chunk.Usage.PromptTokens != 0 || chunk.Usage.CompletionTokens != 0 ||
-		chunk.Usage.PromptTokensDetails.CachedTokens != 0 ||
-		chunk.Usage.CompletionTokensDetails.ReasoningTokens != 0 {
+	if chunkHasUsage(chunk.Usage) {
 		c.usage = protocolusage.FromOpenAIChatCompletion(chunk.Usage)
 	}
 }
@@ -290,13 +288,13 @@ func (c *openAIToAnthropicConverter) consumeTokenCounter(chunk *openai.ChatCompl
 func (c *openAIToAnthropicConverter) emitTerminalEvents() {
 	if c.tokenCounter != nil {
 		inputTokens, outputTokens := c.tokenCounter.GetCounts()
-		cacheTokens, reasoningTokens := c.tokenCounter.GetUpstreamDetails()
-		c.usage = protocol.NewTokenUsageFull(inputTokens, outputTokens, cacheTokens, reasoningTokens)
+		cacheTokens, cacheWriteTokens, reasoningTokens := c.tokenCounter.GetUpstreamDetails()
+		c.usage = protocol.NewTokenUsageFull(inputTokens, outputTokens, cacheTokens, cacheWriteTokens, reasoningTokens)
 	}
 	usage := c.Usage()
-	logrus.Debugf("OpenAI->Anthropic stream usage: model=%s in=%d out=%d cache=%d reasoning=%d stop=%s",
+	logrus.Debugf("OpenAI->Anthropic stream usage: model=%s in=%d out=%d cache=%d cache_write=%d reasoning=%d stop=%s",
 		c.responseModel, usage.InputTokens, usage.OutputTokens,
-		usage.CacheInputTokens, usage.ReasoningTokens, c.pendingFinishReason)
+		usage.CacheInputTokens, usage.CacheWriteTokens, usage.ReasoningTokens, c.pendingFinishReason)
 	c.emitEnsureMessageStart()
 	c.emitStopEvents()
 	stopReason := c.mapFinishReason(c.pendingFinishReason)

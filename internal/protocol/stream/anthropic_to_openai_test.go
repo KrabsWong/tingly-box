@@ -113,8 +113,8 @@ func TestAnthropicToOpenAIStream_RealFormatUsage(t *testing.T) {
 	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
 
 	events := []string{
-		buildAnthropicMessageStartJSON(t, 35, 0),  // input_tokens=35, cache=0
-		buildAnthropicOutputOnlyDeltaJSON(t, 18),   // output_tokens=18 only
+		buildAnthropicMessageStartJSON(t, 35, 0), // input_tokens=35, cache=0
+		buildAnthropicOutputOnlyDeltaJSON(t, 18), // output_tokens=18 only
 		buildMessageStopJSON(),
 	}
 	decoder := newFakeAnthropicDecoder(events)

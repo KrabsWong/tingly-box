@@ -127,13 +127,14 @@ func (us *UsageStore) aggregateDay(key string, dayStart time.Time) (int64, error
 		res := tx.Exec(`
 			INSERT INTO usage_daily (date, provider_uuid, provider_name, model, user_id,
 				request_count, total_tokens, input_tokens, output_tokens,
-				cache_input_tokens, system_tokens, error_count, streamed_count, latency_sum_ms)
+				cache_input_tokens, cache_write_tokens, system_tokens, error_count, streamed_count, latency_sum_ms)
 			SELECT ?, COALESCE(provider_uuid, ''), COALESCE(provider_name, ''), COALESCE(model, ''), COALESCE(user_id, ''),
 				COUNT(*),
 				COALESCE(SUM(total_tokens), 0),
 				COALESCE(SUM(input_tokens), 0),
 				COALESCE(SUM(output_tokens), 0),
 				COALESCE(SUM(cache_input_tokens), 0),
+				COALESCE(SUM(cache_write_tokens), 0),
 				COALESCE(SUM(system_tokens), 0),
 				COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0),
 				COALESCE(SUM(CASE WHEN streamed = true THEN 1 ELSE 0 END), 0),
@@ -187,6 +188,7 @@ func (us *UsageStore) aggregatedStatsFromDaily(q UsageStatsQuery) ([]AggregatedS
 				cur.InputTokens += b.InputTokens
 				cur.OutputTokens += b.OutputTokens
 				cur.CacheInputTokens += b.CacheInputTokens
+				cur.CacheWriteTokens += b.CacheWriteTokens
 				cur.SystemTokens += b.SystemTokens
 				cur.ErrorCount += b.ErrorCount
 				cur.StreamedCount += b.StreamedCount
@@ -282,6 +284,7 @@ func (us *UsageStore) dailyStatBuckets(q UsageStatsQuery, firstDay, lastDayEx ti
 		COALESCE(SUM(input_tokens), 0) as input_tokens,
 		COALESCE(SUM(output_tokens), 0) as output_tokens,
 		COALESCE(SUM(cache_input_tokens), 0) as cache_input_tokens,
+		COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens,
 		COALESCE(SUM(system_tokens), 0) as system_tokens,
 		COALESCE(SUM(error_count), 0) as error_count,
 		COALESCE(SUM(streamed_count), 0) as streamed_count,
@@ -422,6 +425,7 @@ func (us *UsageStore) dailyTimeSeries(firstDay, lastDayEx time.Time, filters map
 		InputTokens      int64
 		OutputTokens     int64
 		CacheInputTokens int64
+		CacheWriteTokens int64
 		SystemTokens     int64
 		ErrorCount       int64
 		LatencySum       int64
@@ -433,6 +437,7 @@ func (us *UsageStore) dailyTimeSeries(firstDay, lastDayEx time.Time, filters map
 		COALESCE(SUM(input_tokens), 0) as input_tokens,
 		COALESCE(SUM(output_tokens), 0) as output_tokens,
 		COALESCE(SUM(cache_input_tokens), 0) as cache_input_tokens,
+		COALESCE(SUM(cache_write_tokens), 0) as cache_write_tokens,
 		COALESCE(SUM(system_tokens), 0) as system_tokens,
 		COALESCE(SUM(error_count), 0) as error_count,
 		COALESCE(SUM(latency_sum_ms), 0) as latency_sum`).
@@ -457,6 +462,7 @@ func (us *UsageStore) dailyTimeSeries(firstDay, lastDayEx time.Time, filters map
 			InputTokens:      r.InputTokens,
 			OutputTokens:     r.OutputTokens,
 			CacheInputTokens: r.CacheInputTokens,
+			CacheWriteTokens: r.CacheWriteTokens,
 			SystemTokens:     r.SystemTokens,
 			ErrorCount:       r.ErrorCount,
 			AvgLatencyMs:     avgFloat(float64(r.LatencySum), r.RequestCount),

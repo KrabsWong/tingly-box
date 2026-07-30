@@ -361,8 +361,8 @@ func (h *Handler) handleAnthropicStreaming(c *gin.Context, req *AnthropicMessage
 					if explicitUsage.CachedInputTokens > 0 {
 						usageMap["cache_read_input_tokens"] = explicitUsage.CachedInputTokens
 					}
-					if explicitUsage.CacheCreationInputTokens > 0 {
-						usageMap["cache_creation_input_tokens"] = explicitUsage.CacheCreationInputTokens
+					if explicitUsage.CacheWriteTokens > 0 {
+						usageMap["cache_creation_input_tokens"] = explicitUsage.CacheWriteTokens
 					}
 					if explicitUsage.ReasoningTokens > 0 {
 						usageMap["reasoning_tokens"] = explicitUsage.ReasoningTokens
@@ -573,6 +573,11 @@ func (h *Handler) handleOpenAIStreaming(c *gin.Context, req *ChatCompletionReque
 				usage.TotalTokens = explicitUsage.PromptTokens + explicitUsage.CompletionTokens
 				if explicitUsage.CachedInputTokens > 0 {
 					usage.PromptTokensDetails.CachedTokens = explicitUsage.CachedInputTokens
+				}
+				// gpt-5.6+ reports cache writes alongside reads; both are
+				// disjoint subsets of prompt_tokens.
+				if explicitUsage.CacheWriteTokens > 0 {
+					usage.PromptTokensDetails.CacheWriteTokens = explicitUsage.CacheWriteTokens
 				}
 				if explicitUsage.ReasoningTokens > 0 {
 					usage.CompletionTokensDetails.ReasoningTokens = explicitUsage.ReasoningTokens

@@ -15,7 +15,7 @@ func TestResponsesWireResponseJSONIsMinimalComparedToSDKResponse(t *testing.T) {
 	conv := NewChatToResponsesConverter(nil, "")
 	conv.responseID = "resp_test"
 	conv.createdAt = 123
-	conv.usage = protocol.NewTokenUsageFull(10, 5, 3, 2)
+	conv.usage = protocol.NewTokenUsageFull(10, 5, 3, 0, 2)
 
 	wireEvent := wire.ResponsesCreatedEvent{
 		Type:           "response.created",

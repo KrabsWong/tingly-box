@@ -112,9 +112,7 @@ func (c *chatToResponsesConverter) processChunk(chunk *openai.ChatCompletionChun
 	}
 
 	// Track usage
-	if chunk.Usage.PromptTokens != 0 || chunk.Usage.CompletionTokens != 0 ||
-		chunk.Usage.PromptTokensDetails.CachedTokens != 0 ||
-		chunk.Usage.CompletionTokensDetails.ReasoningTokens != 0 {
+	if chunkHasUsage(chunk.Usage) {
 		c.usage = protocolusage.FromOpenAIChatCompletion(chunk.Usage)
 		c.promptTokensTotal = int64(c.usage.InputTokens + c.usage.CacheInputTokens)
 		c.hasUsage = true
@@ -202,7 +200,8 @@ func (c *chatToResponsesConverter) processChunk(chunk *openai.ChatCompletionChun
 			for _, ptc := range c.pendingToolCalls {
 				outputTokens += int64(ptc.arguments.Len() / 4)
 			}
-			c.usage = protocol.NewTokenUsageFull(c.usage.InputTokens, int(outputTokens), c.usage.CacheInputTokens, c.usage.ReasoningTokens)
+			c.usage = protocol.NewTokenUsageFull(c.usage.InputTokens, int(outputTokens),
+				c.usage.CacheInputTokens, c.usage.CacheWriteTokens, c.usage.ReasoningTokens)
 		}
 
 		c.emitCompletionEvents()

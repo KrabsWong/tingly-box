@@ -32,11 +32,12 @@ type StreamTokenCounter struct {
 	// pendingOutput buffers streamed delta text that has not been tokenized
 	// yet. It is flushed (tokenized in one pass) the first time counts are
 	// read, and discarded outright when upstream usage arrives.
-	pendingOutput        strings.Builder
-	upstreamInputTokens  int64
-	upstreamOutputTokens int64
-	upstreamCacheTokens  int64 // prompt_tokens_details.cached_tokens
-	upstreamReasoning    int64 // completion_tokens_details.reasoning_tokens
+	pendingOutput            strings.Builder
+	upstreamInputTokens      int64
+	upstreamOutputTokens     int64
+	upstreamCacheTokens      int64 // prompt_tokens_details.cached_tokens
+	upstreamCacheWriteTokens int64 // prompt_tokens_details.cache_write_tokens (gpt-5.6+)
+	upstreamReasoning        int64 // completion_tokens_details.reasoning_tokens
 }
 
 // NewStreamTokenCounter creates a new streaming token counter.
@@ -120,6 +121,9 @@ func (c *StreamTokenCounter) ConsumeOpenAIChunk(chunk *openai.ChatCompletionChun
 		if chunk.Usage.PromptTokensDetails.CachedTokens > 0 {
 			c.upstreamCacheTokens = chunk.Usage.PromptTokensDetails.CachedTokens
 		}
+		if chunk.Usage.PromptTokensDetails.CacheWriteTokens > 0 {
+			c.upstreamCacheWriteTokens = chunk.Usage.PromptTokensDetails.CacheWriteTokens
+		}
 		if chunk.Usage.CompletionTokensDetails.ReasoningTokens > 0 {
 			c.upstreamReasoning = chunk.Usage.CompletionTokensDetails.ReasoningTokens
 		}
@@ -174,7 +178,8 @@ func (c *StreamTokenCounter) GetCounts() (inputTokens, outputTokens int) {
 
 	i, o := c.inputTokens, c.outputTokens
 	if c.upstreamInputTokens > 0 {
-		// Normalize: subtract cache so inputTokens = uncached-only portion
+		// Normalize: subtract cache reads only. Cache writes are billed at a
+		// premium and stay inside inputTokens (see ai.TokenUsage).
 		i = int(c.upstreamInputTokens - c.upstreamCacheTokens)
 	}
 	if c.upstreamOutputTokens > 0 {
@@ -183,12 +188,13 @@ func (c *StreamTokenCounter) GetCounts() (inputTokens, outputTokens int) {
 	return i, o
 }
 
-// GetUpstreamDetails returns cache and reasoning token counts harvested
-// from upstream usage chunks (zero if upstream did not advertise them).
-func (c *StreamTokenCounter) GetUpstreamDetails() (cacheTokens, reasoningTokens int) {
+// GetUpstreamDetails returns cache read, cache write and reasoning token counts
+// harvested from upstream usage chunks (zero if upstream did not advertise
+// them). cacheWriteTokens is only reported by gpt-5.6 and later models.
+func (c *StreamTokenCounter) GetUpstreamDetails() (cacheTokens, cacheWriteTokens, reasoningTokens int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return int(c.upstreamCacheTokens), int(c.upstreamReasoning)
+	return int(c.upstreamCacheTokens), int(c.upstreamCacheWriteTokens), int(c.upstreamReasoning)
 }
 
 // SetInputTokens sets the input token count.

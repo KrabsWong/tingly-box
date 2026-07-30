@@ -7,20 +7,16 @@ instead of re-implementing provider rules inline.
 
 ## Normalization rules
 
-Different providers report tokens with incompatible semantics. We normalize to a
-consistent internal representation so the front-end cache-hit formula works correctly:
+**The normalization table lives in [`.design/stream-usage-tracking.md`](../../../.design/stream-usage-tracking.md) §2**, together with the per-field containment rules, the cross-provider invariants, and the gpt-5.6 cache-write background (§12). It is deliberately not duplicated here — this file previously carried a second copy that went stale the moment cache writes landed.
+
+The one-line version, for orientation:
 
 ```
-cache_hit_ratio = CacheInputTokens / (InputTokens + CacheInputTokens)
+InputTokens      = uncached + written   (OpenAI subtracts reads; Anthropic adds creation)
+CacheInputTokens = cache reads
+CacheWriteTokens = cache writes, a SUBSET of InputTokens — never add it on top
+cache_hit_ratio  = CacheInputTokens / (InputTokens + CacheInputTokens)
 ```
-
-| Provider | Wire semantics | InputTokens stored as | CacheInputTokens stored as |
-|---|---|---|---|
-| **OpenAI Chat / Responses** | `prompt_tokens` = total (cached + uncached) | `prompt_tokens - cached_tokens` | `cached_tokens` |
-| **Anthropic** | `input_tokens` = uncached only; `cache_creation_input_tokens` = write cost | `input_tokens + cache_creation_input_tokens` | `cache_read_input_tokens` |
-
-> **Why add `cache_creation` to input?** Creation tokens are billable at a write-cost
-> rate, so they belong in the denominator to correctly represent total prompt spend.
 
 ### Anthropic streaming event split
 

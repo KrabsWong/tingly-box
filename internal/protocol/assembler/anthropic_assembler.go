@@ -210,16 +210,21 @@ func (a *AnthropicStreamAssembler) SetUsage(inputTokens, outputTokens int) {
 
 // SetUsageFromTokenUsage sets the assembled response usage from the canonical
 // ai.TokenUsage type. Cache-read input tokens are mapped to
-// anthropic.Usage.CacheReadInputTokens; reasoning_tokens has no Anthropic
-// analogue (extended-thinking tokens are billed inside output_tokens).
+// anthropic.Usage.CacheReadInputTokens and cache writes to
+// CacheCreationInputTokens; reasoning_tokens has no Anthropic analogue
+// (extended-thinking tokens are billed inside output_tokens).
+//
+// InputTokens goes through UncachedInputTokens() because canonical usage folds
+// the cache-write cost into InputTokens while Anthropic's wire field excludes it.
 func (a *AnthropicStreamAssembler) SetUsageFromTokenUsage(u *ai.TokenUsage) {
 	if u == nil {
 		return
 	}
 	a.usageData = &anthropic.Usage{
-		InputTokens:          int64(u.InputTokens),
-		OutputTokens:         int64(u.OutputTokens),
-		CacheReadInputTokens: int64(u.CacheInputTokens),
+		InputTokens:              int64(u.UncachedInputTokens()),
+		OutputTokens:             int64(u.OutputTokens),
+		CacheReadInputTokens:     int64(u.CacheInputTokens),
+		CacheCreationInputTokens: int64(u.CacheWriteTokens),
 	}
 }
 

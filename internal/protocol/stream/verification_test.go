@@ -11,9 +11,9 @@ import (
 // TestStopReasonMapping tests OpenAI to Anthropic stop reason conversion
 func TestStopReasonMapping(t *testing.T) {
 	mappings := map[string]string{
-		"stop":         "end_turn",
-		"length":       "max_tokens",
-		"tool_calls":   "tool_use",
+		"stop":           "end_turn",
+		"length":         "max_tokens",
+		"tool_calls":     "tool_use",
 		"content_filter": "content_filter",
 	}
 
@@ -128,9 +128,9 @@ func TestTokenCounterBasicOperations(t *testing.T) {
 // TestFinishReasonMappingFromPackage tests finish reason mapping from the openai_to_anthropic package
 func TestFinishReasonMappingFromPackage(t *testing.T) {
 	mappings := map[string]string{
-		"stop":         "end_turn",
-		"length":       "max_tokens",
-		"tool_calls":   "tool_use",
+		"stop":           "end_turn",
+		"length":         "max_tokens",
+		"tool_calls":     "tool_use",
 		"content_filter": "content_filter",
 	}
 
