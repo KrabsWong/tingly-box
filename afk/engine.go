@@ -99,6 +99,72 @@ func (u Usage) LogFields() logrus.Fields {
 	}
 }
 
+// ThinkingMode selects how the model reasons, and whether that reasoning comes
+// back to us.
+//
+// One field rather than an on/off flag plus a visibility flag, because the two
+// are not independent in the API: reasoning you cannot see and no reasoning at
+// all are different requests, and "unset" is a third thing again — on current
+// models omitting the parameter already means adaptive thinking, while on
+// slightly older ones it means none.
+//
+//	                      | thinking parameter sent
+//	ThinkingModelDefault  | (none — the model's own default applies)
+//	ThinkingVisible       | {type: adaptive, display: summarized}
+//	ThinkingHidden        | {type: adaptive, display: omitted}
+//	ThinkingOff           | {type: disabled}
+type ThinkingMode string
+
+const (
+	// ThinkingModelDefault sends nothing and lets the model decide. This is the
+	// zero value, and the right default for a gateway that routes to whatever
+	// model the user configured: forcing a mode a model does not accept is a
+	// hard failure, while its own default is by definition supported.
+	ThinkingModelDefault ThinkingMode = ""
+
+	// ThinkingVisible asks for adaptive thinking and for the reasoning to be
+	// returned. This is the mode to pick if anything renders StreamSink
+	// .OnThinking — display defaults to omitted on current models, which means
+	// thinking blocks arrive with empty text and OnThinking never fires with
+	// anything in it.
+	ThinkingVisible ThinkingMode = "visible"
+
+	// ThinkingHidden asks for adaptive thinking but not for its content. The
+	// model still reasons and still returns a signature for multi-turn
+	// continuity; we simply do not pay to carry the text around. Distinct from
+	// ThinkingModelDefault on models where omitting the parameter means no
+	// thinking at all.
+	ThinkingHidden ThinkingMode = "hidden"
+
+	// ThinkingOff turns thinking off, for latency- or cost-sensitive callers.
+	ThinkingOff ThinkingMode = "off"
+)
+
+// thinkingParam renders the mode as the request parameter, and reports whether
+// there is one to send.
+func (m ThinkingMode) thinkingParam() (anthropic.BetaThinkingConfigParamUnion, bool) {
+	switch m {
+	case ThinkingVisible:
+		return anthropic.BetaThinkingConfigParamUnion{
+			OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{
+				Display: anthropic.BetaThinkingConfigAdaptiveDisplaySummarized,
+			},
+		}, true
+	case ThinkingHidden:
+		return anthropic.BetaThinkingConfigParamUnion{
+			OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{
+				Display: anthropic.BetaThinkingConfigAdaptiveDisplayOmitted,
+			},
+		}, true
+	case ThinkingOff:
+		return anthropic.BetaThinkingConfigParamUnion{
+			OfDisabled: &anthropic.BetaThinkingConfigDisabledParam{},
+		}, true
+	default:
+		return anthropic.BetaThinkingConfigParamUnion{}, false
+	}
+}
+
 // Engine runs the ReAct loop against a configured model and toolset.
 type Engine struct {
 	client        anthropic.Client
@@ -108,6 +174,7 @@ type Engine struct {
 	temperature   *float64
 	maxIterations int
 	streamText    bool
+	thinking      ThinkingMode
 	serverCompact bool
 	serverTrigger int64
 	tools         []Tool
@@ -140,6 +207,9 @@ type Config struct {
 	// engine always consumes the model's HTTP stream either way; this flag only
 	// changes the granularity of the OnText fan-out to the sink.
 	StreamText bool
+	// Thinking selects the model's reasoning mode. Zero value leaves the
+	// parameter unset; see ThinkingMode.
+	Thinking ThinkingMode
 	// DisableServerCompaction turns off server-side compaction, which is
 	// otherwise on by default. With it off, nothing bounds the prompt: a long
 	// enough conversation eventually exceeds the context window and fails.
@@ -179,6 +249,7 @@ func NewEngine(cfg Config) (*Engine, error) {
 		temperature:   cfg.Temperature,
 		maxIterations: maxIter,
 		streamText:    cfg.StreamText,
+		thinking:      cfg.Thinking,
 		serverCompact: !cfg.DisableServerCompaction,
 		serverTrigger: cfg.ServerCompactTrigger,
 		toolByName:    make(map[string]Tool, len(cfg.Tools)),
@@ -364,6 +435,9 @@ func (e *Engine) streamTurn(
 	}
 	if e.temperature != nil {
 		params.Temperature = anthropic.Float(*e.temperature)
+	}
+	if think, ok := e.thinking.thinkingParam(); ok {
+		params.Thinking = think
 	}
 	if len(e.toolParams) > 0 {
 		params.Tools = e.toolParams

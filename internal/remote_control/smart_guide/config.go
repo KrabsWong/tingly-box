@@ -18,6 +18,14 @@ type SmartGuideConfig struct {
 	// Temperature for LLM responses
 	Temperature float64 `json:"temperature"`
 
+	// Thinking selects the model's reasoning mode: "" (the model's own
+	// default), "visible", "hidden", or "off". See afk.ThinkingMode.
+	//
+	// "visible" is what makes @tb render 💭 lines: reasoning only comes back
+	// with content when it is asked for explicitly, and the streaming layer
+	// shows it in verbose mode.
+	Thinking string `json:"thinking,omitempty"`
+
 	// ToolsEnabled maps tool names to enabled state
 	ToolsEnabled map[string]bool `json:"tools_enabled"`
 

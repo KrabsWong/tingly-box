@@ -130,8 +130,33 @@ Thinking blocks stay in history **with their signatures**, which the API
 validates on replay. A block that does not survive the session store's JSON
 round trip is a rejected request on the user's next message.
 
-Thinking is not *enabled* (no `thinking` parameter is sent). Enabling it blind
-risks rejection on upstreams that do not accept it — see §5.
+Whether the model thinks at all is one config field, `Config.Thinking`, with
+four values that each map to exactly one request shape:
+
+| `ThinkingMode` | sends |
+|---|---|
+| `ThinkingModelDefault` (zero value) | nothing — the model's own default applies |
+| `ThinkingVisible` | `{type: adaptive, display: summarized}` |
+| `ThinkingHidden` | `{type: adaptive, display: omitted}` |
+| `ThinkingOff` | `{type: disabled}` |
+
+One field rather than an on/off flag plus a visibility flag, because those are
+not independent here: reasoning you cannot see and no reasoning at all are
+different requests, and *unset* is a third thing again — on current models
+omitting the parameter already means adaptive thinking, on slightly older ones
+it means none.
+
+**`ThinkingVisible` is the one that makes `OnThinking` useful.** `display`
+defaults to `omitted` on current models, so thinking blocks otherwise arrive
+with empty text and the 💭 rendering never has anything to show. Asking for
+reasoning and asking to see it are the same decision in practice, which is why
+they are one value and not two.
+
+The default stays *unset*: `@tb` routes to whatever model the user configured,
+and a mode a model rejects is a hard failure, while its own default is by
+definition supported. An unrecognized value falls back to sending nothing —
+the mode arrives as a plain string from `SmartGuideConfig.Thinking`, and a typo
+must not become a 400.
 
 ### 3.4 Skills are discovered once per agent
 
@@ -260,10 +285,16 @@ context window, because `@tb` routes by bot-UUID rule and the window is not know
 at runtime. 120k suits the models compaction is available on (all 1M-window) and
 would be too high for a small one.
 
-**Thinking is still not enabled.** Unlike compaction this is not a beta — adaptive
-thinking is GA — but it is model-gated in a way that 400s where unsupported, and
-nothing has asked for it yet. Thinking blocks are handled correctly when a model
-returns them by default (§3.3); that is as far as it goes.
+**Thinking is configurable but off by default** (§3.3) — "off" meaning the
+parameter is not sent, which on current models still means the model thinks. The
+default is unset rather than `ThinkingVisible` for the same reason the trigger is
+a fixed number: the model is not known at runtime, and its own default is the
+only setting guaranteed to be accepted.
+
+**`output_config.effort` is not wired.** It is the API's primary
+intelligence/latency/cost control and would be a second one-field knob on the
+same axis as thinking. Left out because nothing has asked for it; adding it is
+`Config.Effort` plus three lines in `streamTurn`.
 
 **`Temperature` is sent unconditionally** (`smart_guide/agent.go`, from
 `SmartGuideConfig`). Current Anthropic models — Opus 5, 4.8, 4.7, Fable 5,
@@ -313,6 +344,11 @@ means designing it against a single caller.
   pinned trigger and no per-chat setting. Both compaction knobs
   (`DisableServerCompaction`, `ServerCompactTrigger`) are escape hatches, not
   settings anyone is expected to tune.
+- **#4 separate orthogonal axes / #2 no mode pickers** — thinking is the one
+  place with a genuine multi-value setting. It stays a single field because its
+  values are not orthogonal (§3.3): splitting it into on/off plus visible/hidden
+  would invent a fourth combination the API has no shape for, and would hide
+  that *unset* is meaningfully different from both.
 - **#10 done ≠ locked** — `/clear` archives rather than deletes, and the
   append-only log never rewrites what it already wrote.
 - **#12 side effects scoped to the current surface** — a steering message
