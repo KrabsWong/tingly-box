@@ -273,7 +273,7 @@ func TestChatToResponsesConverter_CompletedEvent(t *testing.T) {
 func TestChatToResponsesConverter_WithReasoningTokens(t *testing.T) {
 	conv := NewChatToResponsesConverter(nil, "o3-mini")
 	conv.hasSentCreated = true
-	conv.usage = protocol.NewTokenUsageFull(45, 30, 5, 12)
+	conv.usage = protocol.NewTokenUsageFull(45, 30, 5, 0, 12)
 	conv.hasUsage = true
 
 	conv.processChunk(&openai.ChatCompletionChunk{

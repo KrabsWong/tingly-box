@@ -3,12 +3,17 @@
 // of re-implementing provider-specific rules inline.
 //
 // Normalization rules:
-//   - OpenAI (Chat / Responses): prompt_tokens = total (cached + uncached).
-//     Store inputTokens = total - cached so the frontend ratio formula gives
-//     cache_read / (cache_read + uncached) = correct hit rate.
+//   - OpenAI (Chat / Responses): prompt_tokens = total (cached + written +
+//     uncached). Store inputTokens = total - cached so the frontend ratio
+//     formula gives cache_read / (cache_read + uncached) = correct hit rate.
+//     cache_write_tokens (gpt-5.6+) stays inside inputTokens because it is
+//     billed at a premium rate, and is also reported as CacheWriteTokens.
 //   - Anthropic: input_tokens = uncached only; cache_creation_input_tokens is
 //     an additional write cost that belongs in the denominator.
 //     Store inputTokens = input + creation so the formula covers total prompt cost.
+//
+// Both sides therefore agree: inputTokens = uncached + written, and
+// CacheWriteTokens is a subset of inputTokens, never an addition to it.
 package usage
 
 import (
@@ -20,29 +25,36 @@ import (
 )
 
 // FromOpenAIChatCompletion extracts normalized TokenUsage from an OpenAI Chat
-// Completions usage block. CachedTokens is a SUBSET of PromptTokens, so we
-// subtract it to get the uncached portion.
+// Completions usage block. CachedTokens and CacheWriteTokens are disjoint
+// SUBSETS of PromptTokens. Only the read hits are subtracted: writes are billed
+// at 1.25x the uncached input rate (gpt-5.6+), so they stay inside InputTokens
+// and are reported separately for cost attribution — mirroring how Anthropic's
+// cache_creation_input_tokens is folded in.
 func FromOpenAIChatCompletion(u openai.CompletionUsage) *protocol.TokenUsage {
-	cache := int(u.PromptTokensDetails.CachedTokens)
+	cacheRead := int(u.PromptTokensDetails.CachedTokens)
+	cacheWrite := int(u.PromptTokensDetails.CacheWriteTokens)
 	reasoning := int(u.CompletionTokensDetails.ReasoningTokens)
 	return protocol.NewTokenUsageFull(
-		int(u.PromptTokens)-cache,
+		int(u.PromptTokens)-cacheRead,
 		int(u.CompletionTokens),
-		cache,
+		cacheRead,
+		cacheWrite,
 		reasoning,
 	)
 }
 
 // FromOpenAIResponses extracts normalized TokenUsage from an OpenAI Responses
 // API usage block. Same semantics as Chat: InputTokens = total, CachedTokens
-// is a subset.
+// and CacheWriteTokens are subsets.
 func FromOpenAIResponses(u responses.ResponseUsage) *protocol.TokenUsage {
-	cache := int(u.InputTokensDetails.CachedTokens)
+	cacheRead := int(u.InputTokensDetails.CachedTokens)
+	cacheWrite := int(u.InputTokensDetails.CacheWriteTokens)
 	reasoning := int(u.OutputTokensDetails.ReasoningTokens)
 	return protocol.NewTokenUsageFull(
-		int(u.InputTokens)-cache,
+		int(u.InputTokens)-cacheRead,
 		int(u.OutputTokens),
-		cache,
+		cacheRead,
+		cacheWrite,
 		reasoning,
 	)
 }
@@ -82,6 +94,9 @@ func ChatUsage(u *protocol.TokenUsage) openai.CompletionUsage {
 	}
 	if u.CacheInputTokens > 0 {
 		cu.PromptTokensDetails.CachedTokens = int64(u.CacheInputTokens)
+	}
+	if u.CacheWriteTokens > 0 {
+		cu.PromptTokensDetails.CacheWriteTokens = int64(u.CacheWriteTokens)
 	}
 	if u.ReasoningTokens > 0 {
 		cu.CompletionTokensDetails.ReasoningTokens = int64(u.ReasoningTokens)

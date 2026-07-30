@@ -65,9 +65,10 @@ func HandleAnthropicBetaToOpenAIResponse(bm *anthropic.BetaMessage, responseMode
 		CompletionTokens: bm.Usage.OutputTokens,
 		TotalTokens:      promptTokens + bm.Usage.OutputTokens,
 	}
-	if bm.Usage.CacheReadInputTokens > 0 {
+	if bm.Usage.CacheReadInputTokens > 0 || bm.Usage.CacheCreationInputTokens > 0 {
 		usage.PromptTokensDetails = &wire.ChatCompletionPromptDetailsWire{
-			CachedTokens: bm.Usage.CacheReadInputTokens,
+			CachedTokens:     bm.Usage.CacheReadInputTokens,
+			CacheWriteTokens: bm.Usage.CacheCreationInputTokens,
 		}
 	}
 

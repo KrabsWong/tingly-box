@@ -361,3 +361,99 @@ func TestStreamTokenCounter_EmptyChunk(t *testing.T) {
 		t.Errorf("expected zero tokens for empty chunk, got input=%d output=%d", inputTokens, outputTokens)
 	}
 }
+
+// TestStreamTokenCounter_CacheWriteTokens covers the gpt-5.6+ usage chunk:
+// cache_write_tokens must be harvested alongside cached_tokens, and only the
+// read portion may be subtracted from the input count — writes are billed at a
+// premium and belong to this prompt's cost.
+func TestStreamTokenCounter_CacheWriteTokens(t *testing.T) {
+	counter, err := NewStreamTokenCounter()
+	if err != nil {
+		t.Fatalf("failed to create counter: %v", err)
+	}
+
+	chunkJSON := `{
+		"id": "test",
+		"object": "chat.completion.chunk",
+		"created": 1234567890,
+		"model": "gpt-5.6",
+		"choices": [],
+		"usage": {
+			"prompt_tokens": 1000,
+			"completion_tokens": 25,
+			"total_tokens": 1025,
+			"prompt_tokens_details": {
+				"cached_tokens": 600,
+				"cache_write_tokens": 150
+			},
+			"completion_tokens_details": {
+				"reasoning_tokens": 9
+			}
+		}
+	}`
+
+	var chunk openai.ChatCompletionChunk
+	if err := chunk.UnmarshalJSON([]byte(chunkJSON)); err != nil {
+		t.Fatalf("failed to unmarshal chunk: %v", err)
+	}
+	if err := counter.ConsumeOpenAIChunk(&chunk); err != nil {
+		t.Fatalf("failed to consume chunk: %v", err)
+	}
+
+	inputTokens, outputTokens := counter.GetCounts()
+	if inputTokens != 400 {
+		t.Errorf("expected input tokens 400 (1000 - 600 cached, writes kept), got %d", inputTokens)
+	}
+	if outputTokens != 25 {
+		t.Errorf("expected output tokens 25, got %d", outputTokens)
+	}
+
+	cacheRead, cacheWrite, reasoning := counter.GetUpstreamDetails()
+	if cacheRead != 600 {
+		t.Errorf("expected cache read 600, got %d", cacheRead)
+	}
+	if cacheWrite != 150 {
+		t.Errorf("expected cache write 150, got %d", cacheWrite)
+	}
+	if reasoning != 9 {
+		t.Errorf("expected reasoning 9, got %d", reasoning)
+	}
+}
+
+// TestStreamTokenCounter_NoCacheWriteReported pins the pre-gpt-5.6 / Azure
+// shape: no cache_write_tokens in the payload leaves the detail at zero.
+func TestStreamTokenCounter_NoCacheWriteReported(t *testing.T) {
+	counter, err := NewStreamTokenCounter()
+	if err != nil {
+		t.Fatalf("failed to create counter: %v", err)
+	}
+
+	chunkJSON := `{
+		"id": "test",
+		"object": "chat.completion.chunk",
+		"created": 1234567890,
+		"model": "gpt-4.1",
+		"choices": [],
+		"usage": {
+			"prompt_tokens": 500,
+			"completion_tokens": 10,
+			"total_tokens": 510,
+			"prompt_tokens_details": {"cached_tokens": 200}
+		}
+	}`
+
+	var chunk openai.ChatCompletionChunk
+	if err := chunk.UnmarshalJSON([]byte(chunkJSON)); err != nil {
+		t.Fatalf("failed to unmarshal chunk: %v", err)
+	}
+	if err := counter.ConsumeOpenAIChunk(&chunk); err != nil {
+		t.Fatalf("failed to consume chunk: %v", err)
+	}
+
+	if _, cacheWrite, _ := counter.GetUpstreamDetails(); cacheWrite != 0 {
+		t.Errorf("expected cache write 0, got %d", cacheWrite)
+	}
+	if inputTokens, _ := counter.GetCounts(); inputTokens != 300 {
+		t.Errorf("expected input tokens 300, got %d", inputTokens)
+	}
+}

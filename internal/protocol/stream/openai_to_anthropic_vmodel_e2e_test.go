@@ -148,14 +148,20 @@ func TestOpenAIToAnthropicStream_VModelFullUsage(t *testing.T) {
 			usageBlock, _ := msgDelta["usage"].(map[string]interface{})
 			require.NotNil(t, usageBlock)
 
-			// MockUsage from StreamTestMockSpecs: prompt=42 completion=17 cached=11 reasoning=9
-			// After normalization: inputTokens = 42 - 11 = 31 (uncached portion only)
+			// MockUsage from StreamTestMockSpecs:
+			//   prompt=42 completion=17 cached=11 cache_write=5 reasoning=9
+			// Normalized: InputTokens = 42 - 11 = 31 (cache writes stay folded in).
+			// On the Anthropic wire the fold is undone again:
+			//   input_tokens = 31 - 5 = 26, cache_creation = 5, cache_read = 11.
 			assert.EqualValues(t, 17, usageBlock["output_tokens"], "output_tokens from explicit MockUsage.CompletionTokens")
 			assert.EqualValues(t, 11, usageBlock["cache_read_input_tokens"], "cache_read_input_tokens from prompt_tokens_details.cached_tokens")
+			assert.EqualValues(t, 5, usageBlock["cache_creation_input_tokens"], "cache_creation_input_tokens from prompt_tokens_details.cache_write_tokens")
+			assert.EqualValues(t, 26, usageBlock["input_tokens"], "input_tokens must exclude the write portion, or writes get billed twice")
 
 			assert.Equal(t, 31, usage.InputTokens)
 			assert.Equal(t, 17, usage.OutputTokens)
 			assert.Equal(t, 11, usage.CacheInputTokens)
+			assert.Equal(t, 5, usage.CacheWriteTokens)
 			assert.Equal(t, 9, usage.ReasoningTokens)
 
 			// tool variant should map finish_reason=tool_calls to stop_reason=tool_use

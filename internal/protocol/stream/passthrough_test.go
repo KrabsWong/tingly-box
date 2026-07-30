@@ -492,8 +492,8 @@ func TestHandleAnthropic_RealStreamFormat(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	events := []string{
-		buildAnthropicMessageStartJSON(t, 35, 5),   // input_tokens=35, cache=5
-		buildAnthropicOutputOnlyDeltaJSON(t, 18),   // output_tokens=18 only
+		buildAnthropicMessageStartJSON(t, 35, 5), // input_tokens=35, cache=5
+		buildAnthropicOutputOnlyDeltaJSON(t, 18), // output_tokens=18 only
 	}
 	decoder := newFakeAnthropicDecoder(events)
 	stream := anthropicstream.NewStream[anthropic.MessageStreamEventUnion](decoder, nil)
@@ -521,8 +521,8 @@ func TestHandleAnthropicBeta_RealStreamFormat(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	events := []string{
-		buildAnthropicMessageStartJSON(t, 40, 8),  // input_tokens=40, cache=8
-		buildAnthropicOutputOnlyDeltaJSON(t, 22),  // output_tokens=22 only
+		buildAnthropicMessageStartJSON(t, 40, 8), // input_tokens=40, cache=8
+		buildAnthropicOutputOnlyDeltaJSON(t, 22), // output_tokens=22 only
 	}
 	decoder := newFakeAnthropicDecoder(events)
 	stream := anthropicstream.NewStream[anthropic.BetaRawMessageStreamEventUnion](decoder, nil)

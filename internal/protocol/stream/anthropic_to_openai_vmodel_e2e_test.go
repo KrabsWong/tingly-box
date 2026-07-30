@@ -64,6 +64,7 @@ func TestAnthropicToOpenAIStream_VModelFullUsage(t *testing.T) {
 			// The returned usage (what gets persisted) must retain cache_read_input_tokens
 			// instead of dropping it to 0 on the conversion path.
 			assert.Equal(t, 11, usage.CacheInputTokens, "CacheInputTokens should retain cache_read_input_tokens for recorded usage")
+			assert.Equal(t, 5, usage.CacheWriteTokens, "CacheWriteTokens should retain cache_creation_input_tokens")
 
 			body := w.Body.String()
 
@@ -80,6 +81,9 @@ func TestAnthropicToOpenAIStream_VModelFullUsage(t *testing.T) {
 			details, _ := usageChunk["prompt_tokens_details"].(map[string]interface{})
 			require.NotNil(t, details, "prompt_tokens_details should be populated when upstream advertises cache_read_input_tokens")
 			assert.EqualValues(t, 11, jsonNumber(details, "cached_tokens"))
+			// Anthropic cache_creation maps onto OpenAI's cache_write_tokens:
+			// both are the premium-rate write slice of the prompt total.
+			assert.EqualValues(t, 5, jsonNumber(details, "cache_write_tokens"))
 		})
 	}
 }

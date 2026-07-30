@@ -61,9 +61,11 @@ flowchart TD
 
 ```go
 type TokenUsage struct {
-    InputTokens      int `json:"input_tokens"`                 // 输入/prompt，已扣除 cache
+    InputTokens      int `json:"input_tokens"`                 // 输入/prompt，已扣除 cache read（仍含 cache write）
     OutputTokens     int `json:"output_tokens"`                // 输出/completion
     CacheInputTokens int `json:"cache_input_tokens,omitempty"` // cache read 命中（不含 write）
+    CacheReadTokens  int `json:"cache_read_tokens,omitempty"`  // = CacheInputTokens，计费明细
+    CacheWriteTokens int `json:"cache_write_tokens,omitempty"` // cache write，⊂ InputTokens，计费明细
     ReasoningTokens  int `json:"reasoning_tokens,omitempty"`   // o1/o3 reasoning，是 OutputTokens 的子集
     SystemTokens     int `json:"system_tokens,omitempty"`      // 模板/系统指令/框架开销
 }
@@ -78,12 +80,17 @@ type TokenUsage struct {
 | `HasCacheUsage()` | `CacheInputTokens > 0` |
 | `NewTokenUsage(in, out)` | 基础 |
 | `NewTokenUsageWithCache(in, out, cache)` | + cache |
-| `NewTokenUsageFull(in, out, cache, reasoning)` | + reasoning（OpenAI 路径用） |
+| `NewTokenUsageWithCacheDetails(in, out, read, write)` | + cache 读写明细 |
+| `NewTokenUsageFull(in, out, cacheRead, cacheWrite, reasoning)` | 全字段 |
 | `ZeroTokenUsage()` | 零值，用于「无 usage」回退 |
 | `ToAnthropicUsageMap()` / `ToAnthropicMessageDeltaUsageMap()` | 从 canonical usage 生成 Anthropic wire usage map |
 | `ToOpenAIChatUsageMap()` / `ToOpenAIResponsesUsageMap()` | 从 canonical usage 还原 OpenAI wire usage map（input/prompt 含 cache） |
+| `UncachedInputTokens()` | `InputTokens` 去掉写入部分 = Anthropic wire 的 `input_tokens` |
+| `PromptTotalTokens()` | `Input + Cache` = OpenAI wire 的 `prompt_tokens` |
 
-> ⚠️ `CacheInputTokens` 仅代表 **cache read 命中**。Write（`cache_creation`）已并入 `InputTokens`（Anthropic 归一化）；OpenAI 无 write 概念。`CacheReadTokens` / `CacheWriteTokens` 为详情字段，两者之和 = 旧版 `CacheInputTokens`（合并期已过去，现以详情为准）。
+> **wire usage map 只能由这些方法产出。** 之前每个 converter 各自手搓 `prompt_tokens_details`，加一个字段要改 9 处，漏一处就是静默少算一个计费维度。converter 若需微调（如 `total_tokens` 用上游原值），在返回的 map 上覆盖那一个键，不要 fork 整个构造。
+
+> ⚠️ `CacheInputTokens` 仅代表 **cache read 命中**。Write 成本（Anthropic `cache_creation_input_tokens` / OpenAI `cache_write_tokens`）**已并入 `InputTokens`**，两家归一化后语义一致。`CacheReadTokens` / `CacheWriteTokens` 是**计费明细字段**：`CacheReadTokens == CacheInputTokens`，`CacheWriteTokens ⊂ InputTokens`——所以**不要**把 `CacheWriteTokens` 再加进任何总量，否则重复计数。
 
 ---
 
@@ -95,12 +102,12 @@ type TokenUsage struct {
 cache_hit_ratio = CacheInputTokens / (InputTokens + CacheInputTokens)
 ```
 
-| Provider | wire 语义 | 归一化后 InputTokens | 归一化后 CacheInputTokens |
-|---|---|---|---|
-| **OpenAI Chat / Responses** | `prompt_tokens` = 总数（含 cached） | `prompt_tokens − cached_tokens` | `cached_tokens` |
-| **Anthropic** | `input_tokens` = 仅未命中；`cache_creation_input_tokens` = 写入成本 | `input_tokens + cache_creation_input_tokens` | `cache_read_input_tokens` |
+| Provider | wire 语义 | 归一化后 InputTokens | 归一化后 CacheInputTokens | 归一化后 CacheWriteTokens |
+|---|---|---|---|---|
+| **OpenAI Chat / Responses** | `prompt_tokens` = 总数（含 cached **和** cache_write） | `prompt_tokens − cached_tokens` | `cached_tokens` | `cache_write_tokens` |
+| **Anthropic** | `input_tokens` = 仅未命中；`cache_creation_input_tokens` = 写入成本 | `input_tokens + cache_creation_input_tokens` | `cache_read_input_tokens` | `cache_creation_input_tokens` |
 
-> **为什么把 `cache_creation` 加进 input？** creation 按写入价计费，属于「本次 prompt 总花费」，要进分母；read 命中是省下来的，单独放 cache。
+> **为什么写入成本要留在 input 里？** 写入按（更贵的）写入价计费，属于「本次 prompt 总花费」，要进分母；read 命中是省下来的，单独放 cache。两家 wire 形态不同（OpenAI 是减法、Anthropic 是加法），但归一化后 `InputTokens` 都是「未命中 + 写入」，`CacheWriteTokens` 都是它的子集明细。
 
 ### 2.1 每个值：含义 · 包含关系 · 计算 ⭐
 
@@ -114,21 +121,25 @@ cache_hit_ratio = CacheInputTokens / (InputTokens + CacheInputTokens)
 
 | wire 字段（Chat / Responses） | 含义 | 包含关系 |
 |---|---|---|
-| `prompt_tokens` / `input_tokens` | 本次 prompt 的**全部** input | 父字段，**已含** cached |
-| `prompt_tokens_details.cached_tokens` / `input_tokens_details.cached_tokens` | 其中命中 prompt cache 的部分 | ⊂ `prompt_tokens` 的**子集** |
+| `prompt_tokens` / `input_tokens` | 本次 prompt 的**全部** input | 父字段，**已含** cached **与** cache_write |
+| `prompt_tokens_details.cached_tokens` / `input_tokens_details.cached_tokens` | 其中命中 prompt cache 的部分（读，折扣价） | ⊂ `prompt_tokens` 的**子集** |
+| `prompt_tokens_details.cache_write_tokens` / `input_tokens_details.cache_write_tokens` | 其中写入 prompt cache 的部分（gpt-5.6+，1.25× input 价） | ⊂ `prompt_tokens` 的**子集**，与 `cached_tokens` **不重叠** |
 | `completion_tokens` / `output_tokens` | 本次**全部** output | 父字段，**已含** reasoning |
 | `completion_tokens_details.reasoning_tokens` / `output_tokens_details.reasoning_tokens` | 其中思考（o1/o3）消耗 | ⊂ `completion_tokens` 的**子集** |
 
 归一化计算（`FromOpenAIChatCompletion` / `FromOpenAIResponses`）：
 
 ```
-InputTokens      = prompt_tokens − cached_tokens   // 减掉缓存，得到"未命中/新增"input
+InputTokens      = prompt_tokens − cached_tokens   // 只减 read；write 留在 input 里（它要按写入价计费）
 CacheInputTokens = cached_tokens                    // 命中缓存（读）
+CacheWriteTokens = cache_write_tokens               // 写入缓存，⊂ InputTokens，仅作计费明细
 OutputTokens     = completion_tokens                // 原样保留（reasoning 仍含在内，不减）
 ReasoningTokens  = reasoning_tokens                 // 仅作展示，是 Output 的子集，下游不再相加
 ```
 
-> 单测佐证（`usage_test.go`）：`prompt=200, cached=50, completion=80, reasoning=30` → `Input=150, Output=80, Cache=50, Reasoning=30`。注意 reasoning **没有**从 output 里减掉。
+> ⚠️ **不要**从 `InputTokens` 里再减掉 `cache_write_tokens`。减掉会让 `Input + Cache ≠ prompt_tokens`，破坏 §2.1 末尾的不变量，也会把「写入」这笔真实开销从分母里抹掉。
+>
+> 单测佐证（`usage_test.go`）：`prompt=200, cached=50, write=40, completion=80, reasoning=30` → `Input=150, Output=80, Cache=50, CacheWrite=40, Reasoning=30`。注意 reasoning **没有**从 output 里减掉，cache_write 也**没有**从 input 里减掉。
 
 #### Anthropic（v1 & beta 同构）
 
@@ -144,6 +155,7 @@ ReasoningTokens  = reasoning_tokens                 // 仅作展示，是 Output
 ```
 InputTokens      = input_tokens + cache_creation_input_tokens  // 写入成本并进 input（进分母）
 CacheInputTokens = cache_read_input_tokens                      // 命中缓存（读）
+CacheWriteTokens = cache_creation_input_tokens                  // 写入明细，⊂ InputTokens
 OutputTokens     = output_tokens                                // thinking 已含在内
 ReasoningTokens  = 0                                            // Anthropic 不单列 reasoning
 ```
@@ -158,23 +170,24 @@ ReasoningTokens  = 0                                            // Anthropic 不
 本次 prompt 总量 = InputTokens + CacheInputTokens
 cache_hit_ratio = CacheInputTokens / (InputTokens + CacheInputTokens)
 TotalTokens()   = InputTokens + OutputTokens          // ⚠️ 不含 cache —— cache 单独计费，不进 total
+CacheWriteTokens ≤ InputTokens                        // 明细字段，已被 InputTokens 覆盖，不再单独相加
 ```
 
-`CacheInputTokens` 在两侧统一只表示**缓存读命中**那部分；OpenAI 不暴露「缓存写入」维度，Anthropic 的写入成本（`cache_creation`）被并进了 `InputTokens`。
+`CacheInputTokens` 在两侧统一只表示**缓存读命中**那部分；两家的写入成本（Anthropic `cache_creation`、OpenAI `cache_write_tokens`）都被并进 `InputTokens`，并同时记在 `CacheWriteTokens` 供计费拆分。
 
 #### 一个对照例子
 
-同一个请求语义（200 未命中 input + 800 缓存读命中 + 500 output），两家 wire 形态不同，**归一化后结果一致**：
+同一个请求语义（200 未命中 input + 50 缓存写入 + 800 缓存读命中 + 500 output），两家 wire 形态不同，**归一化后结果一致**：
 
 | 维度 | OpenAI wire | Anthropic wire | → 归一化 |
 |---|---|---|---|
-| input 父字段 | `prompt_tokens = 1000`（含 cached） | `input_tokens = 200`（不含 cache） | — |
-| cache 写入 | —（无此概念） | `cache_creation = 0` | — |
+| input 父字段 | `prompt_tokens = 1050`（含 cached + write） | `input_tokens = 200`（不含任何 cache） | — |
+| cache 写入 | `cache_write_tokens = 50`（子集） | `cache_creation = 50`（独立） | `CacheWriteTokens = 50` |
 | cache 读命中 | `cached_tokens = 800`（子集） | `cache_read = 800`（独立） | `CacheInputTokens = 800` |
 | output | `completion_tokens = 500` | `output_tokens = 500` | `OutputTokens = 500` |
-| **InputTokens** | `1000 − 800 = 200` | `200 + 0 = 200` | **200** |
+| **InputTokens** | `1050 − 800 = 250` | `200 + 50 = 250` | **250** |
 
-> 若 Anthropic 这次还写了 50 个缓存（`cache_creation = 50`），则 `InputTokens = 200 + 50 = 250` —— 写入按成本算进 prompt；OpenAI 没有这个维度，无法对应。
+> OpenAI 减法、Anthropic 加法，落点相同：`InputTokens` 都等于「未命中 200 + 写入 50」。gpt-5.6 之前的 OpenAI 模型不上报 `cache_write_tokens`（写入免费），此时 `CacheWriteTokens = 0`，退化成旧行为。
 
 ### 2.2 非流式：纯函数（`extract.go`）
 
@@ -185,14 +198,14 @@ usage.FromAnthropicMessage(resp.Usage)     // anthropic.Usage  (v1)
 usage.FromAnthropicBetaMessage(resp.Usage) // anthropic.BetaUsage
 ```
 
-OpenAI 侧：`InputTokens = prompt − cached`，cache/reasoning 直接读 details。
-Anthropic 侧：`InputTokens = input + cache_creation`，`CacheInputTokens = cache_read`，无 reasoning。
+OpenAI 侧：`InputTokens = prompt − cached`，cache read / cache write / reasoning 直接读 details。
+Anthropic 侧：`InputTokens = input + cache_creation`，`CacheInputTokens = cache_read`，`CacheWriteTokens = cache_creation`，无 reasoning。
 
 反向（`*TokenUsage` → wire）：
 
 ```go
 usage.ChatUsage(u) // → openai.CompletionUsage：PromptTokens = Input + Cache（还原成总数），
-                   //   CachedTokens / ReasoningTokens 填回 details
+                   //   CachedTokens / CacheWriteTokens / ReasoningTokens 填回 details
 ```
 
 ### 2.3 流式 Anthropic：`AnthropicAccumulator`（`accumulator.go`）
@@ -230,18 +243,19 @@ type StreamTokenCounter struct {
     upstreamInputTokens       int64 // 尾 usage chunk: prompt_tokens
     upstreamOutputTokens      int64 // 尾 usage chunk: completion_tokens
     upstreamCacheTokens       int64 // prompt_tokens_details.cached_tokens
+    upstreamCacheWriteTokens  int64 // prompt_tokens_details.cache_write_tokens (gpt-5.6+)
     upstreamReasoning         int64 // completion_tokens_details.reasoning_tokens
 }
 ```
 
 `ConsumeOpenAIChunk(chunk)`：
-- chunk 带 usage（通常是 `stream_options.include_usage=true` 的**尾 usage-only chunk**，`choices` 为空）→ 抓权威 input/output/cache/reasoning，**覆盖**本地估算
+- chunk 带 usage（通常是 `stream_options.include_usage=true` 的**尾 usage-only chunk**，`choices` 为空）→ 抓权威 input/output/cache read/cache write/reasoning，**覆盖**本地估算
   - SDK 的 `JSON.Usage.Valid()` 会漏掉部分合法情况，所以同时接受 `PromptTokens>0 || CompletionTokens>0` 作为「usage 存在」的证据
 - 否则 → 对每个 delta（content / refusal / tool_call name+args / 旧式 function_call）增量 tiktoken 累加 output
 
 取数：
-- `GetCounts() → (input, output)`：有上游就用上游，`input = upstreamInput − upstreamCache`（归一化成仅未命中）
-- `GetUpstreamDetails() → (cache, reasoning)`：上游 usage chunk 里抓到的 cache/reasoning（没有则 0）
+- `GetCounts() → (input, output)`：有上游就用上游，`input = upstreamInput − upstreamCache`（只减 read，写入留在 input 里）
+- `GetUpstreamDetails() → (cacheRead, cacheWrite, reasoning)`：上游 usage chunk 里抓到的三个明细（没有则 0）
 
 tiktoken：默认 `O200kBase`；流前用 `EstimateInputTokensSimple(req)`（`len/4` 近似）预置 input——**不要**在流式热路径用精确 BPE 的 `EstimateInputTokens`：agentic 客户端每轮携带全量上下文（MB 级），tiktoken 的 regexp2 切分会产生远超输入体积的瞬时分配，是 OOM 峰值来源之一（#1255）；该预置值只用于 message_start 占位与上游无 usage 时的回退。`countTokens` 失败回退 `len(text)/4`。Anthropic 侧另有 `EstimateAnthropicTokens`。
 
@@ -270,7 +284,7 @@ tiktoken：默认 `O200kBase`；流前用 `EstimateInputTokensSimple(req)`（`le
 | `HandleAnthropicBeta` | `AnthropicAccumulator.ConsumeBeta` |
 | `AnthropicToOpenAIStreamWithMCPHooks`（`anthropic_to_openai*.go`） | `AnthropicAccumulator.ConsumeBeta`；`Usage()` 返回 `acc.Result()` |
 | `HandleAnthropicBetaToOpenAIResponsesStream` | `AnthropicAccumulator.ConsumeBeta` |
-| `openAIToAnthropicConverter`（`openai_to_anthropic_converter.go` + `_beta`） | `StreamTokenCounter`；`Usage()` 返回 `NewTokenUsageFull(in, out, cache, reasoning)` |
+| `openAIToAnthropicConverter`（`openai_to_anthropic_converter.go` + `_beta`） | `StreamTokenCounter`；`Usage()` 返回 `NewTokenUsageOpenAI(in, out, cacheRead, cacheWrite, reasoning)` |
 | `openai_passthrough.go` | inline：每 chunk 累加 + 估算 fallback 注入 |
 | `openai_{chat,responses}_to_*.go` | inline：`state` 字段双用（同时拼 wire body） |
 | `google_to_any.go` | inline：Google SDK 无结构化 cache 子字段 |
@@ -452,10 +466,12 @@ type MockUsage struct {
     PromptTokens             int64
     CompletionTokens         int64
     CachedInputTokens        int64 // OpenAI cached_tokens / Anthropic cache_read
-    CacheCreationInputTokens int64 // Anthropic only
+    CacheCreationInputTokens int64 // Anthropic cache_creation / OpenAI cache_write_tokens
     ReasoningTokens          int64 // OpenAI only
 }
 ```
+
+> `CacheCreationInputTokens` 现在两侧都用：Anthropic 渲染成 `cache_creation_input_tokens`，OpenAI 渲染成 `prompt_tokens_details.cache_write_tokens`（Chat）/ `input_tokens_details.cache_write_tokens`（Responses）。字段名保留 Anthropic 措辞是为了不动既有断言。
 
 两个协议的 `MockModelConfig` 都加 `Usage *vmodel.MockUsage`。
 
@@ -522,14 +538,78 @@ anthropicvm.RegisterStreamTestMocks(svc.GetAnthropicRegistry())
 
 | 文件 | 状态 | 备注 |
 |---|---|---|
-| `stream/openai_to_anthropic_converter.go` + `_beta` | ✅ | drain 到底；走 `StreamTokenCounter` |
-| `stream/anthropic_to_openai*.go` | ✅ | `AnthropicAccumulator`，cache_read 全 |
-| `stream/anthropic_beta_to_openai_responses*.go` | ✅ | 已抽 cache_read；`cache_creation` 目标协议无字段 |
-| `stream/openai_chat_to_responses*.go` | OK | usage 持续抽取，无早退 |
-| `stream/openai_responses_to_chat*.go` | OK | 完整抽 input/output/cache/reasoning |
-| `nonstream/openai_to_anthropic.go` | OK | reasoning 在 Anthropic 无对等；其余完整 |
-| `nonstream/anthropic_to_openai.go` | OK | cache_read 已映射；Anthropic 不发 reasoning |
-| `nonstream/openai_responses_to_chat.go` | OK | 完整 |
+| `stream/openai_to_anthropic_converter.go` + `_beta` | ✅ | drain 到底；走 `StreamTokenCounter`；cache_write → `cache_creation_input_tokens` |
+| `stream/anthropic_to_openai*.go` | ✅ | `AnthropicAccumulator`；cache_read → `cached_tokens`，cache_creation → `cache_write_tokens` |
+| `stream/anthropic_beta_to_openai_responses*.go` | ✅ | 同上，落在 `input_tokens_details` |
+| `stream/openai_chat_to_responses*.go` | ✅ | usage 持续抽取，无早退；cache_write 透传 |
+| `stream/openai_responses_to_chat*.go` | ✅ | 完整抽 input/output/cache read+write/reasoning |
+| `nonstream/openai_to_anthropic.go` | ✅ | cache_write → `cache_creation_input_tokens`；reasoning 在 Anthropic 无对等 |
+| `nonstream/anthropic_to_openai.go` | ✅ | cache_read/cache_creation 双向已映射；Anthropic 不发 reasoning |
+| `nonstream/openai_responses_to_chat.go` | ✅ | 完整 |
 | `stream/google_to_any.go` + `nonstream/google_to.go` | skip | Google SDK 无结构化 cache 子字段 |
 
-新增 stream / nonstream converter 时：① 确认 `Usage()`（或等价提取）接到 §2 的归一化函数；② cache_creation / cache_read / reasoning 三个易丢字段逐一核对；③ 流式注意「上游终态 chunk 是否晚于 finish」别提前 return。
+新增 stream / nonstream converter 时：① 确认 `Usage()`（或等价提取）接到 §2 的归一化函数；② cache_write / cache_read / reasoning 三个易丢字段逐一核对；③ 流式注意「上游终态 chunk 是否晚于 finish」别提前 return；④ 判断「这个 chunk 带 usage 吗」一律调 `stream.chunkHasUsage()`，**不要**再手写谓词——漏掉 `cache_write_tokens != 0` 会让一次纯写入、零命中、零 reasoning 的 usage chunk 被判成空 usage 丢掉，这正是它被收进单一函数的原因。
+
+---
+
+## 12. OpenAI gpt-5.6+ 缓存计费变更（背景与外部协议）
+
+> 这一节记录**上游协议为什么变**，§1–§3 记录**我们怎么接**。改 OpenAI usage 相关代码前先看这里。
+
+### 12.1 计费模型
+
+| | gpt-5.6 之前 | gpt-5.6 及之后 |
+|---|---|---|
+| cache read | 折扣价（≈0.1× input） | 折扣价（≈0.1× input） |
+| **cache write** | **免费** | **1.25× 未命中 input 价** |
+
+于是「缓存」从一个纯省钱的优化，变成一个有独立成本的操作——这正是我们必须把 `CacheWriteTokens` 一路搬到计费侧的原因。
+
+成本公式（`cache_write_tokens` 是**未经 1.25 放大**的原始 token 数，放大由计费侧施加，不要重复乘）：
+
+```
+cost_input = (prompt_tokens − cached_tokens − cache_write_tokens) × input_rate
+           + cached_tokens      × input_rate × 0.1
+           + cache_write_tokens × input_rate × 1.25
+```
+
+`cached_tokens` 与 `cache_write_tokens` 都是 `prompt_tokens` 的子集且**互不重叠**。OpenAI 文档没有一句话明说这点，但 `prompt_tokens_details` 的定义就是「prompt 的拆分」；社区曾上报 `cached + write > prompt_tokens` 的账单，OpenAI 确认是 bug 并退款。**如果上游真的发来 `cached + write > prompt`，那是上游 bug，不要跟着算。**
+
+### 12.2 请求侧参数（当前为透传，无本地语义）
+
+| 参数 | 状态 | 说明 |
+|---|---|---|
+| `prompt_cache_key` | 现行 | 5.6+ 上是显式缓存可靠匹配的必需项；单 key 流量需 ≲15 RPM，超了掉缓存 |
+| `prompt_cache_retention` | **已废弃** | `in_memory` / `24h`；未开 ZDR 的组织默认已从 `in_memory` 改成 `24h` |
+| `prompt_cache_options` | 5.6+ 新增 | `{"mode": "implicit"｜"explicit", "ttl": "30m"}`，`ttl` 目前**只支持 30m** |
+| `prompt_cache_breakpoint` | 5.6+ 新增 | 挂在 content block 上的 `{"mode":"explicit"}`，即 OpenAI 版 `cache_control` |
+
+`prompt_cache_breakpoint` 的可挂载位置：Chat 是 `text` / `image_url` / `input_audio` / `file` 四种 content part（**不含 tools 定义**）；Responses 是 `input_text` / `input_image` / `input_file`。`implicit` 模式下 1 个隐式 + 最新 3 个显式断点，`explicit` 模式下无隐式 + 最新 4 个显式（无显式断点 = 完全不走缓存）。前缀仍需 ≥1024 token 才可缓存。
+
+> ⚠️ 5.6+ 的 `ttl` 只有 `30m`，比老模型的 `24h` 短——长会话代理的缓存命中率会下降，路由策略若依赖长缓存需要重新评估。
+
+### 12.3 通道差异
+
+Azure OpenAI 上 gpt-5.6 的 usage **完全不上报 `cache_write_tokens`**，也不支持 `prompt_cache_options` / `prompt_cache_breakpoint`。因此「`cache_write_tokens` 为 0」有两种含义——本次确实没写入，或该通道不上报。canonical `TokenUsage` 是值类型，区分不了这两者；下游若要做成本归因，需要额外按 provider/model 判断，不能把 0 直接当成「没写入」。
+
+### 12.4 SDK 侧
+
+`libs/openai-go` 已带全 `cache_write_tokens` / `prompt_cache_options` / `prompt_cache_breakpoint`（随上游 `feat(api): gpt-5.6-sol updates` 落地），**无需升级 SDK**。缺口全在我们手写的 `internal/protocol/wire/*` 与归一化/转换层——也就是 §1–§3 覆盖的部分。
+
+### 12.5 落库与 Dashboard
+
+`usage_records` / `usage_daily` / `usage_monthly` 都有独立的 `cache_write_tokens` 列，rollup / stats / timeseries 三类查询与 OTel（新增 `cache_write` token_type）全部带上。列语义与 canonical 一致：`cache_input_tokens` 仅表示 read，`cache_write_tokens` 是 `input_tokens` 的**子集**。
+
+> ⚠️ **`usage_daily` 是派生表，加汇总列必须 DROP 重建，不能 AutoMigrate。** AutoMigrate 会把新列补成全 0，已聚合过的日期会永久少报 cache write。`ensureUsageDailySchema` 因此按列存在性检查并整表删除，靠 `usage_records` 惰性重建——和当年 v2 加 `user_id` 是同一套做法。回归测试见 `usage_daily_test.go::TestEnsureUsageDailySchemaDropsStaleAggregates`。
+
+API 侧 `AggregatedStat` / `TimeSeriesData` / `UsageRecordResponse` 三个模型都暴露 `cache_write_tokens`。
+
+> ⏳ **`openapi.json` 与前端 SDK 尚未重新生成。** committed 的 schema 早已和代码漂移（bot-interaction 端点加了没跑 codegen），此刻跑 `task codegen` 会把约 490 行无关改动一起带进来。等那批漂移单独处理掉再跑。当前不阻塞任何东西——Dashboard 组件用的是本地 interface，不消费生成类型。
+
+Dashboard 侧的关键约束同样是「write ⊂ input」：
+
+- **不能**把 cache write 做成第四条堆叠序列、第四个饼图扇区，或加进任何 total —— 会重复计数并抬高整页所有总量
+- 它以**注解**形式挂在 Input 上：图表 tooltip 的 `Input Tokens: 12,570 (incl. 1,508 written)`、环形图 Input 图例下方的 `incl. 107K written`
+- 表格里各占一列（`Cache Read` / `Cache Write`），Cache Hit Rate 卡片副标题为 `40M read · 4.8M written`
+- 词汇统一：原先所有 "Cache" 一律改称 **Cache Read**（一个词一个义）
+- Cache Write 列与 "written" 注解**仅在存在非零写入时出现**——5.6 之前的模型和 Azure 永不上报，常驻一列 0 是噪声

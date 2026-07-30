@@ -70,15 +70,19 @@ type TokenUsage struct {
 
 	// CacheInputTokens is the number of cache-read-hit tokens consumed.
 	// Cache-write cost is tracked separately in CacheWriteTokens.
-	// Note: Anthropic normalization folds CacheWriteTokens into InputTokens
-	// (InputTokens += cache_creation), so InputTokens already covers write cost.
+	// Note: normalization folds CacheWriteTokens into InputTokens on both
+	// sides (Anthropic: InputTokens += cache_creation; OpenAI: cache_write is
+	// left inside prompt_tokens and only cached_tokens is subtracted), so
+	// InputTokens already covers write cost.
 	// Total prompt cost = InputTokens + CacheInputTokens.
 	CacheInputTokens int `json:"cache_input_tokens,omitempty"`
 
 	// CacheReadTokens and CacheWriteTokens provide detail for billing.
 	// CacheReadTokens  = cache-read hits (same as CacheInputTokens).
-	// CacheWriteTokens = cache writes; folded into InputTokens in Anthropic
-	// normalization; zero for OpenAI (no wire-level write concept).
+	// CacheWriteTokens = cache writes, a SUBSET of InputTokens — never add it
+	// on top of InputTokens or the write cost is counted twice. Sourced from
+	// Anthropic cache_creation_input_tokens and, since gpt-5.6, OpenAI
+	// cache_write_tokens (billed at 1.25x the uncached input rate).
 	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 
@@ -109,9 +113,14 @@ func (u *TokenUsage) HasCacheUsage() bool {
 }
 
 // ToAnthropicUsageMap converts canonical usage into Anthropic message usage shape.
+//
+// Anthropic's wire input_tokens counts ONLY uncached tokens — cache writes sit
+// beside it in cache_creation_input_tokens. Canonical InputTokens folds writes
+// in, so the fold is undone here; emitting both unchanged would bill the write
+// portion twice.
 func (u *TokenUsage) ToAnthropicUsageMap() map[string]interface{} {
 	usage := map[string]interface{}{
-		"input_tokens":  u.InputTokens,
+		"input_tokens":  u.UncachedInputTokens(),
 		"output_tokens": u.OutputTokens,
 	}
 	if u.CacheReadTokens > 0 {
@@ -123,6 +132,20 @@ func (u *TokenUsage) ToAnthropicUsageMap() map[string]interface{} {
 	return usage
 }
 
+// UncachedInputTokens returns InputTokens with the cache-write portion removed:
+// the tokens that were neither read from nor written to the cache. This is what
+// Anthropic's input_tokens field expects. Defensive against upstreams that
+// report a write count exceeding the prompt.
+func (u *TokenUsage) UncachedInputTokens() int {
+	if u.CacheWriteTokens <= 0 {
+		return u.InputTokens
+	}
+	if n := u.InputTokens - u.CacheWriteTokens; n > 0 {
+		return n
+	}
+	return 0
+}
+
 // ToAnthropicMessageDeltaUsageMap converts canonical usage into Anthropic stream
 // message_delta usage shape for protocol conversion. Native Anthropic streams put
 // input usage on message_start, but converters such as OpenAI→Anthropic only get
@@ -132,19 +155,40 @@ func (u *TokenUsage) ToAnthropicMessageDeltaUsageMap() map[string]interface{} {
 	return u.ToAnthropicUsageMap()
 }
 
+// PromptTotalTokens returns the prompt total as OpenAI reports it on the wire:
+// uncached + written + read. Canonical InputTokens already folds writes in, so
+// only the read hits are added back.
+func (u *TokenUsage) PromptTotalTokens() int {
+	return u.InputTokens + u.CacheInputTokens
+}
+
+// promptCacheDetails builds the cache breakdown shared by the Chat
+// (prompt_tokens_details) and Responses (input_tokens_details) usage shapes, or
+// nil when there is nothing to report. cache_write_tokens stays absent rather
+// than zero: an absent value means the channel does not report writes at all
+// (Azure, pre-gpt-5.6), which is not the same as "no writes happened".
+func (u *TokenUsage) promptCacheDetails() map[string]interface{} {
+	if u.CacheInputTokens <= 0 && u.CacheWriteTokens <= 0 {
+		return nil
+	}
+	details := map[string]interface{}{"cached_tokens": u.CacheInputTokens}
+	if u.CacheWriteTokens > 0 {
+		details["cache_write_tokens"] = u.CacheWriteTokens
+	}
+	return details
+}
+
 // ToOpenAIChatUsageMap converts canonical usage into OpenAI Chat Completions
 // usage shape. Prompt/input tokens on the wire include cached tokens.
 func (u *TokenUsage) ToOpenAIChatUsageMap() map[string]interface{} {
-	inputTokens := u.InputTokens + u.CacheInputTokens
+	inputTokens := u.PromptTotalTokens()
 	usage := map[string]interface{}{
 		"prompt_tokens":     inputTokens,
 		"completion_tokens": u.OutputTokens,
 		"total_tokens":      inputTokens + u.OutputTokens,
 	}
-	if u.CacheInputTokens > 0 {
-		usage["prompt_tokens_details"] = map[string]interface{}{
-			"cached_tokens": u.CacheInputTokens,
-		}
+	if details := u.promptCacheDetails(); details != nil {
+		usage["prompt_tokens_details"] = details
 	}
 	if u.ReasoningTokens > 0 {
 		usage["completion_tokens_details"] = map[string]interface{}{
@@ -157,16 +201,14 @@ func (u *TokenUsage) ToOpenAIChatUsageMap() map[string]interface{} {
 // ToOpenAIResponsesUsageMap converts canonical usage into OpenAI Responses API
 // usage shape. Input tokens on the wire include cached tokens.
 func (u *TokenUsage) ToOpenAIResponsesUsageMap() map[string]interface{} {
-	inputTokens := u.InputTokens + u.CacheInputTokens
+	inputTokens := u.PromptTotalTokens()
 	usage := map[string]interface{}{
 		"input_tokens":  inputTokens,
 		"output_tokens": u.OutputTokens,
 		"total_tokens":  inputTokens + u.OutputTokens,
 	}
-	if u.CacheInputTokens > 0 {
-		usage["input_tokens_details"] = map[string]interface{}{
-			"cached_tokens": u.CacheInputTokens,
-		}
+	if details := u.promptCacheDetails(); details != nil {
+		usage["input_tokens_details"] = details
 	}
 	if u.ReasoningTokens > 0 {
 		usage["output_tokens_details"] = map[string]interface{}{
@@ -200,9 +242,12 @@ func NewTokenUsageWithCacheDetails(inputTokens, outputTokens, cacheReadTokens, c
 	}
 }
 
-// NewTokenUsageFull creates a TokenUsage with cache and reasoning token counts.
-func NewTokenUsageFull(inputTokens, outputTokens, cacheTokens, reasoningTokens int) *TokenUsage {
-	usage := NewTokenUsageWithCache(inputTokens, outputTokens, cacheTokens)
+// NewTokenUsageFull creates a TokenUsage with every detail count: cache read,
+// cache write and reasoning. inputTokens must already have cacheReadTokens
+// subtracted while still including cacheWriteTokens — see
+// TokenUsage.CacheWriteTokens.
+func NewTokenUsageFull(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens int) *TokenUsage {
+	usage := NewTokenUsageWithCacheDetails(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens)
 	usage.ReasoningTokens = reasoningTokens
 	return usage
 }

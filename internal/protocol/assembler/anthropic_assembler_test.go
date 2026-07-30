@@ -241,3 +241,26 @@ func TestAnthropicStreamAssembler_BlockRestartResetsAccumulation(t *testing.T) {
 	require.Len(t, result.Content, 1)
 	assert.Equal(t, "NEW", result.Content[0].Text)
 }
+
+// TestAnthropicStreamAssembler_SetUsageFromTokenUsage_CarriesCacheWrite checks
+// that the recorded response splits the cache-write cost back out of
+// InputTokens. Canonical usage folds writes into InputTokens; Anthropic's wire
+// input_tokens excludes them, so recording both unchanged would double count.
+func TestAnthropicStreamAssembler_SetUsageFromTokenUsage_CarriesCacheWrite(t *testing.T) {
+	assembler := NewAnthropicStreamAssembler()
+	assembler.SetUsageFromTokenUsage(&ai.TokenUsage{
+		InputTokens:      47, // 42 uncached + 5 written
+		OutputTokens:     17,
+		CacheInputTokens: 11,
+		CacheWriteTokens: 5,
+	})
+	assembler.msgID = "msg_cache_write"
+	assembler.blocks[0] = anthropic.ContentBlockUnion{Type: "text", Text: "ok"}
+
+	result := assembler.Finish("model", 0, 0)
+	require.NotNil(t, result)
+	assert.Equal(t, int64(42), result.Usage.InputTokens, "input_tokens must exclude the write portion")
+	assert.Equal(t, int64(5), result.Usage.CacheCreationInputTokens, "cache_creation must survive into assembled response")
+	assert.Equal(t, int64(11), result.Usage.CacheReadInputTokens)
+	assert.Equal(t, int64(17), result.Usage.OutputTokens)
+}

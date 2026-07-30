@@ -61,19 +61,9 @@ func BuildResponsesPayloadFromChat(resp *openai.ChatCompletion, responseModel, a
 		})
 	}
 
-	usageMap := map[string]any{
-		"input_tokens":  resp.Usage.PromptTokens,
-		"output_tokens": resp.Usage.CompletionTokens,
-		"total_tokens":  resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
-	}
-	// Carry cache-read and reasoning detail so a client reading usage off the
-	// Responses-API body sees them instead of zeros.
-	if cached := resp.Usage.PromptTokensDetails.CachedTokens; cached > 0 {
-		usageMap["input_tokens_details"] = map[string]any{"cached_tokens": cached}
-	}
-	if reasoning := resp.Usage.CompletionTokensDetails.ReasoningTokens; reasoning > 0 {
-		usageMap["output_tokens_details"] = map[string]any{"reasoning_tokens": reasoning}
-	}
+	// The canonical type owns the Responses usage shape, including the cache
+	// read/write and reasoning detail a client would otherwise read as zeros.
+	usageMap := usage.FromOpenAIChatCompletion(resp.Usage).ToOpenAIResponsesUsageMap()
 
 	result := map[string]any{
 		"id":         resp.ID,
@@ -154,18 +144,11 @@ func BuildResponsesPayloadFromAnthropicBeta(resp *anthropic.BetaMessage, respons
 		output = append([]map[string]any{msgItem}, output...)
 	}
 
-	// Responses-API input_tokens is the TOTAL prompt cost. Anthropic reports
-	// uncached input separately from cache-read/creation, so fold them in here
-	// (matching the Chat conversion) instead of reporting only the uncached slice.
-	totalInput := resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens
-	usageMap := map[string]any{
-		"input_tokens":  totalInput,
-		"output_tokens": resp.Usage.OutputTokens,
-		"total_tokens":  totalInput + resp.Usage.OutputTokens,
-	}
-	if cached := resp.Usage.CacheReadInputTokens; cached > 0 {
-		usageMap["input_tokens_details"] = map[string]any{"cached_tokens": cached}
-	}
+	// Responses-API input_tokens is the TOTAL prompt cost, so normalizing the
+	// Anthropic usage folds cache_creation into it and reports cache_read
+	// separately — Anthropic cache_creation lands in the cache_write_tokens slot,
+	// both being the premium-rate write portion of the prompt total.
+	usageMap := usage.FromAnthropicBetaMessage(resp.Usage).ToOpenAIResponsesUsageMap()
 
 	result := map[string]any{
 		"id":         resp.ID,

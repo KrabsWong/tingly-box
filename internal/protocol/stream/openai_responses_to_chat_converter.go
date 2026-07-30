@@ -287,22 +287,11 @@ func (c *responsesToChatConverter) toolCallDeltaChunk(index int, delta string) w
 func (c *responsesToChatConverter) finalChunk(finishReason string) wire.ChatStreamChunk {
 	chunk := c.newChunk(wire.ChatStreamDelta{}, &finishReason)
 	if !c.disableUsage {
-		u := c.Usage()
-		totalInput := int64(u.InputTokens + u.CacheInputTokens)
-		total := c.totalTokens
-		if total == 0 {
-			total = totalInput + int64(u.OutputTokens)
-		}
-		usage := &wire.ChatStreamUsage{
-			PromptTokens:     totalInput,
-			CompletionTokens: int64(u.OutputTokens),
-			TotalTokens:      total,
-		}
-		if u.CacheInputTokens != 0 {
-			usage.PromptTokensDetails = &wire.ChatStreamPromptTokenDetails{CachedTokens: int64(u.CacheInputTokens)}
-		}
-		if u.ReasoningTokens != 0 {
-			usage.CompletionTokensDetails = &wire.ChatStreamOutputTokenDetails{ReasoningTokens: int64(u.ReasoningTokens)}
+		// Same wire shape as the Anthropic→Chat path; only total_tokens differs,
+		// preferring the total the upstream Responses stream already reported.
+		usage := chatStreamUsageWire(c.Usage())
+		if c.totalTokens != 0 {
+			usage.TotalTokens = c.totalTokens
 		}
 		chunk.Usage = usage
 	}

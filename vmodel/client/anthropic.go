@@ -344,7 +344,7 @@ func newAnthropicVModelDecoder(ctx context.Context, vm anthropicvm.VirtualModel,
 					input:    u.PromptTokens,
 					output:   u.CompletionTokens,
 					cached:   u.CachedInputTokens,
-					creation: u.CacheCreationInputTokens,
+					creation: u.CacheWriteTokens,
 				}
 
 			case anthropicvm.DoneEvent:

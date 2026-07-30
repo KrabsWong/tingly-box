@@ -9,8 +9,24 @@ import (
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
+	protocol "github.com/tingly-dev/tingly-box/ai"
+	usageconv "github.com/tingly-dev/tingly-box/internal/protocol/usage"
 	"github.com/tingly-dev/tingly-box/internal/protocol/wire"
 )
+
+// anthropicUsageWire denormalizes canonical usage into the Anthropic wire shape,
+// where input_tokens counts ONLY uncached tokens and the cache read/write costs
+// sit beside it in their own fields. Canonical usage folds the write cost into
+// InputTokens, so emitting it unchanged alongside cache_creation_input_tokens
+// would bill the write portion twice.
+func anthropicUsageWire(u *protocol.TokenUsage) wire.AnthropicUsageWire {
+	return wire.AnthropicUsageWire{
+		InputTokens:              int64(u.UncachedInputTokens()),
+		OutputTokens:             int64(u.OutputTokens),
+		CacheReadInputTokens:     int64(u.CacheInputTokens),
+		CacheCreationInputTokens: int64(u.CacheWriteTokens),
+	}
+}
 
 func HandleOpenAIChatToAnthropic(chat *openai.ChatCompletion, model string) *anthropic.BetaMessage {
 	wire := wire.AnthropicMsgWire{
@@ -21,12 +37,7 @@ func HandleOpenAIChatToAnthropic(chat *openai.ChatCompletion, model string) *ant
 		Model:        model,
 		StopReason:   "end_turn",
 		StopSequence: "",
-		// Anthropic wire: input_tokens = uncached only; OpenAI PromptTokens = total.
-		Usage: wire.AnthropicUsageWire{
-			InputTokens:          chat.Usage.PromptTokens - chat.Usage.PromptTokensDetails.CachedTokens,
-			OutputTokens:         chat.Usage.CompletionTokens,
-			CacheReadInputTokens: chat.Usage.PromptTokensDetails.CachedTokens,
-		},
+		Usage:        anthropicUsageWire(usageconv.FromOpenAIChatCompletion(chat.Usage)),
 	}
 
 	// Preserve server_tool_use from ExtraFields if present
@@ -79,12 +90,7 @@ func HandleOpenAIChatToAnthropicBeta(chat *openai.ChatCompletion, model string) 
 		Model:        model,
 		StopReason:   string(anthropic.BetaStopReasonEndTurn),
 		StopSequence: "",
-		// Anthropic wire: input_tokens = uncached only; OpenAI PromptTokens = total.
-		Usage: wire.AnthropicUsageWire{
-			InputTokens:          chat.Usage.PromptTokens - chat.Usage.PromptTokensDetails.CachedTokens,
-			OutputTokens:         chat.Usage.CompletionTokens,
-			CacheReadInputTokens: chat.Usage.PromptTokensDetails.CachedTokens,
-		},
+		Usage:        anthropicUsageWire(usageconv.FromOpenAIChatCompletion(chat.Usage)),
 	}
 
 	if chat.JSON.ExtraFields != nil {
@@ -136,12 +142,7 @@ func HandleResponsesToAnthropicBeta(rs *responses.Response, model string) anthro
 		Model:        model,
 		StopReason:   string(anthropic.BetaStopReasonEndTurn),
 		StopSequence: "",
-		// Anthropic wire: input_tokens = uncached only; OpenAI Responses InputTokens = total.
-		Usage: wire.AnthropicUsageWire{
-			InputTokens:          rs.Usage.InputTokens - rs.Usage.InputTokensDetails.CachedTokens,
-			OutputTokens:         rs.Usage.OutputTokens,
-			CacheReadInputTokens: rs.Usage.InputTokensDetails.CachedTokens,
-		},
+		Usage:        anthropicUsageWire(usageconv.FromOpenAIResponses(rs.Usage)),
 	}
 
 	var contentBlocks []anthropic.BetaContentBlockParamUnion
@@ -198,12 +199,7 @@ func HandleResponsesToAnthropicV1(rs *responses.Response, model string) anthropi
 		Model:        model,
 		StopReason:   "end_turn",
 		StopSequence: "",
-		// Anthropic wire: input_tokens = uncached only; OpenAI Responses InputTokens = total.
-		Usage: wire.AnthropicUsageWire{
-			InputTokens:          rs.Usage.InputTokens - rs.Usage.InputTokensDetails.CachedTokens,
-			OutputTokens:         rs.Usage.OutputTokens,
-			CacheReadInputTokens: rs.Usage.InputTokensDetails.CachedTokens,
-		},
+		Usage:        anthropicUsageWire(usageconv.FromOpenAIResponses(rs.Usage)),
 	}
 
 	var contentBlocks []anthropic.ContentBlockParamUnion

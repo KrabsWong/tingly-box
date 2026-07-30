@@ -88,8 +88,14 @@ type ResponsesUsageWire struct {
 // reasoning_tokens to be present; omitempty would drop them when zero and
 // cause "missing field 'reasoning_tokens'" parse errors for chat-only
 // providers (e.g. DeepSeek) routed through chat-to-responses.
+//
+// cache_write_tokens (gpt-5.6+) is deliberately omitempty instead: it is a
+// newer field that older Codex builds do not expect, and unlike cached_tokens
+// an absent value is meaningful — it says the channel never reported writes
+// (e.g. Azure, which does not surface them at all).
 type ResponsesInputTokensDetailsWire struct {
-	CachedTokens int64 `json:"cached_tokens"`
+	CachedTokens     int64 `json:"cached_tokens"`
+	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
 }
 
 type ResponsesOutputTokensDetailsWire struct {
