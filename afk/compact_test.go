@@ -1,9 +1,8 @@
 package afk
 
 import (
-	"bytes"
 	"context"
-	"fmt"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,141 +14,140 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// isSummarizeRequest reports whether a captured request body is the
-// summarization call rather than a normal agent step. The summarizer runs with
-// no tools, which is the one structural difference. Routing on shape instead of
-// a request counter matters because the SDK retries 5xx responses, which shifts
-// every count.
-func isSummarizeRequest(body []byte) bool {
-	return !bytes.Contains(body, []byte(`"tools"`))
+// capturedRequest is what the server saw: the decoded body plus the headers we
+// care about. Server-side compaction is configured across both — the flag is a
+// header, the edit is in the body — so a test that only checks one proves
+// nothing.
+type capturedRequest struct {
+	body    map[string]any
+	betas   string
+	rawBody []byte
 }
 
-// routeByShape serves agent steps and the summarization call differently.
-func routeByShape(t *testing.T, onStep func(n int) string, onSummarize func() (string, int)) http.HandlerFunc {
+type headerCapturingServer struct {
+	reqs    []capturedRequest
+	respond func(n int) string
+}
+
+func (c *headerCapturingServer) handler(t *testing.T) http.HandlerFunc {
 	t.Helper()
-	var steps int32
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
-		if isSummarizeRequest(raw) {
-			body, status := onSummarize()
-			if status != 0 {
-				http.Error(w, body, status)
-				return
-			}
-			writeSSE(t, w, body)
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(raw, &body))
+		c.reqs = append(c.reqs, capturedRequest{
+			body:    body,
+			betas:   r.Header.Get("anthropic-beta"),
+			rawBody: raw,
+		})
+		writeSSE(t, w, c.respond(len(c.reqs)))
+	}
+}
+
+// compactEdit digs the compaction edit out of a captured request body.
+func compactEdit(t *testing.T, req capturedRequest) map[string]any {
+	t.Helper()
+	cm, ok := req.body["context_management"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	edits, ok := cm["edits"].([]any)
+	require.True(t, ok, "context_management should carry an edits list")
+	for _, e := range edits {
+		em, _ := e.(map[string]any)
+		if em["type"] == "compact_20260112" {
+			return em
+		}
+	}
+	return nil
+}
+
+// TestEngine_SendsServerCompactionByDefault is the default-on behavior: a plain
+// engine asks the API to compact for it, on both halves of the contract.
+func TestEngine_SendsServerCompactionByDefault(t *testing.T) {
+	srv := &headerCapturingServer{respond: func(int) string { return textResponse("hi") }}
+	ts := httptest.NewServer(srv.handler(t))
+	defer ts.Close()
+
+	eng, err := NewEngine(Config{BaseURL: ts.URL, APIKey: "k", Model: "m"})
+	require.NoError(t, err)
+
+	_, _, err = eng.Run(context.Background(), nil, "hello", &recordingSink{})
+	require.NoError(t, err)
+
+	require.Len(t, srv.reqs, 1)
+	req := srv.reqs[0]
+
+	assert.Contains(t, req.betas, betaCompaction,
+		"the beta flag travels as a header; without it the body edit is not honored")
+
+	edit := compactEdit(t, req)
+	require.NotNil(t, edit, "the request should carry a compact_20260112 edit")
+
+	trigger, ok := edit["trigger"].(map[string]any)
+	require.True(t, ok, "the edit should carry an explicit trigger")
+	assert.Equal(t, "input_tokens", trigger["type"])
+	assert.Equal(t, float64(DefaultServerCompactTrigger), trigger["value"],
+		"the trigger is pinned here rather than inherited from the API default")
+
+	assert.NotEmpty(t, edit["instructions"], "summaries should be steered toward agent state")
+	assert.NotContains(t, string(req.rawBody), "pause_after_compaction",
+		"compaction should be invisible to the run, not a step to resume")
+}
+
+func TestEngine_ServerCompactionTriggerIsConfigurable(t *testing.T) {
+	srv := &headerCapturingServer{respond: func(int) string { return textResponse("hi") }}
+	ts := httptest.NewServer(srv.handler(t))
+	defer ts.Close()
+
+	eng, err := NewEngine(Config{
+		BaseURL: ts.URL, APIKey: "k", Model: "m",
+		ServerCompactTrigger: 42_000,
+	})
+	require.NoError(t, err)
+
+	_, _, err = eng.Run(context.Background(), nil, "hello", &recordingSink{})
+	require.NoError(t, err)
+
+	edit := compactEdit(t, srv.reqs[0])
+	require.NotNil(t, edit)
+	trigger, _ := edit["trigger"].(map[string]any)
+	assert.Equal(t, float64(42_000), trigger["value"])
+}
+
+// The escape hatch has to actually remove both halves, not just one.
+func TestEngine_ServerCompactionCanBeDisabled(t *testing.T) {
+	srv := &headerCapturingServer{respond: func(int) string { return textResponse("hi") }}
+	ts := httptest.NewServer(srv.handler(t))
+	defer ts.Close()
+
+	eng, err := NewEngine(Config{
+		BaseURL: ts.URL, APIKey: "k", Model: "m",
+		DisableServerCompaction: true,
+	})
+	require.NoError(t, err)
+
+	_, _, err = eng.Run(context.Background(), nil, "hello", &recordingSink{})
+	require.NoError(t, err)
+
+	req := srv.reqs[0]
+	assert.NotContains(t, req.betas, betaCompaction)
+	assert.Nil(t, compactEdit(t, req))
+	assert.NotContains(t, string(req.rawBody), "context_management")
+}
+
+// TestHarness_ReportsServerCompaction covers the read-back: a compaction block
+// in the response is the API saying it compacted, and the run reports it.
+func TestHarness_ReportsServerCompaction(t *testing.T) {
+	var reqCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&reqCount, 1) == 1 {
+			writeSSE(t, w, compactedToolUseResponse("toolu_1", "get_weather", `{"city":"Paris"}`))
 			return
 		}
-		writeSSE(t, w, onStep(int(atomic.AddInt32(&steps, 1))))
-	}
-}
-
-func userTurn(text string) anthropic.BetaMessageParam {
-	return anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(text))
-}
-
-func assistantTurn(text string) anthropic.BetaMessageParam {
-	return anthropic.BetaMessageParam{
-		Role:    anthropic.BetaMessageParamRoleAssistant,
-		Content: []anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock(text)},
-	}
-}
-
-func assistantToolUse(id, name string) anthropic.BetaMessageParam {
-	return anthropic.BetaMessageParam{
-		Role: anthropic.BetaMessageParamRoleAssistant,
-		Content: []anthropic.BetaContentBlockParamUnion{
-			{OfToolUse: &anthropic.BetaToolUseBlockParam{ID: id, Name: name, Input: map[string]any{}}},
-		},
-	}
-}
-
-func toolResultTurn(id, out string) anthropic.BetaMessageParam {
-	return anthropic.NewBetaUserMessage(anthropic.NewBetaToolResultBlock(id, out, false))
-}
-
-// The boundary must land on a real user turn. Cutting on a tool_result orphans
-// it from the tool_use that asked for it, which the API rejects outright.
-func TestCompactionBoundary_LandsOnAUserTurn(t *testing.T) {
-	msgs := []anthropic.BetaMessageParam{
-		userTurn("q1"), assistantTurn("a1"),
-		userTurn("q2"), assistantTurn("a2"),
-		userTurn("q3"), assistantTurn("a3"),
-		userTurn("q4"), assistantTurn("a4"),
-	}
-
-	b := compactionBoundary(msgs, 4)
-	require.Greater(t, b, 0)
-	assert.True(t, isConversationTurnStart(msgs[b]), "the cut must open an exchange")
-	assert.Equal(t, anthropic.BetaMessageParamRoleUser, msgs[b].Role)
-}
-
-func TestCompactionBoundary_SkipsToolResultMessages(t *testing.T) {
-	// The ideal boundary lands inside a tool loop; it must move forward to the
-	// next genuine user turn rather than cutting a tool_result loose.
-	msgs := []anthropic.BetaMessageParam{
-		userTurn("q1"), assistantTurn("a1"),
-		userTurn("q2"),
-		assistantToolUse("t1", "read"), toolResultTurn("t1", "contents"),
-		assistantToolUse("t2", "read"), toolResultTurn("t2", "more"),
-		assistantTurn("a2"),
-		userTurn("q3"), assistantTurn("a3"),
-	}
-
-	b := compactionBoundary(msgs, 6)
-	require.Greater(t, b, 0)
-	assert.True(t, isConversationTurnStart(msgs[b]),
-		"boundary %d landed on a tool_result or assistant turn", b)
-
-	// Everything kept must be self-contained: no tool_result whose tool_use was
-	// left behind.
-	kept := msgs[b:]
-	seen := map[string]bool{}
-	for _, m := range kept {
-		for _, blk := range m.Content {
-			if blk.OfToolUse != nil {
-				seen[blk.OfToolUse.ID] = true
-			}
-			if blk.OfToolResult != nil {
-				assert.True(t, seen[blk.OfToolResult.ToolUseID],
-					"tool_result %s kept without its tool_use", blk.OfToolResult.ToolUseID)
-			}
-		}
-	}
-}
-
-// A tail that is one unbroken tool loop has no safe cut. Compaction must give
-// up rather than cut somewhere that breaks the conversation.
-func TestCompactionBoundary_GivesUpWhenNoSafeCutExists(t *testing.T) {
-	msgs := []anthropic.BetaMessageParam{userTurn("go")}
-	for i := 0; i < 20; i++ {
-		id := fmt.Sprintf("t%d", i)
-		msgs = append(msgs, assistantToolUse(id, "read"), toolResultTurn(id, "out"))
-	}
-	assert.Equal(t, 0, compactionBoundary(msgs, 6), "no clean turn boundary in the tail")
-}
-
-func TestCompactionBoundary_ShortConversationIsNotCompacted(t *testing.T) {
-	msgs := []anthropic.BetaMessageParam{userTurn("q"), assistantTurn("a")}
-	assert.Equal(t, 0, compactionBoundary(msgs, 12))
-}
-
-// TestHarness_CompactsWhenPromptExceedsBudget is the end-to-end behavior: an
-// oversized prompt is summarized between steps instead of growing until the
-// request fails.
-func TestHarness_CompactsWhenPromptExceedsBudget(t *testing.T) {
-	srv := httptest.NewServer(routeByShape(t,
-		func(n int) string {
-			if n == 1 {
-				// A huge prompt, and the model wants another step.
-				return oversizedToolUseResponse("toolu_1", "get_weather", `{"city":"Paris"}`, 500_000)
-			}
-			return textResponse("done")
-		},
-		func() (string, int) {
-			return textResponse("Earlier: the user asked about weather; we read one file."), 0
-		},
-	))
+		writeSSE(t, w, textResponse("72F"))
+	}))
 	defer srv.Close()
 
 	eng, err := NewEngine(Config{
@@ -158,68 +156,44 @@ func TestHarness_CompactsWhenPromptExceedsBudget(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Seed enough history that there is something to compact.
-	var history []anthropic.BetaMessageParam
-	for i := 0; i < 20; i++ {
-		history = append(history, userTurn(fmt.Sprintf("q%d", i)), assistantTurn(fmt.Sprintf("a%d", i)))
-	}
-
 	log := &recordingLog{}
-	res, err := NewHarness(eng, log).Run(context.Background(), history, "and now?", &recordingSink{})
+	res, err := NewHarness(eng, log).Run(context.Background(), nil, "weather?", &recordingSink{})
 	require.NoError(t, err)
 
-	assert.Equal(t, 1, res.Compactions, "the oversized prompt should have triggered one compaction")
-	require.Len(t, log.compactions, 1, "compaction must be recorded in the log")
-	assert.Contains(t, log.compactions[0].summary, "Earlier: the user asked about weather")
-	assert.Greater(t, log.compactions[0].replaced, 0)
-
-	// The conversation shrank, and still starts on a user turn carrying the summary.
-	assert.Less(t, len(res.Messages), len(history)+4, "compaction should have dropped older messages")
-	require.NotEmpty(t, res.Messages)
-	assert.Equal(t, anthropic.BetaMessageParamRoleUser, res.Messages[0].Role)
-	require.NotNil(t, res.Messages[0].Content[0].OfText)
-	assert.Contains(t, res.Messages[0].Content[0].OfText.Text, summaryPrefix,
-		"the summary rides on the first surviving message")
+	assert.Equal(t, 1, res.Compactions, "the compaction block should be noticed")
+	assert.Equal(t, "72F", res.FinalText, "and the run carries on normally")
 }
 
-// A conversation inside the budget must not be touched — compaction costs a
-// model call and loses detail, so it only happens when it has to.
-func TestHarness_DoesNotCompactWhenUnderBudget(t *testing.T) {
+// A run the API did not compact reports nothing — the counter is a fact read off
+// the response, not a guess from token arithmetic.
+func TestHarness_ReportsNoCompactionWhenNoneHappened(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeSSE(t, w, textResponse("short answer"))
+		writeSSE(t, w, textResponse("short"))
 	}))
 	defer srv.Close()
 
 	eng, err := NewEngine(Config{BaseURL: srv.URL, APIKey: "k", Model: "m"})
 	require.NoError(t, err)
 
-	var history []anthropic.BetaMessageParam
-	for i := 0; i < 20; i++ {
-		history = append(history, userTurn(fmt.Sprintf("q%d", i)), assistantTurn(fmt.Sprintf("a%d", i)))
-	}
-
-	log := &recordingLog{}
-	res, err := NewHarness(eng, log).Run(context.Background(), history, "hi", &recordingSink{})
+	res, err := NewHarness(eng, nil).Run(context.Background(), nil, "hi", &recordingSink{})
 	require.NoError(t, err)
-
 	assert.Zero(t, res.Compactions)
-	assert.Empty(t, log.compactions)
-	assert.Len(t, res.Messages, len(history)+2)
 }
 
-// If the summarizing call fails, the run continues on the full conversation. An
-// oversized prompt still has a chance of succeeding; a half-compacted one does
-// not.
-func TestHarness_CompactionFailureLeavesConversationIntact(t *testing.T) {
-	srv := httptest.NewServer(routeByShape(t,
-		func(n int) string {
-			if n == 1 {
-				return oversizedToolUseResponse("toolu_1", "get_weather", `{"city":"Paris"}`, 500_000)
-			}
-			return textResponse("done anyway")
-		},
-		func() (string, int) { return "summarizer down", http.StatusInternalServerError },
-	))
+// TestHarness_CompactionBlockSurvivesHistoryAndPersistence is now load-bearing.
+// The API replaces the compacted history using the compaction block we send
+// back, so a block dropped from history — in memory or through the session log's
+// JSON round trip — means the next request re-sends the full conversation the
+// compaction was supposed to shrink.
+func TestHarness_CompactionBlockSurvivesHistoryAndPersistence(t *testing.T) {
+	var reqCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&reqCount, 1) == 1 {
+			writeSSE(t, w, compactedToolUseResponse("toolu_1", "get_weather", `{"city":"Paris"}`))
+			return
+		}
+		writeSSE(t, w, textResponse("done"))
+	}))
 	defer srv.Close()
 
 	eng, err := NewEngine(Config{
@@ -228,99 +202,47 @@ func TestHarness_CompactionFailureLeavesConversationIntact(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	var history []anthropic.BetaMessageParam
-	for i := 0; i < 20; i++ {
-		history = append(history, userTurn(fmt.Sprintf("q%d", i)), assistantTurn(fmt.Sprintf("a%d", i)))
-	}
-
 	log := &recordingLog{}
-	res, err := NewHarness(eng, log).Run(context.Background(), history, "and now?", &recordingSink{})
+	res, err := NewHarness(eng, log).Run(context.Background(), nil, "weather?", &recordingSink{})
 	require.NoError(t, err)
 
-	assert.Zero(t, res.Compactions)
-	assert.Empty(t, log.compactions)
-	assert.Equal(t, "done anyway", res.FinalText, "the run still finished")
-	assert.GreaterOrEqual(t, len(res.Messages), len(history), "nothing was dropped")
+	assert.True(t, hasCompactionBlock(res.Messages), "the block must stay in the live conversation")
+	assert.True(t, hasCompactionBlock(log.appended), "and in what was persisted")
+
+	// Round-trip the persisted history the way the session store does.
+	data, err := json.Marshal(log.appended)
+	require.NoError(t, err)
+	var restored []anthropic.BetaMessageParam
+	require.NoError(t, json.Unmarshal(data, &restored))
+	assert.True(t, hasCompactionBlock(restored),
+		"a compaction block that does not survive persistence un-does the compaction")
+	assert.Contains(t, string(data), "the earlier conversation was summarized",
+		"the summary itself has to be preserved, not just the block type")
 }
 
-// If the compaction cannot be recorded, it must not be applied either: the log
-// is what the next turn is rebuilt from, so the two must not diverge.
-func TestHarness_CompactionNotAppliedWhenItCannotBeRecorded(t *testing.T) {
-	srv := httptest.NewServer(routeByShape(t,
-		func(n int) string {
-			if n == 1 {
-				return oversizedToolUseResponse("toolu_1", "get_weather", `{"city":"Paris"}`, 500_000)
+func hasCompactionBlock(msgs []anthropic.BetaMessageParam) bool {
+	for _, m := range msgs {
+		for _, b := range m.Content {
+			if b.OfCompaction != nil {
+				return true
 			}
-			return textResponse("done")
-		},
-		func() (string, int) { return textResponse("a summary"), 0 },
-	))
-	defer srv.Close()
-
-	eng, err := NewEngine(Config{
-		BaseURL: srv.URL, APIKey: "k", Model: "m",
-		Tools: []Tool{&fakeTool{name: "get_weather", result: "72F"}},
-	})
-	require.NoError(t, err)
-
-	var history []anthropic.BetaMessageParam
-	for i := 0; i < 20; i++ {
-		history = append(history, userTurn(fmt.Sprintf("q%d", i)), assistantTurn(fmt.Sprintf("a%d", i)))
+		}
 	}
-
-	log := &recordingLog{failCompactWith: assert.AnError}
-	res, err := NewHarness(eng, log).Run(context.Background(), history, "and now?", &recordingSink{})
-	require.NoError(t, err)
-
-	assert.Zero(t, res.Compactions, "an unrecordable compaction must not be applied")
-	assert.GreaterOrEqual(t, len(res.Messages), len(history))
+	return false
 }
 
-// Compaction can be turned off, in which case a long conversation eventually
-// fails on its own rather than being summarized.
-func TestHarness_CompactionCanBeDisabled(t *testing.T) {
-	var summarized int32
-	srv := httptest.NewServer(routeByShape(t,
-		func(n int) string {
-			if n == 1 {
-				return oversizedToolUseResponse("toolu_1", "get_weather", `{"city":"Paris"}`, 500_000)
-			}
-			return textResponse("done")
-		},
-		func() (string, int) {
-			atomic.AddInt32(&summarized, 1)
-			return textResponse("should not be called"), 0
-		},
-	))
-	defer srv.Close()
-
-	eng, err := NewEngine(Config{
-		BaseURL: srv.URL, APIKey: "k", Model: "m",
-		CompactAtTokens: -1,
-		Tools:           []Tool{&fakeTool{name: "get_weather", result: "72F"}},
-	})
-	require.NoError(t, err)
-
-	var history []anthropic.BetaMessageParam
-	for i := 0; i < 20; i++ {
-		history = append(history, userTurn(fmt.Sprintf("q%d", i)), assistantTurn(fmt.Sprintf("a%d", i)))
-	}
-
-	res, err := NewHarness(eng, nil).Run(context.Background(), history, "and now?", &recordingSink{})
-	require.NoError(t, err)
-	assert.Zero(t, res.Compactions)
-	assert.Zero(t, atomic.LoadInt32(&summarized), "no summarization call should be made")
-}
-
-// oversizedToolUseResponse is toolUseResponse with a large reported input-token
-// count, so the harness sees a prompt over budget without the test having to
-// build a genuinely enormous conversation.
-func oversizedToolUseResponse(id, name, inputJSON string, inputTokens int64) string {
+// compactedToolUseResponse is toolUseResponse preceded by a compaction block,
+// which is what the API returns on a request it compacted.
+func compactedToolUseResponse(id, name, inputJSON string) string {
 	w := &sseWriter{}
-	w.event("message_start", fmt.Sprintf(`{"type":"message_start","message":{"id":"msg_big","type":"message","role":"assistant","model":"test","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":%d,"output_tokens":1}}}`, inputTokens))
-	w.event("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":%q,"name":%q,"input":{}}}`, id, name))
-	w.event("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":%q}}`, inputJSON))
+	w.event("message_start", `{"type":"message_start","message":{"id":"msg_c","type":"message","role":"assistant","model":"test","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":90000,"output_tokens":1}}}`)
+	w.event("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"compaction","content":""}}`)
+	w.event("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"compaction_delta","content":"the earlier conversation was summarized"}}`)
 	w.event("content_block_stop", `{"type":"content_block_stop","index":0}`)
+	w.event("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"`+id+`","name":"`+name+`","input":{}}}`)
+	pj, _ := json.Marshal(inputJSON)
+	w.event("content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":`+string(pj)+`}}`)
+	w.event("content_block_stop", `{"type":"content_block_stop","index":1}`)
 	w.event("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":5}}`)
 	w.event("message_stop", `{"type":"message_stop"}`)
 	return w.String()

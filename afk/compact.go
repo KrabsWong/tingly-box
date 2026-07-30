@@ -1,173 +1,59 @@
 package afk
 
 import (
-	"context"
-	"fmt"
-	"strings"
-
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/sirupsen/logrus"
 )
 
-// DefaultCompactAtTokens is the prompt size at which a run compacts before its
-// next model call.
+// Server-side compaction, from the Beta Messages API.
 //
-// The number is measured, not guessed: every response reports how many input
-// tokens the request actually cost, so the trigger reads the real prompt size
-// rather than estimating from character counts. 100k leaves useful headroom
-// under the 200k window that is the floor for models worth pointing @tb at,
-// while being high enough that ordinary conversations never reach it.
-const DefaultCompactAtTokens = 100_000
-
-// compactKeepMessages is how many recent messages compaction tries to keep
-// verbatim. Recent turns are where the work is; older ones are what a summary
-// can stand in for.
-const compactKeepMessages = 12
-
-// summarySystemPrompt instructs the summarizing call. It asks for the things a
-// resumed conversation actually needs — decisions, state, open threads — rather
-// than a readable recap, because the reader is the model itself.
-const summarySystemPrompt = `You are compacting a conversation so it can continue within a smaller context.
-Write a dense summary of the exchange below, for the assistant that will continue it.
-Preserve: what the user asked for and why, decisions and conclusions reached, files and
-directories touched, commands run and their outcomes, current working state, and anything
-still outstanding. Drop pleasantries and redundant tool output. Do not address the user;
-write it as notes to yourself. Be complete over brief — omitted state cannot be recovered.`
-
-const summaryPrefix = "[Summary of the earlier part of this conversation]\n\n"
-
-// compactionBoundary picks how many leading messages may be replaced by a
-// summary, or 0 when there is no safe place to cut.
+// Once the prompt crosses the trigger, the API summarizes the older part of the
+// conversation itself and returns a compaction block in the response. We keep
+// sending the full history — the block is what tells the API which part of it to
+// replace on the next request — so nothing here rewrites or drops messages.
 //
-// The cut must land on a genuine user turn — one that opens an exchange rather
-// than carrying tool results. Cutting anywhere else orphans a tool_result from
-// the tool_use that requested it, which the API rejects outright, and it is
-// also where the summary text gets attached, which only makes sense on a user
-// turn.
-//
-// It searches forward from the ideal boundary so compaction keeps at most
-// keepLast-ish messages; if the whole tail is one long tool loop with no clean
-// turn boundary, it gives up rather than cutting somewhere unsafe.
-func compactionBoundary(msgs []anthropic.BetaMessageParam, keepLast int) int {
-	if len(msgs) <= keepLast {
-		return 0
-	}
-	for i := len(msgs) - keepLast; i < len(msgs); i++ {
-		if isConversationTurnStart(msgs[i]) {
-			return i
-		}
-	}
-	return 0
-}
+// This is the whole mechanism. There is no in-process summarizer: doing it
+// ourselves meant an extra model call per compaction, a summary written by a
+// prompt we maintain, and a boundary-selection rule that had to avoid cutting a
+// tool_result away from its tool_use. All of that is the platform's job.
+const (
+	// betaCompaction enables it. Passed as a literal because the vendored SDK
+	// ships the request types (BetaCompact20260112EditParam) ahead of a named
+	// constant for the flag; AnthropicBeta is an alias for string, so this is
+	// the same thing a constant would be.
+	betaCompaction = "compact-2026-01-12"
 
-// isConversationTurnStart reports whether m opens an exchange: a user message
-// that carries no tool results.
-func isConversationTurnStart(m anthropic.BetaMessageParam) bool {
-	if m.Role != anthropic.BetaMessageParamRoleUser {
-		return false
-	}
-	for _, b := range m.Content {
-		if b.OfToolResult != nil {
-			return false
-		}
-	}
-	return true
-}
+	// DefaultServerCompactTrigger is the input-token count at which the API
+	// compacts. Set explicitly rather than inheriting the API's own default so
+	// the number @tb runs at is visible here and does not move underneath us.
+	DefaultServerCompactTrigger = 120_000
+)
 
-// renderForSummary flattens messages into the transcript handed to the
-// summarizing model. Tool inputs and results are included in outline form —
-// what ran and what came back is exactly the state a resumed conversation needs
-// — but truncated, since re-reading a full build log to summarize it would cost
-// as much as the context we are trying to reclaim.
-func renderForSummary(msgs []anthropic.BetaMessageParam) string {
-	var b strings.Builder
-	for _, m := range msgs {
-		role := "User"
-		if m.Role == anthropic.BetaMessageParamRoleAssistant {
-			role = "Assistant"
-		}
-		for _, blk := range m.Content {
-			switch {
-			case blk.OfText != nil:
-				fmt.Fprintf(&b, "%s: %s\n", role, blk.OfText.Text)
-			case blk.OfToolUse != nil:
-				fmt.Fprintf(&b, "%s called %s(%s)\n", role, blk.OfToolUse.Name,
-					Truncate(string(mustJSON(blk.OfToolUse.Input)), TruncateOptions{MaxBytes: 500, MaxLines: 8}).Text)
-			case blk.OfToolResult != nil:
-				fmt.Fprintf(&b, "Tool result: %s\n",
-					Truncate(toolResultText(blk.OfToolResult), TruncateOptions{MaxBytes: 1000, MaxLines: 20, KeepTail: true}).Text)
-			}
-		}
-	}
-	return b.String()
-}
+// compactionInstructions steers what the summary keeps. The default summary is
+// written for a reader resuming the conversation; these are the specifics a
+// tool-using agent needs and would otherwise have to re-derive.
+const compactionInstructions = `Preserve what the user asked for and why, decisions and conclusions reached,
+files and directories touched, commands run and their outcomes, current working
+state, and anything still outstanding. Drop pleasantries and redundant tool output.`
 
-func toolResultText(r *anthropic.BetaToolResultBlockParam) string {
-	var b strings.Builder
-	for _, c := range r.Content {
-		if c.OfText != nil {
-			b.WriteString(c.OfText.Text)
-		}
-	}
-	return b.String()
-}
-
-func mustJSON(v any) []byte {
-	switch t := v.(type) {
-	case []byte:
-		return t
-	case string:
-		return []byte(t)
-	default:
-		return []byte(fmt.Sprint(v))
+// serverCompactionEdit builds the context-management edit that asks the API to
+// compact on our behalf.
+func serverCompactionEdit(trigger int64) anthropic.BetaContextManagementConfigParam {
+	return anthropic.BetaContextManagementConfigParam{
+		Edits: []anthropic.BetaContextManagementConfigEditUnionParam{{
+			OfCompact20260112: &anthropic.BetaCompact20260112EditParam{
+				Instructions: anthropic.String(compactionInstructions),
+				Trigger:      anthropic.BetaInputTokensTriggerParam{Value: trigger},
+				// PauseAfterCompaction stays false: compaction should be
+				// invisible to the run, not a step that has to be resumed.
+			},
+		}},
 	}
 }
 
-// Summarize condenses messages into a single block of text using the engine's
-// model, with no tools and no conversation history of its own.
-func (e *Engine) Summarize(ctx context.Context, msgs []anthropic.BetaMessageParam) (string, error) {
-	transcript := renderForSummary(msgs)
-	if strings.TrimSpace(transcript) == "" {
-		return "", fmt.Errorf("nothing to summarize")
+// serverCompactTrigger returns the configured trigger, or the default.
+func (e *Engine) serverCompactTrigger() int64 {
+	if e.serverTrigger > 0 {
+		return e.serverTrigger
 	}
-
-	params := anthropic.BetaMessageNewParams{
-		Model:     anthropic.Model(e.model),
-		MaxTokens: 4096,
-		System:    []anthropic.BetaTextBlockParam{{Text: summarySystemPrompt}},
-		Messages: []anthropic.BetaMessageParam{
-			anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(transcript)),
-		},
-	}
-
-	stream := e.client.Beta.Messages.NewStreaming(ctx, params)
-	msg := anthropic.BetaMessage{}
-	for stream.Next() {
-		if err := msg.Accumulate(stream.Current()); err != nil {
-			return "", fmt.Errorf("accumulate summary stream: %w", err)
-		}
-	}
-	if err := stream.Err(); err != nil {
-		return "", fmt.Errorf("summary stream error: %w", err)
-	}
-
-	var out strings.Builder
-	for _, block := range msg.Content {
-		if block.Type == "text" {
-			out.WriteString(block.Text)
-		}
-	}
-	summary := strings.TrimSpace(out.String())
-	if summary == "" {
-		return "", fmt.Errorf("summary was empty")
-	}
-
-	logrus.WithFields(logrus.Fields{
-		"summarized_msgs": len(msgs),
-		"summary_len":     len(summary),
-		"input_tokens":    msg.Usage.InputTokens,
-		"output_tokens":   msg.Usage.OutputTokens,
-	}).Info("afk: compacted conversation prefix")
-
-	return summaryPrefix + summary, nil
+	return DefaultServerCompactTrigger
 }

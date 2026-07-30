@@ -163,27 +163,34 @@ stripped. That line is how the tool tracks the working directory; tail-truncatin
 first would cut it off and strand the session in the previous directory. There is
 a test for exactly this.
 
-### 3.6 Compaction: the boundary is the whole problem
+### 3.6 Compaction is the platform's, not ours
 
-Triggered by **measured** prompt size — every response reports the input tokens
-the request actually cost, so there is no need to estimate from character counts.
-Cached tokens count, because they still occupy the window. Default trigger
-`DefaultCompactAtTokens` = 100k; keeps the last `compactKeepMessages` = 12
-messages verbatim.
+Server-side compaction from the Beta Messages API, on by default:
+`context_management` carrying a `compact_20260112` edit in the body, plus the
+`compact-2026-01-12` flag as a header. Trigger pinned to
+`DefaultServerCompactTrigger` = 120k rather than inheriting the API's own
+default, so the number `@tb` runs at is visible in our code and cannot move
+underneath us. `Instructions` steers the summary toward the state a tool-using
+agent needs; `PauseAfterCompaction` stays false so compaction is invisible to
+the run rather than a step to resume.
 
-The cut lands **only on a genuine user turn** — one that opens an exchange
-rather than carrying tool results. Anywhere else orphans a `tool_result` from
-the `tool_use` that requested it, which the API rejects. When the recent stretch
-is one unbroken tool loop with no clean boundary, compaction **gives up**: an
-oversized prompt still has a chance of succeeding, a malformed one does not.
-Every other failure path — summarization call fails, log write fails — leaves the
-conversation untouched, for the same reason.
+**We do not rewrite history.** The API returns a compaction block in the
+assistant message; we keep sending the full conversation, and that block is what
+tells the API which part of it to replace next time. So there is nothing to
+summarize ourselves, no boundary to choose, and no compaction record in the log —
+the block persists as part of the message, like any other content block.
 
-The summary rides into the first surviving message as an extra text block rather
-than becoming a message of its own, so the transcript keeps alternating without
-inventing a turn that never happened. `Harness.prependSummary` and
-`session.withSummary` must stay in agreement: one is what the live run keeps
-using, the other is what the next turn is rebuilt from.
+That makes one test load-bearing: **the compaction block has to survive both
+history and the session log's JSON round trip**
+(`TestHarness_CompactionBlockSurvivesHistoryAndPersistence`). A block dropped
+anywhere means the next request re-sends the conversation the compaction was
+supposed to shrink.
+
+An earlier revision hand-rolled this: an extra model call per compaction, a
+summarization prompt of our own, and a boundary rule that had to avoid cutting a
+`tool_result` away from its `tool_use`. It was deleted. Using the beta API is the
+one-protocol thesis (§1) applied — the reason to speak one protocol is to use its
+whole surface, not to reimplement it.
 
 ### 3.7 Steering lands where the transcript allows
 
@@ -201,7 +208,7 @@ it would answer a question nobody is asking any more.
 Only `@tb` registers as steerable. `@cc` drives a subprocess and still falls
 through to the busy path.
 
-### 3.8 The log is append-only, and compaction does not rewrite it
+### 3.8 The log is append-only
 
 One JSONL entry per line, `O_APPEND`, never rewritten. An unreadable line costs
 one message rather than the conversation — the previous whole-file store treated
@@ -209,9 +216,9 @@ any parse failure as "no history at all". The scanner is sized for turns carryin
 tool output; `bufio`'s 64KB default would stop mid-file and take the rest of the
 history with it.
 
-Compaction appends a `compaction` entry; the replaced messages stay on disk and
-the projection skips past them. That keeps the log auditable and keeps a
-reloaded conversation identical to what the run was using when it compacted.
+Entries are typed even though there is currently only `message`. The envelope is
+the file format: adding a kind of record later should not mean rewriting every
+log that already exists. Compaction does not need one (§3.6).
 
 A persistence failure is logged, never returned. The run's work is real whether
 or not it was recorded, and failing the turn over a disk error would discard
@@ -233,8 +240,8 @@ Also not taken, and not currently wanted:
 | Durable resume across process restarts | Requires orchestration entries and recovery logic. A dropped turn is recoverable by asking again; the checkpoint already keeps the work. |
 | Conversation branching / tree navigation | No product surface asks for it. |
 | Refs (parallel operations on one session) | A chat is one conversation at a time. |
-| Hooks / extension points | Guardrails and approval are wired directly today. Worth revisiting when there is a second consumer — see §6. |
-| Server-side compaction beta | See §5. |
+| Hooks / extension points | Approval is wired directly today. Worth revisiting when there is a second consumer — see §6. |
+| An in-process compaction fallback | The beta API does it (§3.6). A second mechanism would need a threshold ordered against the server's trigger, and would fire on exactly the conversations where its worse summaries hurt most. |
 
 The guiding rule: the loop and the checkpoint are what everything else needs.
 The rest is weight this product has no use for yet.
@@ -243,21 +250,20 @@ The rest is weight this product has no use for yet.
 
 ## 5. Known limits and open questions
 
-**Model capability is unknown at runtime.** `@tb` routes by bot-UUID rule to
-whatever model the user configured, reached through the gateway. AFK therefore
-cannot assume any model-gated feature is available. Three consequences:
+**Beta features are the default.** AFK talks to the Beta Messages API and uses
+what it offers rather than reimplementing it. Compaction is the first case; the
+`Config.DisableServerCompaction` escape hatch exists for an upstream that cannot
+take it, and turning it off means nothing bounds the prompt.
 
-- **Thinking is not enabled.** A `thinking` parameter an upstream rejects is a
-  hard failure for that user. Thinking blocks are handled correctly when a model
-  returns them by default; that is as far as it goes.
-- **Compaction is hand-rolled** rather than using the server-side beta
-  (`compact-2026-01-12`), which would otherwise be the natural fit for the
-  one-protocol thesis. The beta is model-gated and fails hard where unsupported,
-  and it cannot be exercised against the `vmodel` test server. The seam is one
-  function (`Harness.compact`), so switching later is a local change.
-- **The compaction trigger is a fixed token count**, not a fraction of the
-  model's context window, because the window is not known. 100k is safe for the
-  200k+ models worth pointing `@tb` at, and too high for a small one.
+**The compaction trigger is a fixed token count**, not a fraction of the model's
+context window, because `@tb` routes by bot-UUID rule and the window is not known
+at runtime. 120k suits the models compaction is available on (all 1M-window) and
+would be too high for a small one.
+
+**Thinking is still not enabled.** Unlike compaction this is not a beta — adaptive
+thinking is GA — but it is model-gated in a way that 400s where unsupported, and
+nothing has asked for it yet. Thinking blocks are handled correctly when a model
+returns them by default (§3.3); that is as far as it goes.
 
 **`Temperature` is sent unconditionally** (`smart_guide/agent.go`, from
 `SmartGuideConfig`). Current Anthropic models — Opus 5, 4.8, 4.7, Fable 5,
@@ -303,11 +309,12 @@ means designing it against a single caller.
 ## 7. Checked against `.design/ux-principles.md`
 
 - **#6 smart defaults over toggles** — skills register when a skill directory
-  exists, with no enable flag; steering is always on; compaction has a default
-  and no per-chat setting. The one knob added (`CompactAtTokens`) exists to be
-  turned *off* in tests, not to be tuned by users.
-- **#10 done ≠ locked** — `/clear` archives rather than deletes, and compaction
-  keeps the replaced messages on disk.
+  exists, with no enable flag; steering is always on; compaction is on with a
+  pinned trigger and no per-chat setting. Both compaction knobs
+  (`DisableServerCompaction`, `ServerCompactTrigger`) are escape hatches, not
+  settings anyone is expected to tune.
+- **#10 done ≠ locked** — `/clear` archives rather than deletes, and the
+  append-only log never rewrites what it already wrote.
 - **#12 side effects scoped to the current surface** — a steering message
   affects the running turn only; anything left queued when it ends is dropped.
 

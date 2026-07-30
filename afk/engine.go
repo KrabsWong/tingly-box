@@ -101,17 +101,18 @@ func (u Usage) LogFields() logrus.Fields {
 
 // Engine runs the ReAct loop against a configured model and toolset.
 type Engine struct {
-	client          anthropic.Client
-	model           string
-	system          string
-	maxTokens       int64
-	temperature     *float64
-	maxIterations   int
-	streamText      bool
-	compactAtTokens int64
-	tools           []Tool
-	toolByName      map[string]Tool
-	toolParams      []anthropic.BetaToolUnionParam
+	client        anthropic.Client
+	model         string
+	system        string
+	maxTokens     int64
+	temperature   *float64
+	maxIterations int
+	streamText    bool
+	serverCompact bool
+	serverTrigger int64
+	tools         []Tool
+	toolByName    map[string]Tool
+	toolParams    []anthropic.BetaToolUnionParam
 }
 
 // Config configures an Engine.
@@ -139,11 +140,13 @@ type Config struct {
 	// engine always consumes the model's HTTP stream either way; this flag only
 	// changes the granularity of the OnText fan-out to the sink.
 	StreamText bool
-	// CompactAtTokens is the measured prompt size at which a run summarizes its
-	// own older history to keep going. Zero uses DefaultCompactAtTokens; a
-	// negative value disables compaction, which means a long enough
-	// conversation eventually fails outright.
-	CompactAtTokens int64
+	// DisableServerCompaction turns off server-side compaction, which is
+	// otherwise on by default. With it off, nothing bounds the prompt: a long
+	// enough conversation eventually exceeds the context window and fails.
+	DisableServerCompaction bool
+	// ServerCompactTrigger overrides the input-token count at which the server
+	// compacts. Zero uses DefaultServerCompactTrigger.
+	ServerCompactTrigger int64
 	// Tools are the callable tools exposed to the model.
 	Tools []Tool
 }
@@ -169,15 +172,16 @@ func NewEngine(cfg Config) (*Engine, error) {
 	client := newClient(cfg.BaseURL, cfg.APIKey)
 
 	e := &Engine{
-		client:          client,
-		model:           cfg.Model,
-		system:          cfg.System,
-		maxTokens:       maxTokens,
-		temperature:     cfg.Temperature,
-		maxIterations:   maxIter,
-		streamText:      cfg.StreamText,
-		compactAtTokens: cfg.CompactAtTokens,
-		toolByName:      make(map[string]Tool, len(cfg.Tools)),
+		client:        client,
+		model:         cfg.Model,
+		system:        cfg.System,
+		maxTokens:     maxTokens,
+		temperature:   cfg.Temperature,
+		maxIterations: maxIter,
+		streamText:    cfg.StreamText,
+		serverCompact: !cfg.DisableServerCompaction,
+		serverTrigger: cfg.ServerCompactTrigger,
+		toolByName:    make(map[string]Tool, len(cfg.Tools)),
 	}
 	for _, t := range cfg.Tools {
 		e.registerTool(t)
@@ -267,6 +271,10 @@ type StepResult struct {
 	StopReason anthropic.BetaStopReason
 	// ToolCalls is how many tools this step invoked.
 	ToolCalls int
+	// ServerCompacted reports that the response carried a compaction block, so
+	// the API compacted this request's history on its own. It is a fact, not an
+	// estimate, which is why the harness trusts it over any token arithmetic.
+	ServerCompacted bool
 	// NeedsAnotherStep reports that the model asked for tools. Their results
 	// are already in Messages, and the model has to be shown them, so the run
 	// is not finished no matter what else this step produced.
@@ -293,11 +301,18 @@ func (e *Engine) Step(
 		StopReason: msg.StopReason,
 	}
 
-	// Collect tool_use blocks from the SDK-native content slice.
+	// Walk the SDK-native content slice once: collect tool_use blocks, and note
+	// whether the API compacted this request's history. A compaction block is
+	// the API telling us it did; it rides along in the assistant message and is
+	// carried forward in history, which is how the next request knows what was
+	// replaced.
 	var toolUses []anthropic.BetaContentBlockUnion
 	for _, block := range msg.Content {
-		if block.Type == "tool_use" {
+		switch block.Type {
+		case "tool_use":
 			toolUses = append(toolUses, block)
+		case "compaction":
+			res.ServerCompacted = true
 		}
 	}
 	if len(toolUses) == 0 {
@@ -352,6 +367,16 @@ func (e *Engine) streamTurn(
 	}
 	if len(e.toolParams) > 0 {
 		params.Tools = e.toolParams
+	}
+	if e.serverCompact {
+		// Server-side compaction, on by default: the API summarizes the older
+		// part of the conversation itself once the prompt crosses the trigger,
+		// and returns a compaction block we carry forward in history. It
+		// produces better summaries than we can and costs us no extra model
+		// call. The in-process path stays as the backstop for upstreams that
+		// drop this.
+		params.Betas = append(params.Betas, betaCompaction)
+		params.ContextManagement = serverCompactionEdit(e.serverCompactTrigger())
 	}
 
 	stream := e.client.Beta.Messages.NewStreaming(ctx, params)

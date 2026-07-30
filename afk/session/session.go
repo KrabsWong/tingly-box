@@ -7,9 +7,8 @@
 // file if the process died mid-write. Appending a line cannot corrupt the lines
 // before it.
 //
-// Entries are typed rather than bare messages so the log can carry facts that
-// are not themselves conversation — compaction markers being the next one —
-// without changing the file format again.
+// Entries are typed rather than bare messages so a record that is not itself
+// conversation can be added later without changing the file format again.
 package session
 
 import (
@@ -32,20 +31,18 @@ type EntryType string
 const (
 	// EntryMessage carries one conversation message.
 	EntryMessage EntryType = "message"
-	// EntryCompaction records that the messages before it were replaced by a
-	// summary. The messages themselves stay in the file — the log is
-	// append-only — and the projection skips past them.
-	EntryCompaction EntryType = "compaction"
 )
 
 // Entry is a single record in the log.
+//
+// Typed even though there is currently one type: the envelope is the file
+// format, and adding a kind of record later should not mean rewriting every
+// existing log. Compaction, notably, does not need one — the API returns a
+// compaction block inside the assistant message, so it persists as part of that
+// message like any other content block.
 type Entry struct {
 	Type    EntryType                   `json:"type"`
 	Message *anthropic.BetaMessageParam `json:"message,omitempty"`
-	// Summary and Replaced describe an EntryCompaction: the text that stands in
-	// for the first Replaced messages of the conversation as it stood then.
-	Summary  string `json:"summary,omitempty"`
-	Replaced int    `json:"replaced,omitempty"`
 }
 
 // Session is an append-only conversation log backed by one file.
@@ -101,61 +98,14 @@ func Open(path string) (*Session, error) {
 }
 
 // Messages projects the log to the conversation the model sees.
-//
-// A compaction entry hides the messages it replaced and carries its summary
-// into the first message that survived, which is why this is a projection and
-// not a filter: the file keeps everything, the conversation does not.
 func (s *Session) Messages() []anthropic.BetaMessageParam {
 	msgs := make([]anthropic.BetaMessageParam, 0, len(s.entries))
-	summary := ""
 	for _, e := range s.entries {
-		switch e.Type {
-		case EntryMessage:
-			if e.Message != nil {
-				msgs = append(msgs, *e.Message)
-			}
-		case EntryCompaction:
-			// Only the newest compaction matters: an older one is already
-			// folded into the summary this one was written from.
-			replaced := e.Replaced
-			if replaced > len(msgs) {
-				replaced = len(msgs)
-			}
-			msgs = msgs[replaced:]
-			summary = e.Summary
+		if e.Type == EntryMessage && e.Message != nil {
+			msgs = append(msgs, *e.Message)
 		}
 	}
-	if summary != "" && len(msgs) > 0 {
-		msgs = withSummary(msgs, summary)
-	}
 	return msgs
-}
-
-// withSummary prepends the summary to the first surviving message as an extra
-// text block.
-//
-// It rides on a real message rather than becoming one of its own so the
-// transcript keeps alternating roles without inventing a turn that never
-// happened. The first survivor is always a user turn — compaction chooses its
-// boundary that way — so a text block belongs there.
-func withSummary(msgs []anthropic.BetaMessageParam, summary string) []anthropic.BetaMessageParam {
-	out := append([]anthropic.BetaMessageParam(nil), msgs...)
-	first := out[0]
-	content := make([]anthropic.BetaContentBlockParamUnion, 0, len(first.Content)+1)
-	content = append(content, anthropic.NewBetaTextBlock(summary))
-	content = append(content, first.Content...)
-	first.Content = content
-	out[0] = first
-	return out
-}
-
-// AppendCompaction records that the first replaced messages of the conversation
-// as it currently stands are now represented by summary.
-func (s *Session) AppendCompaction(summary string, replaced int) error {
-	if summary == "" || replaced <= 0 {
-		return nil
-	}
-	return s.appendEntries(Entry{Type: EntryCompaction, Summary: summary, Replaced: replaced})
 }
 
 // Len returns the number of messages currently in the log.
