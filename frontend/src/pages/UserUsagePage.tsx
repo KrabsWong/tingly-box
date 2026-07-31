@@ -9,7 +9,6 @@ import {
     Grid,
     IconButton,
     InputAdornment,
-    LinearProgress,
     Paper,
     Skeleton,
     Stack,
@@ -51,13 +50,14 @@ import {
     getCacheHitRate,
     getCacheHitRateColor,
     formatCacheBreakdown,
+    hasCacheWrites,
     getErrorRateColor,
 } from '@/components/dashboard';
 import type { AggregatedStat } from '@/components/dashboard';
 import api from '@/services/api';
 
 type TimeRange = 'today' | '7d' | '30d' | '90d';
-type SortField = 'name' | 'requests' | 'tokens' | 'errors';
+type SortField = 'name' | 'requests' | 'tokens' | 'cacheRead' | 'cacheWrite' | 'cacheHit' | 'input' | 'output' | 'errors';
 type SortDirection = 'asc' | 'desc';
 
 interface APITokenInfo {
@@ -121,10 +121,7 @@ const formatDateTime = (value?: string) => {
     }).format(date);
 };
 
-// Shared base style for the master-list and detail-panel cards: separate
-// elevation-0 Paper cards (matching StatCard/ServiceStatsTable's convention)
-// rather than one Paper split by an internal divider line.
-const masterDetailCardSx = {
+const usageTableCardSx = {
     width: '100%',
     borderRadius: 2,
     border: '1px solid',
@@ -132,7 +129,6 @@ const masterDetailCardSx = {
     backgroundColor: 'background.paper',
     boxShadow: 'none',
     overflow: 'hidden',
-    height: { xs: 'auto', lg: 640 },
 } as const;
 
 const UserUsageSkeleton = () => (
@@ -284,6 +280,16 @@ export default function UserUsagePage() {
             .sort((a, b) => {
                 if (sortField === 'name') return direction * a.display_name.localeCompare(b.display_name);
                 if (sortField === 'requests') return direction * (a.request_count - b.request_count);
+                if (sortField === 'cacheRead') return direction * (a.cache_read_tokens - b.cache_read_tokens);
+                if (sortField === 'cacheWrite') return direction * (a.cache_write_tokens - b.cache_write_tokens);
+                if (sortField === 'cacheHit') {
+                    return direction * (
+                        getCacheHitRate(a.cache_read_tokens, a.total_input_tokens)
+                        - getCacheHitRate(b.cache_read_tokens, b.total_input_tokens)
+                    );
+                }
+                if (sortField === 'input') return direction * (a.total_input_tokens - b.total_input_tokens);
+                if (sortField === 'output') return direction * (a.total_output_tokens - b.total_output_tokens);
                 if (sortField === 'errors') return direction * (a.error_rate - b.error_rate);
                 return direction * (a.total_tokens - b.total_tokens);
             });
@@ -362,10 +368,8 @@ export default function UserUsagePage() {
         cacheHitRate,
         errorRate,
     } = summary;
-    const maxTokens = useMemo(
-        () => visibleRows.reduce((max, row) => Math.max(max, row.total_tokens), 1),
-        [visibleRows],
-    );
+    const showUserCacheWrite = hasCacheWrites(rows);
+    const showModelCacheWrite = hasCacheWrites(modelStats);
     const summaryItems = [
         {
             label: t('dashboard.userUsage.registeredUsers', { defaultValue: 'Registered users' }),
@@ -422,33 +426,28 @@ export default function UserUsagePage() {
         label: string;
         align?: 'right';
         defaultDir: SortDirection;
-        sx?: object;
     }> = [
         { field: 'name', label: t('dashboard.userUsage.user', { defaultValue: 'User' }), defaultDir: 'asc' },
-        {
-            field: 'requests',
-            label: t('dashboard.userUsage.requests', { defaultValue: 'Requests' }),
-            align: 'right',
-            defaultDir: 'desc',
-            sx: { display: { xs: 'none', sm: 'table-cell' } },
-        },
-        { field: 'tokens', label: t('dashboard.userUsage.tokens', { defaultValue: 'Tokens' }), align: 'right', defaultDir: 'desc' },
-        {
-            field: 'errors',
-            label: t('dashboard.userUsage.errorRate', { defaultValue: 'Error rate' }),
-            align: 'right',
-            defaultDir: 'desc',
-            sx: { display: { xs: 'none', md: 'table-cell' } },
-        },
+        { field: 'requests', label: t('dashboard.userUsage.requests', { defaultValue: 'Requests' }), align: 'right', defaultDir: 'desc' },
+        { field: 'tokens', label: t('dashboard.userUsage.total', { defaultValue: 'Total' }), align: 'right', defaultDir: 'desc' },
+        { field: 'cacheRead', label: t('dashboard.userUsage.cacheRead', { defaultValue: 'Cache Read' }), align: 'right', defaultDir: 'desc' },
+        ...(showUserCacheWrite ? [{
+            field: 'cacheWrite' as const,
+            label: t('dashboard.userUsage.cacheWrite', { defaultValue: 'Cache Write' }),
+            align: 'right' as const,
+            defaultDir: 'desc' as const,
+        }] : []),
+        { field: 'cacheHit', label: t('dashboard.userUsage.cacheHit', { defaultValue: 'Cache Hit' }), align: 'right', defaultDir: 'desc' },
+        { field: 'input', label: t('dashboard.userUsage.input', { defaultValue: 'Input' }), align: 'right', defaultDir: 'desc' },
+        { field: 'output', label: t('dashboard.userUsage.output', { defaultValue: 'Output' }), align: 'right', defaultDir: 'desc' },
+        { field: 'errors', label: t('dashboard.userUsage.errorRate', { defaultValue: 'Error rate' }), align: 'right', defaultDir: 'desc' },
     ];
 
     const handleSelectUser = (userID: string) => {
         setSelectedUserID(userID);
-        if (window.matchMedia('(max-width: 1199.95px)').matches) {
-            requestAnimationFrame(() => {
-                detailPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            });
-        }
+        requestAnimationFrame(() => {
+            detailPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
     };
 
     if (loading) return <UserUsageSkeleton />;
@@ -506,10 +505,10 @@ export default function UserUsagePage() {
             </Grid>
 
             <Grid container spacing={2} sx={{ alignItems: 'stretch' }}>
-                <Grid size={{ xs: 12, lg: 7, xl: 5 }} sx={{ display: 'flex' }}>
+                <Grid size={{ xs: 12 }} sx={{ display: 'flex' }}>
                     <Paper
                         elevation={0}
-                        sx={{ ...masterDetailCardSx, display: 'flex', flexDirection: 'column' }}
+                        sx={{ ...usageTableCardSx, display: 'flex', flexDirection: 'column' }}
                     >
                         <Box
                             sx={{
@@ -546,13 +545,11 @@ export default function UserUsagePage() {
                         </Box>
                         <TableContainer
                             sx={{
-                                maxHeight: { xs: 420, lg: 'none' },
-                                flex: { lg: 1 },
-                                minHeight: 0,
+                                maxHeight: 520,
                                 overscrollBehavior: 'contain',
                             }}
                         >
-                            <Table stickyHeader>
+                            <Table stickyHeader sx={{ minWidth: showUserCacheWrite ? 1080 : 980 }}>
                                 <TableHead>
                                     <TableRow
                                         sx={{
@@ -574,7 +571,6 @@ export default function UserUsagePage() {
                                                 key={col.field}
                                                 align={col.align}
                                                 sortDirection={sortField === col.field ? sortDirection : false}
-                                                sx={col.sx}
                                             >
                                                 <TableSortLabel
                                                     active={sortField === col.field}
@@ -663,61 +659,22 @@ export default function UserUsagePage() {
                                                         </Box>
                                                     </Stack>
                                                 </TableCell>
-                                                <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
-                                                    <Typography variant="body1" sx={{ color: 'text.primary', fontWeight: 550 }}>
-                                                        {formatNumber(row.request_count)}
-                                                    </Typography>
+                                                <TableCell align="right">{formatNumber(row.request_count)}</TableCell>
+                                                <TableCell align="right" sx={{ fontWeight: 600 }}>{formatNumber(row.total_tokens)}</TableCell>
+                                                <TableCell align="right">{formatNumber(row.cache_read_tokens)}</TableCell>
+                                                {showUserCacheWrite && (
+                                                    <TableCell align="right">{formatNumber(row.cache_write_tokens)}</TableCell>
+                                                )}
+                                                <TableCell align="right">
+                                                    {getCacheHitRate(row.cache_read_tokens, row.total_input_tokens).toFixed(1)}%
                                                 </TableCell>
-                                                <TableCell align="right" sx={{ minWidth: { xs: 88, sm: 140 } }}>
-                                                    <Typography variant="body1" sx={{ color: 'text.primary', fontWeight: 600 }}>
-                                                        {formatNumber(row.total_tokens)}
-                                                    </Typography>
+                                                <TableCell align="right">{formatNumber(row.total_input_tokens)}</TableCell>
+                                                <TableCell align="right">{formatNumber(row.total_output_tokens)}</TableCell>
+                                                <TableCell align="right">
                                                     <Typography
-                                                        variant="caption"
+                                                        variant="body2"
                                                         sx={{
-                                                            color: 'text.secondary',
-                                                            display: { xs: 'none', sm: 'block' },
-                                                            mt: 0.2,
-                                                            whiteSpace: 'nowrap',
-                                                        }}
-                                                    >
-                                                        {t('dashboard.userUsage.compactTokenBreakdown', {
-                                                            cache: formatNumber(row.cache_read_tokens),
-                                                            input: formatNumber(row.total_input_tokens),
-                                                            output: formatNumber(row.total_output_tokens),
-                                                            defaultValue: `C ${formatNumber(row.cache_read_tokens)} · I ${formatNumber(row.total_input_tokens)} · O ${formatNumber(row.total_output_tokens)}`,
-                                                        })}
-                                                    </Typography>
-                                                    <Typography
-                                                        variant="caption"
-                                                        sx={{
-                                                            // Keep the comparison table neutral, matching
-                                                            // ServiceStatsTable; health color remains on the
-                                                            // summary/detail gauges where it has clear context.
-                                                            color: 'text.secondary',
-                                                            display: 'block',
-                                                            mt: 0.1,
-                                                            whiteSpace: 'nowrap',
-                                                        }}
-                                                    >
-                                                        {t('dashboard.userUsage.cacheHitValue', {
-                                                            value: getCacheHitRate(row.cache_read_tokens, row.total_input_tokens).toFixed(1),
-                                                            defaultValue: `${getCacheHitRate(row.cache_read_tokens, row.total_input_tokens).toFixed(1)}% cache hit`,
-                                                        })}
-                                                    </Typography>
-                                                    <LinearProgress
-                                                        variant="determinate"
-                                                        value={(row.total_tokens / maxTokens) * 100}
-                                                        sx={{ mt: 0.6, height: 3, borderRadius: 2 }}
-                                                    />
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>
-                                                    <Typography
-                                                        variant="body1"
-                                                        sx={{
-                                                            // Same threshold/color rule as ServiceStatsTable's per-model Error Rate column.
                                                             color: row.error_rate > 0.05 ? 'error.main' : 'text.secondary',
-                                                            fontWeight: 550,
                                                         }}
                                                     >
                                                         {(row.error_rate * 100).toFixed(1)}%
@@ -731,7 +688,7 @@ export default function UserUsagePage() {
                                     })}
                                     {visibleRows.length === 0 && (
                                         <TableRow>
-                                            <TableCell colSpan={5} align="center" sx={{ py: 8 }}>
+                                            <TableCell colSpan={showUserCacheWrite ? 10 : 9} align="center" sx={{ py: 8 }}>
                                                 <Typography variant="body1" sx={{ color: 'text.secondary' }}>
                                                     {t('dashboard.userUsage.noUsers', { defaultValue: 'No users match your search.' })}
                                                 </Typography>
@@ -764,21 +721,18 @@ export default function UserUsagePage() {
 
                 <Grid
                     ref={detailPanelRef}
-                    size={{ xs: 12, lg: 5, xl: 7 }}
+                    size={{ xs: 12 }}
                     sx={{ display: 'flex', scrollMarginTop: { xs: 72, lg: 0 } }}
                 >
-                    <Paper elevation={0} sx={{ ...masterDetailCardSx, display: 'flex' }}>
+                    <Paper elevation={0} sx={{ ...usageTableCardSx, display: 'flex' }}>
                         <Box sx={{
                             p: { xs: 2, sm: 2.5 },
                             width: '100%',
-                            height: '100%',
-                            minHeight: { xs: 420, lg: 0 },
                             display: 'flex',
                             flexDirection: 'column',
-                            overflow: { lg: 'hidden' },
                         }}>
                         {selectedUser ? (
-                            <Stack spacing={2.5} sx={{ height: '100%', minHeight: 0 }}>
+                            <Stack spacing={2.5}>
                                 <Box>
                                     <Stack direction="row" spacing={2} sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                         <Box sx={{ minWidth: 0 }}>
@@ -906,7 +860,7 @@ export default function UserUsagePage() {
                                     ))}
                                 </Grid>
 
-                                <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                                     <Stack direction="row" sx={{ mb: 1.25, justifyContent: 'space-between', alignItems: 'baseline' }}>
                                         <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
                                             <Typography variant="subtitle2" sx={{ fontWeight: 650 }}>
@@ -923,51 +877,84 @@ export default function UserUsagePage() {
                                             {Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} variant="rounded" height={44} />)}
                                         </Stack>
                                     ) : modelStats.length > 0 ? (
-                                        <Stack
-                                            spacing={1.5}
+                                        <TableContainer
+                                            sx={{
+                                                maxHeight: 520,
+                                                border: '1px solid',
+                                                borderColor: 'divider',
+                                                borderRadius: 1.5,
+                                                overscrollBehavior: 'contain',
+                                            }}
                                             role="region"
                                             aria-label={t('dashboard.userUsage.allModels', { defaultValue: 'All models' })}
-                                            sx={{
-                                                flex: { xs: 'none', lg: 1 },
-                                                minHeight: 0,
-                                                maxHeight: { xs: 'none', lg: 360 },
-                                                overflowY: 'auto',
-                                                overscrollBehavior: 'contain',
-                                                pr: 0.75,
-                                            }}
                                         >
-                                            {modelStats.map((model) => {
-                                                const value = getTotalTokens(model);
-                                                const share = selectedUser.total_tokens ? (value / selectedUser.total_tokens) * 100 : 0;
-                                                return (
-                                                    <Box key={`${model.provider_uuid}-${model.model || model.key}`}>
-                                                        <Stack direction="row" spacing={2} sx={{ justifyContent: 'space-between' }}>
-                                                            <Box sx={{ minWidth: 0 }}>
+                                            <Table stickyHeader sx={{ minWidth: showModelCacheWrite ? 1060 : 960 }}>
+                                                <TableHead>
+                                                    <TableRow
+                                                        sx={{
+                                                            '& .MuiTableCell-root': {
+                                                                fontWeight: 600,
+                                                                fontSize: '0.75rem',
+                                                                textTransform: 'uppercase',
+                                                                letterSpacing: '0.05em',
+                                                                color: 'text.secondary',
+                                                                py: 1.25,
+                                                            },
+                                                        }}
+                                                    >
+                                                        <TableCell>{t('dashboard.userUsage.provider', { defaultValue: 'Provider' })}</TableCell>
+                                                        <TableCell>{t('dashboard.userUsage.model', { defaultValue: 'Model' })}</TableCell>
+                                                        <TableCell align="right">{t('dashboard.userUsage.requests', { defaultValue: 'Requests' })}</TableCell>
+                                                        <TableCell align="right">{t('dashboard.userUsage.total', { defaultValue: 'Total' })}</TableCell>
+                                                        <TableCell align="right">{t('dashboard.userUsage.cacheRead', { defaultValue: 'Cache Read' })}</TableCell>
+                                                        {showModelCacheWrite && (
+                                                            <TableCell align="right">{t('dashboard.userUsage.cacheWrite', { defaultValue: 'Cache Write' })}</TableCell>
+                                                        )}
+                                                        <TableCell align="right">{t('dashboard.userUsage.cacheHit', { defaultValue: 'Cache Hit' })}</TableCell>
+                                                        <TableCell align="right">{t('dashboard.userUsage.input', { defaultValue: 'Input' })}</TableCell>
+                                                        <TableCell align="right">{t('dashboard.userUsage.output', { defaultValue: 'Output' })}</TableCell>
+                                                        <TableCell align="right">{t('dashboard.userUsage.errorRate', { defaultValue: 'Error rate' })}</TableCell>
+                                                    </TableRow>
+                                                </TableHead>
+                                                <TableBody>
+                                                    {modelStats.map((model) => (
+                                                        <TableRow
+                                                            key={`${model.provider_uuid}-${model.model || model.key}`}
+                                                            hover
+                                                            sx={{
+                                                                '& .MuiTableCell-root': {
+                                                                    py: 1.25,
+                                                                    borderBottom: '1px solid',
+                                                                    borderColor: 'divider',
+                                                                },
+                                                            }}
+                                                        >
+                                                            <TableCell>{model.provider_name || '—'}</TableCell>
+                                                            <TableCell sx={{ fontWeight: 600 }}>{model.model || model.key}</TableCell>
+                                                            <TableCell align="right">{formatNumber(model.request_count)}</TableCell>
+                                                            <TableCell align="right" sx={{ fontWeight: 600 }}>{formatNumber(getTotalTokens(model))}</TableCell>
+                                                            <TableCell align="right">{formatNumber(model.cache_read_tokens || 0)}</TableCell>
+                                                            {showModelCacheWrite && (
+                                                                <TableCell align="right">{formatNumber(model.cache_write_tokens || 0)}</TableCell>
+                                                            )}
+                                                            <TableCell align="right">
+                                                                {getCacheHitRate(model.cache_read_tokens || 0, model.total_input_tokens || 0).toFixed(1)}%
+                                                            </TableCell>
+                                                            <TableCell align="right">{formatNumber(model.total_input_tokens || 0)}</TableCell>
+                                                            <TableCell align="right">{formatNumber(model.total_output_tokens || 0)}</TableCell>
+                                                            <TableCell align="right">
                                                                 <Typography
-                                                                    variant="body1"
-                                                                    noWrap
-                                                                    sx={{ color: 'text.primary', fontWeight: 650 }}
+                                                                    variant="body2"
+                                                                    sx={{ color: (model.error_rate || 0) > 0.05 ? 'error.main' : 'text.secondary' }}
                                                                 >
-                                                                    {model.model || model.key}
+                                                                    {((model.error_rate || 0) * 100).toFixed(1)}%
                                                                 </Typography>
-                                                                <Typography variant="body2">{model.provider_name || '—'}</Typography>
-                                                            </Box>
-                                                            <Box sx={{ textAlign: 'right', flexShrink: 0 }}>
-                                                                <Typography variant="body1" sx={{ color: 'text.primary', fontWeight: 650 }}>
-                                                                    {formatNumber(value)}
-                                                                </Typography>
-                                                                <Typography variant="body2">{share.toFixed(1)}%</Typography>
-                                                            </Box>
-                                                        </Stack>
-                                                        <LinearProgress
-                                                            variant="determinate"
-                                                            value={Math.min(share, 100)}
-                                                            sx={{ mt: 0.65, height: 4, borderRadius: 2 }}
-                                                        />
-                                                    </Box>
-                                                );
-                                            })}
-                                        </Stack>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                </TableBody>
+                                            </Table>
+                                        </TableContainer>
                                     ) : (
                                         <Box sx={{ py: 4, textAlign: 'center', bgcolor: 'action.hover', borderRadius: 1.5 }}>
                                             <Typography variant="body1">
