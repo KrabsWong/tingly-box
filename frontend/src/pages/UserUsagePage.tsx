@@ -334,6 +334,7 @@ export default function UserUsagePage() {
             (acc, row) => {
                 acc.tokens += row.total_tokens;
                 acc.inputTokens += row.total_input_tokens;
+                acc.outputTokens += row.total_output_tokens;
                 acc.cacheTokens += row.cache_read_tokens;
                 acc.cacheWriteTokens += row.cache_write_tokens;
                 acc.requests += row.request_count;
@@ -341,7 +342,7 @@ export default function UserUsagePage() {
                 if (row.request_count > 0) acc.activeUsers += 1;
                 return acc;
             },
-            { tokens: 0, inputTokens: 0, cacheTokens: 0, cacheWriteTokens: 0, requests: 0, errors: 0, activeUsers: 0 },
+            { tokens: 0, inputTokens: 0, outputTokens: 0, cacheTokens: 0, cacheWriteTokens: 0, requests: 0, errors: 0, activeUsers: 0 },
         );
         return {
             ...totals,
@@ -351,6 +352,8 @@ export default function UserUsagePage() {
     }, [rows]);
     const {
         tokens: totalTokens,
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
         cacheTokens: totalCacheTokens,
         cacheWriteTokens: totalCacheWriteTokens,
         requests: totalRequests,
@@ -377,9 +380,11 @@ export default function UserUsagePage() {
         {
             label: t('dashboard.userUsage.totalTokens', { defaultValue: 'Total tokens' }),
             value: formatNumber(totalTokens),
-            hint: t('dashboard.userUsage.acrossUsers', {
-                count: activeUsers,
-                defaultValue: `Across ${activeUsers} active users`,
+            hint: t('dashboard.userUsage.tokenBreakdown', {
+                cache: formatNumber(totalCacheTokens),
+                input: formatNumber(totalInputTokens),
+                output: formatNumber(totalOutputTokens),
+                defaultValue: `Cache: ${formatNumber(totalCacheTokens)} · Input: ${formatNumber(totalInputTokens)} · Output: ${formatNumber(totalOutputTokens)}`,
             }),
             icon: <Token />,
             color: 'secondary' as const,
@@ -667,6 +672,39 @@ export default function UserUsagePage() {
                                                     <Typography variant="body1" sx={{ color: 'text.primary', fontWeight: 600 }}>
                                                         {formatNumber(row.total_tokens)}
                                                     </Typography>
+                                                    <Typography
+                                                        variant="caption"
+                                                        sx={{
+                                                            color: 'text.secondary',
+                                                            display: { xs: 'none', sm: 'block' },
+                                                            mt: 0.2,
+                                                            whiteSpace: 'nowrap',
+                                                        }}
+                                                    >
+                                                        {t('dashboard.userUsage.compactTokenBreakdown', {
+                                                            cache: formatNumber(row.cache_read_tokens),
+                                                            input: formatNumber(row.total_input_tokens),
+                                                            output: formatNumber(row.total_output_tokens),
+                                                            defaultValue: `C ${formatNumber(row.cache_read_tokens)} · I ${formatNumber(row.total_input_tokens)} · O ${formatNumber(row.total_output_tokens)}`,
+                                                        })}
+                                                    </Typography>
+                                                    <Typography
+                                                        variant="caption"
+                                                        sx={{
+                                                            // Keep the comparison table neutral, matching
+                                                            // ServiceStatsTable; health color remains on the
+                                                            // summary/detail gauges where it has clear context.
+                                                            color: 'text.secondary',
+                                                            display: 'block',
+                                                            mt: 0.1,
+                                                            whiteSpace: 'nowrap',
+                                                        }}
+                                                    >
+                                                        {t('dashboard.userUsage.cacheHitValue', {
+                                                            value: getCacheHitRate(row.cache_read_tokens, row.total_input_tokens).toFixed(1),
+                                                            defaultValue: `${getCacheHitRate(row.cache_read_tokens, row.total_input_tokens).toFixed(1)}% cache hit`,
+                                                        })}
+                                                    </Typography>
                                                     <LinearProgress
                                                         variant="determinate"
                                                         value={(row.total_tokens / maxTokens) * 100}
@@ -805,14 +843,50 @@ export default function UserUsagePage() {
                                     }}
                                 >
                                     {[
-                                        { label: t('dashboard.userUsage.input', { defaultValue: 'Input' }), value: selectedUser.total_input_tokens, color: TOKEN_COLORS.input.main },
-                                        { label: t('dashboard.userUsage.output', { defaultValue: 'Output' }), value: selectedUser.total_output_tokens, color: TOKEN_COLORS.output.main },
-                                        { label: t('dashboard.userUsage.cacheRead', { defaultValue: 'Cache Read' }), value: selectedUser.cache_read_tokens, color: TOKEN_COLORS.cache.main },
-                                    ].map(({ label, value, color }) => (
+                                        {
+                                            label: t('dashboard.userUsage.input', { defaultValue: 'Input' }),
+                                            value: selectedUser.total_input_tokens,
+                                            color: TOKEN_COLORS.input.main,
+                                            detail: selectedUser.cache_write_tokens > 0
+                                                ? t('dashboard.userUsage.cacheWriteIncluded', {
+                                                    value: formatNumber(selectedUser.cache_write_tokens),
+                                                    defaultValue: `incl. ${formatNumber(selectedUser.cache_write_tokens)} written`,
+                                                })
+                                                : '',
+                                        },
+                                        {
+                                            label: t('dashboard.userUsage.output', { defaultValue: 'Output' }),
+                                            value: selectedUser.total_output_tokens,
+                                            color: TOKEN_COLORS.output.main,
+                                            detail: '',
+                                        },
+                                        {
+                                            label: t('dashboard.userUsage.cacheRead', { defaultValue: 'Cache Read' }),
+                                            value: selectedUser.cache_read_tokens,
+                                            color: TOKEN_COLORS.cache.main,
+                                            detail: '',
+                                        },
+                                        {
+                                            label: t('dashboard.userUsage.cacheHitRate', { defaultValue: 'Cache hit rate' }),
+                                            value: `${getCacheHitRate(selectedUser.cache_read_tokens, selectedUser.total_input_tokens).toFixed(1)}%`,
+                                            color: theme.palette[getCacheHitRateColor(getCacheHitRate(selectedUser.cache_read_tokens, selectedUser.total_input_tokens))].main,
+                                            detail: '',
+                                        },
+                                    ].map(({ label, value, color, detail }, index) => (
                                         <Grid
                                             key={label}
-                                            size={{ xs: 4 }}
-                                            sx={{ '&:not(:last-of-type)': { borderRight: '1px solid', borderColor: 'divider' } }}
+                                            size={{ xs: 6, sm: 3 }}
+                                            sx={{
+                                                borderColor: 'divider',
+                                                borderRight: {
+                                                    xs: index % 2 === 0 ? '1px solid' : 0,
+                                                    sm: index < 3 ? '1px solid' : 0,
+                                                },
+                                                borderBottom: {
+                                                    xs: index < 2 ? '1px solid' : 0,
+                                                    sm: 0,
+                                                },
+                                            }}
                                         >
                                             <Box sx={{ px: 1.5, py: 1.25 }}>
                                                 <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
@@ -820,8 +894,13 @@ export default function UserUsagePage() {
                                                     <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>{label}</Typography>
                                                 </Stack>
                                                 <Typography variant="h4" sx={{ fontVariantNumeric: 'tabular-nums', mt: 0.5 }}>
-                                                    {formatNumber(Number(value))}
+                                                    {typeof value === 'number' ? formatNumber(value) : value}
                                                 </Typography>
+                                                {detail && (
+                                                    <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.25 }}>
+                                                        {detail}
+                                                    </Typography>
+                                                )}
                                             </Box>
                                         </Grid>
                                     ))}
