@@ -9,7 +9,6 @@ import {
     Grid,
     IconButton,
     InputAdornment,
-    LinearProgress,
     Paper,
     Skeleton,
     Stack,
@@ -51,13 +50,17 @@ import {
     getCacheHitRate,
     getCacheHitRateColor,
     formatCacheBreakdown,
+    hasCacheWrites,
     getErrorRateColor,
+    getUsageMetricColumns,
+    UsageMetricHeaderCells,
+    UsageMetricValueCells,
 } from '@/components/dashboard';
-import type { AggregatedStat } from '@/components/dashboard';
+import type { AggregatedStat, UsageMetricKey, UsageMetricLabels } from '@/components/dashboard';
 import api from '@/services/api';
 
 type TimeRange = 'today' | '7d' | '30d' | '90d';
-type SortField = 'name' | 'requests' | 'tokens' | 'errors';
+type SortField = 'name' | UsageMetricKey;
 type SortDirection = 'asc' | 'desc';
 
 interface APITokenInfo {
@@ -121,10 +124,7 @@ const formatDateTime = (value?: string) => {
     }).format(date);
 };
 
-// Shared base style for the master-list and detail-panel cards: separate
-// elevation-0 Paper cards (matching StatCard/ServiceStatsTable's convention)
-// rather than one Paper split by an internal divider line.
-const masterDetailCardSx = {
+const usageTableCardSx = {
     width: '100%',
     borderRadius: 2,
     border: '1px solid',
@@ -132,7 +132,6 @@ const masterDetailCardSx = {
     backgroundColor: 'background.paper',
     boxShadow: 'none',
     overflow: 'hidden',
-    height: { xs: 'auto', lg: 640 },
 } as const;
 
 const UserUsageSkeleton = () => (
@@ -161,7 +160,7 @@ export default function UserUsagePage() {
     const [modelStats, setModelStats] = useState<AggregatedStat[]>([]);
     const [selectedUserID, setSelectedUserID] = useState('');
     const [search, setSearch] = useState('');
-    const [sortField, setSortField] = useState<SortField>('tokens');
+    const [sortField, setSortField] = useState<SortField>('total');
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
     const [page, setPage] = useState(0);
     const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -284,7 +283,17 @@ export default function UserUsagePage() {
             .sort((a, b) => {
                 if (sortField === 'name') return direction * a.display_name.localeCompare(b.display_name);
                 if (sortField === 'requests') return direction * (a.request_count - b.request_count);
-                if (sortField === 'errors') return direction * (a.error_rate - b.error_rate);
+                if (sortField === 'cacheRead') return direction * (a.cache_read_tokens - b.cache_read_tokens);
+                if (sortField === 'cacheWrite') return direction * (a.cache_write_tokens - b.cache_write_tokens);
+                if (sortField === 'cacheHit') {
+                    return direction * (
+                        getCacheHitRate(a.cache_read_tokens, a.total_input_tokens)
+                        - getCacheHitRate(b.cache_read_tokens, b.total_input_tokens)
+                    );
+                }
+                if (sortField === 'input') return direction * (a.total_input_tokens - b.total_input_tokens);
+                if (sortField === 'output') return direction * (a.total_output_tokens - b.total_output_tokens);
+                if (sortField === 'errorRate') return direction * (a.error_rate - b.error_rate);
                 return direction * (a.total_tokens - b.total_tokens);
             });
     }, [rows, search, sortField, sortDirection]);
@@ -334,6 +343,7 @@ export default function UserUsagePage() {
             (acc, row) => {
                 acc.tokens += row.total_tokens;
                 acc.inputTokens += row.total_input_tokens;
+                acc.outputTokens += row.total_output_tokens;
                 acc.cacheTokens += row.cache_read_tokens;
                 acc.cacheWriteTokens += row.cache_write_tokens;
                 acc.requests += row.request_count;
@@ -341,7 +351,7 @@ export default function UserUsagePage() {
                 if (row.request_count > 0) acc.activeUsers += 1;
                 return acc;
             },
-            { tokens: 0, inputTokens: 0, cacheTokens: 0, cacheWriteTokens: 0, requests: 0, errors: 0, activeUsers: 0 },
+            { tokens: 0, inputTokens: 0, outputTokens: 0, cacheTokens: 0, cacheWriteTokens: 0, requests: 0, errors: 0, activeUsers: 0 },
         );
         return {
             ...totals,
@@ -351,6 +361,8 @@ export default function UserUsagePage() {
     }, [rows]);
     const {
         tokens: totalTokens,
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
         cacheTokens: totalCacheTokens,
         cacheWriteTokens: totalCacheWriteTokens,
         requests: totalRequests,
@@ -359,10 +371,8 @@ export default function UserUsagePage() {
         cacheHitRate,
         errorRate,
     } = summary;
-    const maxTokens = useMemo(
-        () => visibleRows.reduce((max, row) => Math.max(max, row.total_tokens), 1),
-        [visibleRows],
-    );
+    const showUserCacheWrite = hasCacheWrites(rows);
+    const showModelCacheWrite = hasCacheWrites(modelStats);
     const summaryItems = [
         {
             label: t('dashboard.userUsage.registeredUsers', { defaultValue: 'Registered users' }),
@@ -377,9 +387,11 @@ export default function UserUsagePage() {
         {
             label: t('dashboard.userUsage.totalTokens', { defaultValue: 'Total tokens' }),
             value: formatNumber(totalTokens),
-            hint: t('dashboard.userUsage.acrossUsers', {
-                count: activeUsers,
-                defaultValue: `Across ${activeUsers} active users`,
+            hint: t('dashboard.userUsage.tokenBreakdown', {
+                cache: formatNumber(totalCacheTokens),
+                input: formatNumber(totalInputTokens),
+                output: formatNumber(totalOutputTokens),
+                defaultValue: `Cache: ${formatNumber(totalCacheTokens)} · Input: ${formatNumber(totalInputTokens)} · Output: ${formatNumber(totalOutputTokens)}`,
             }),
             icon: <Token />,
             color: 'secondary' as const,
@@ -412,38 +424,39 @@ export default function UserUsagePage() {
         },
     ];
 
+    const usageMetricLabels: UsageMetricLabels = {
+        requests: t('dashboard.userUsage.requests', { defaultValue: 'Requests' }),
+        total: t('dashboard.userUsage.total', { defaultValue: 'Total' }),
+        cacheRead: t('dashboard.userUsage.cacheRead', { defaultValue: 'Cache Read' }),
+        cacheWrite: t('dashboard.userUsage.cacheWrite', { defaultValue: 'Cache Write' }),
+        cacheHit: t('dashboard.userUsage.cacheHit', { defaultValue: 'Cache Hit' }),
+        input: t('dashboard.userUsage.input', { defaultValue: 'Input' }),
+        output: t('dashboard.userUsage.output', { defaultValue: 'Output' }),
+        errorRate: t('dashboard.userUsage.errorRate', { defaultValue: 'Error rate' }),
+    };
     const userColumns: Array<{
         field: SortField;
         label: string;
         align?: 'right';
         defaultDir: SortDirection;
-        sx?: object;
     }> = [
         { field: 'name', label: t('dashboard.userUsage.user', { defaultValue: 'User' }), defaultDir: 'asc' },
-        {
-            field: 'requests',
-            label: t('dashboard.userUsage.requests', { defaultValue: 'Requests' }),
-            align: 'right',
-            defaultDir: 'desc',
-            sx: { display: { xs: 'none', sm: 'table-cell' } },
-        },
-        { field: 'tokens', label: t('dashboard.userUsage.tokens', { defaultValue: 'Tokens' }), align: 'right', defaultDir: 'desc' },
-        {
-            field: 'errors',
-            label: t('dashboard.userUsage.errorRate', { defaultValue: 'Error rate' }),
-            align: 'right',
-            defaultDir: 'desc',
-            sx: { display: { xs: 'none', md: 'table-cell' } },
-        },
+        ...getUsageMetricColumns({
+            showTotal: true,
+            showCacheWrite: showUserCacheWrite,
+        }, usageMetricLabels).map((column) => ({
+            field: column.key,
+            label: column.label,
+            align: 'right' as const,
+            defaultDir: 'desc' as const,
+        })),
     ];
 
     const handleSelectUser = (userID: string) => {
         setSelectedUserID(userID);
-        if (window.matchMedia('(max-width: 1199.95px)').matches) {
-            requestAnimationFrame(() => {
-                detailPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            });
-        }
+        requestAnimationFrame(() => {
+            detailPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
     };
 
     if (loading) return <UserUsageSkeleton />;
@@ -501,10 +514,10 @@ export default function UserUsagePage() {
             </Grid>
 
             <Grid container spacing={2} sx={{ alignItems: 'stretch' }}>
-                <Grid size={{ xs: 12, lg: 7, xl: 5 }} sx={{ display: 'flex' }}>
+                <Grid size={{ xs: 12 }} sx={{ display: 'flex' }}>
                     <Paper
                         elevation={0}
-                        sx={{ ...masterDetailCardSx, display: 'flex', flexDirection: 'column' }}
+                        sx={{ ...usageTableCardSx, display: 'flex', flexDirection: 'column' }}
                     >
                         <Box
                             sx={{
@@ -541,13 +554,11 @@ export default function UserUsagePage() {
                         </Box>
                         <TableContainer
                             sx={{
-                                maxHeight: { xs: 420, lg: 'none' },
-                                flex: { lg: 1 },
-                                minHeight: 0,
+                                maxHeight: 520,
                                 overscrollBehavior: 'contain',
                             }}
                         >
-                            <Table stickyHeader>
+                            <Table stickyHeader sx={{ minWidth: showUserCacheWrite ? 1080 : 980 }}>
                                 <TableHead>
                                     <TableRow
                                         sx={{
@@ -569,7 +580,6 @@ export default function UserUsagePage() {
                                                 key={col.field}
                                                 align={col.align}
                                                 sortDirection={sortField === col.field ? sortDirection : false}
-                                                sx={col.sx}
                                             >
                                                 <TableSortLabel
                                                     active={sortField === col.field}
@@ -658,33 +668,11 @@ export default function UserUsagePage() {
                                                         </Box>
                                                     </Stack>
                                                 </TableCell>
-                                                <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
-                                                    <Typography variant="body1" sx={{ color: 'text.primary', fontWeight: 550 }}>
-                                                        {formatNumber(row.request_count)}
-                                                    </Typography>
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ minWidth: { xs: 88, sm: 140 } }}>
-                                                    <Typography variant="body1" sx={{ color: 'text.primary', fontWeight: 600 }}>
-                                                        {formatNumber(row.total_tokens)}
-                                                    </Typography>
-                                                    <LinearProgress
-                                                        variant="determinate"
-                                                        value={(row.total_tokens / maxTokens) * 100}
-                                                        sx={{ mt: 0.6, height: 3, borderRadius: 2 }}
-                                                    />
-                                                </TableCell>
-                                                <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>
-                                                    <Typography
-                                                        variant="body1"
-                                                        sx={{
-                                                            // Same threshold/color rule as ServiceStatsTable's per-model Error Rate column.
-                                                            color: row.error_rate > 0.05 ? 'error.main' : 'text.secondary',
-                                                            fontWeight: 550,
-                                                        }}
-                                                    >
-                                                        {(row.error_rate * 100).toFixed(1)}%
-                                                    </Typography>
-                                                </TableCell>
+                                                <UsageMetricValueCells
+                                                    usage={row}
+                                                    showTotal
+                                                    showCacheWrite={showUserCacheWrite}
+                                                />
                                                 <TableCell padding="checkbox">
                                                     <ArrowForward sx={{ fontSize: 18, opacity: selected ? 1 : 0.22 }} color={selected ? 'primary' : 'inherit'} />
                                                 </TableCell>
@@ -693,7 +681,7 @@ export default function UserUsagePage() {
                                     })}
                                     {visibleRows.length === 0 && (
                                         <TableRow>
-                                            <TableCell colSpan={5} align="center" sx={{ py: 8 }}>
+                                            <TableCell colSpan={userColumns.length + 1} align="center" sx={{ py: 8 }}>
                                                 <Typography variant="body1" sx={{ color: 'text.secondary' }}>
                                                     {t('dashboard.userUsage.noUsers', { defaultValue: 'No users match your search.' })}
                                                 </Typography>
@@ -726,21 +714,18 @@ export default function UserUsagePage() {
 
                 <Grid
                     ref={detailPanelRef}
-                    size={{ xs: 12, lg: 5, xl: 7 }}
+                    size={{ xs: 12 }}
                     sx={{ display: 'flex', scrollMarginTop: { xs: 72, lg: 0 } }}
                 >
-                    <Paper elevation={0} sx={{ ...masterDetailCardSx, display: 'flex' }}>
+                    <Paper elevation={0} sx={{ ...usageTableCardSx, display: 'flex' }}>
                         <Box sx={{
                             p: { xs: 2, sm: 2.5 },
                             width: '100%',
-                            height: '100%',
-                            minHeight: { xs: 420, lg: 0 },
                             display: 'flex',
                             flexDirection: 'column',
-                            overflow: { lg: 'hidden' },
                         }}>
                         {selectedUser ? (
-                            <Stack spacing={2.5} sx={{ height: '100%', minHeight: 0 }}>
+                            <Stack spacing={2.5}>
                                 <Box>
                                     <Stack direction="row" spacing={2} sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                         <Box sx={{ minWidth: 0 }}>
@@ -805,14 +790,50 @@ export default function UserUsagePage() {
                                     }}
                                 >
                                     {[
-                                        { label: t('dashboard.userUsage.input', { defaultValue: 'Input' }), value: selectedUser.total_input_tokens, color: TOKEN_COLORS.input.main },
-                                        { label: t('dashboard.userUsage.output', { defaultValue: 'Output' }), value: selectedUser.total_output_tokens, color: TOKEN_COLORS.output.main },
-                                        { label: t('dashboard.userUsage.cacheRead', { defaultValue: 'Cache Read' }), value: selectedUser.cache_read_tokens, color: TOKEN_COLORS.cache.main },
-                                    ].map(({ label, value, color }) => (
+                                        {
+                                            label: t('dashboard.userUsage.input', { defaultValue: 'Input' }),
+                                            value: selectedUser.total_input_tokens,
+                                            color: TOKEN_COLORS.input.main,
+                                            detail: selectedUser.cache_write_tokens > 0
+                                                ? t('dashboard.userUsage.cacheWriteIncluded', {
+                                                    value: formatNumber(selectedUser.cache_write_tokens),
+                                                    defaultValue: `incl. ${formatNumber(selectedUser.cache_write_tokens)} written`,
+                                                })
+                                                : '',
+                                        },
+                                        {
+                                            label: t('dashboard.userUsage.output', { defaultValue: 'Output' }),
+                                            value: selectedUser.total_output_tokens,
+                                            color: TOKEN_COLORS.output.main,
+                                            detail: '',
+                                        },
+                                        {
+                                            label: t('dashboard.userUsage.cacheRead', { defaultValue: 'Cache Read' }),
+                                            value: selectedUser.cache_read_tokens,
+                                            color: TOKEN_COLORS.cache.main,
+                                            detail: '',
+                                        },
+                                        {
+                                            label: t('dashboard.userUsage.cacheHitRate', { defaultValue: 'Cache hit rate' }),
+                                            value: `${getCacheHitRate(selectedUser.cache_read_tokens, selectedUser.total_input_tokens).toFixed(1)}%`,
+                                            color: theme.palette[getCacheHitRateColor(getCacheHitRate(selectedUser.cache_read_tokens, selectedUser.total_input_tokens))].main,
+                                            detail: '',
+                                        },
+                                    ].map(({ label, value, color, detail }, index) => (
                                         <Grid
                                             key={label}
-                                            size={{ xs: 4 }}
-                                            sx={{ '&:not(:last-of-type)': { borderRight: '1px solid', borderColor: 'divider' } }}
+                                            size={{ xs: 6, sm: 3 }}
+                                            sx={{
+                                                borderColor: 'divider',
+                                                borderRight: {
+                                                    xs: index % 2 === 0 ? '1px solid' : 0,
+                                                    sm: index < 3 ? '1px solid' : 0,
+                                                },
+                                                borderBottom: {
+                                                    xs: index < 2 ? '1px solid' : 0,
+                                                    sm: 0,
+                                                },
+                                            }}
                                         >
                                             <Box sx={{ px: 1.5, py: 1.25 }}>
                                                 <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
@@ -820,14 +841,19 @@ export default function UserUsagePage() {
                                                     <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>{label}</Typography>
                                                 </Stack>
                                                 <Typography variant="h4" sx={{ fontVariantNumeric: 'tabular-nums', mt: 0.5 }}>
-                                                    {formatNumber(Number(value))}
+                                                    {typeof value === 'number' ? formatNumber(value) : value}
                                                 </Typography>
+                                                {detail && (
+                                                    <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.25 }}>
+                                                        {detail}
+                                                    </Typography>
+                                                )}
                                             </Box>
                                         </Grid>
                                     ))}
                                 </Grid>
 
-                                <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                                     <Stack direction="row" sx={{ mb: 1.25, justifyContent: 'space-between', alignItems: 'baseline' }}>
                                         <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
                                             <Typography variant="subtitle2" sx={{ fontWeight: 650 }}>
@@ -844,51 +870,65 @@ export default function UserUsagePage() {
                                             {Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} variant="rounded" height={44} />)}
                                         </Stack>
                                     ) : modelStats.length > 0 ? (
-                                        <Stack
-                                            spacing={1.5}
+                                        <TableContainer
+                                            sx={{
+                                                maxHeight: 520,
+                                                border: '1px solid',
+                                                borderColor: 'divider',
+                                                borderRadius: 1.5,
+                                                overscrollBehavior: 'contain',
+                                            }}
                                             role="region"
                                             aria-label={t('dashboard.userUsage.allModels', { defaultValue: 'All models' })}
-                                            sx={{
-                                                flex: { xs: 'none', lg: 1 },
-                                                minHeight: 0,
-                                                maxHeight: { xs: 'none', lg: 360 },
-                                                overflowY: 'auto',
-                                                overscrollBehavior: 'contain',
-                                                pr: 0.75,
-                                            }}
                                         >
-                                            {modelStats.map((model) => {
-                                                const value = getTotalTokens(model);
-                                                const share = selectedUser.total_tokens ? (value / selectedUser.total_tokens) * 100 : 0;
-                                                return (
-                                                    <Box key={`${model.provider_uuid}-${model.model || model.key}`}>
-                                                        <Stack direction="row" spacing={2} sx={{ justifyContent: 'space-between' }}>
-                                                            <Box sx={{ minWidth: 0 }}>
-                                                                <Typography
-                                                                    variant="body1"
-                                                                    noWrap
-                                                                    sx={{ color: 'text.primary', fontWeight: 650 }}
-                                                                >
-                                                                    {model.model || model.key}
-                                                                </Typography>
-                                                                <Typography variant="body2">{model.provider_name || '—'}</Typography>
-                                                            </Box>
-                                                            <Box sx={{ textAlign: 'right', flexShrink: 0 }}>
-                                                                <Typography variant="body1" sx={{ color: 'text.primary', fontWeight: 650 }}>
-                                                                    {formatNumber(value)}
-                                                                </Typography>
-                                                                <Typography variant="body2">{share.toFixed(1)}%</Typography>
-                                                            </Box>
-                                                        </Stack>
-                                                        <LinearProgress
-                                                            variant="determinate"
-                                                            value={Math.min(share, 100)}
-                                                            sx={{ mt: 0.65, height: 4, borderRadius: 2 }}
+                                            <Table stickyHeader sx={{ minWidth: showModelCacheWrite ? 1060 : 960 }}>
+                                                <TableHead>
+                                                    <TableRow
+                                                        sx={{
+                                                            '& .MuiTableCell-root': {
+                                                                fontWeight: 600,
+                                                                fontSize: '0.75rem',
+                                                                textTransform: 'uppercase',
+                                                                letterSpacing: '0.05em',
+                                                                color: 'text.secondary',
+                                                                py: 1.25,
+                                                            },
+                                                        }}
+                                                    >
+                                                        <TableCell>{t('dashboard.userUsage.provider', { defaultValue: 'Provider' })}</TableCell>
+                                                        <TableCell>{t('dashboard.userUsage.model', { defaultValue: 'Model' })}</TableCell>
+                                                        <UsageMetricHeaderCells
+                                                            labels={usageMetricLabels}
+                                                            showTotal
+                                                            showCacheWrite={showModelCacheWrite}
                                                         />
-                                                    </Box>
-                                                );
-                                            })}
-                                        </Stack>
+                                                    </TableRow>
+                                                </TableHead>
+                                                <TableBody>
+                                                    {modelStats.map((model) => (
+                                                        <TableRow
+                                                            key={`${model.provider_uuid}-${model.model || model.key}`}
+                                                            hover
+                                                            sx={{
+                                                                '& .MuiTableCell-root': {
+                                                                    py: 1.25,
+                                                                    borderBottom: '1px solid',
+                                                                    borderColor: 'divider',
+                                                                },
+                                                            }}
+                                                        >
+                                                            <TableCell>{model.provider_name || '—'}</TableCell>
+                                                            <TableCell sx={{ fontWeight: 600 }}>{model.model || model.key}</TableCell>
+                                                            <UsageMetricValueCells
+                                                                usage={model}
+                                                                showTotal
+                                                                showCacheWrite={showModelCacheWrite}
+                                                            />
+                                                        </TableRow>
+                                                    ))}
+                                                </TableBody>
+                                            </Table>
+                                        </TableContainer>
                                     ) : (
                                         <Box sx={{ py: 4, textAlign: 'center', bgcolor: 'action.hover', borderRadius: 1.5 }}>
                                             <Typography variant="body1">

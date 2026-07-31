@@ -10,6 +10,17 @@ export { default as AgentQuickNav } from './AgentQuickNav';
 export { default as RequestsView } from './RequestsView';
 export type { UsageRecord } from './RequestsView';
 export {
+    UsageMetricHeaderCells,
+    UsageMetricValueCells,
+} from './UsageMetricCells';
+export { getUsageMetricColumns } from './usageMetricColumns';
+export type {
+    UsageMetricColumn,
+    UsageMetricKey,
+    UsageMetricLabels,
+    UsageMetricSource,
+} from './usageMetricColumns';
+export {
     formatNumber,
     TOKEN_COLORS,
     getTotalTokens,
@@ -19,4 +30,3 @@ export {
     hasCacheWrites,
     getErrorRateColor,
 } from './chartStyles';
-
