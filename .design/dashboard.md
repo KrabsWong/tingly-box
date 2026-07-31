@@ -1,15 +1,11 @@
 # Usage Analytics
 
-This document describes the usage analytics subsystem end to end: the two
-product surfaces, metric semantics, API and storage paths, frontend data flow,
-shared table architecture, responsive behavior, and verification boundaries.
+This document describes the usage analytics subsystem end to end: the two product surfaces, metric semantics, API and storage paths, frontend data flow, shared table architecture, responsive behavior, and verification boundaries.
 
 The two entry points answer different user questions:
 
-- **Usage Dashboard** — “What is happening across this time range, and where
-  should I investigate?”
-- **Team Usage** — “Who consumed the shared access, and which models account for
-  that person’s usage?”
+- **Usage Dashboard** — “What is happening across this time range, and where should I investigate?”
+- **Team Usage** — “Who consumed the shared access, and which models account for that person’s usage?”
 
 Primary frontend files:
 
@@ -27,37 +23,29 @@ Primary backend files:
 
 ### Usage Dashboard
 
-Route: `/dashboard/:timeRange`, where `timeRange ∈ today | yesterday | 3d | 7d
-| 30d | 90d`. Invalid values fall back to `today`; `/overview` redirects into
-this route.
+Route: `/dashboard/:timeRange`, where `timeRange ∈ today | yesterday | 3d | 7d | 30d | 90d`. Invalid values fall back to `today`; `/overview` redirects into this route.
 
-`today` and `yesterday` are hourly views backed by minute-level time series.
-The other ranges are daily views.
+`today` and `yesterday` are hourly views backed by minute-level time series. The other ranges are daily views.
 
-Three global filters apply to the stat cards, chart, request view, activity
-heatmap, and Usage by Model table:
+Three global filters apply to the stat cards, chart, request view, activity heatmap, and Usage by Model table:
 
 - **Provider** — provider UUID, grouped by authentication type.
 - **Model** — concrete model name.
-- **Identity** — `user_id`; `admin` is the main account and the remaining
-  options are sharing keys from `listAPITokens`.
+- **Identity** — `user_id`; `admin` is the main account and the remaining options are sharing keys from `listAPITokens`.
 
 The main analysis pane has three modes:
 
 - **Summary** — stacked token trend.
-- **By Request** — request sample, breakdown charts, and request table; only
-  available for `today` and `yesterday`.
+- **By Request** — request sample, breakdown charts, and request table; only available for `today` and `yesterday`.
 - **Activity** — fixed 365-day heatmap.
 
-If a stale `requests` selection survives a route change into a daily range,
-`effectiveViewMode` renders Summary instead.
+If a stale `requests` selection survives a route change into a daily range, `effectiveViewMode` renders Summary instead.
 
 ### Team Usage
 
 Route: `/dashboard/users`.
 
-Available ranges are `today | 7d | 30d | 90d`. Unlike Dashboard’s completed
-daily windows, Team Usage ends every range at the current time:
+Available ranges are `today | 7d | 30d | 90d`. Unlike Dashboard’s completed daily windows, Team Usage ends every range at the current time:
 
 - `today`: local midnight → now.
 - `7d` / `30d` / `90d`: local midnight of the first included day → now.
@@ -65,17 +53,13 @@ daily windows, Team Usage ends every range at the current time:
 The page is a two-stage, full-width drill-down:
 
 1. **Registered users table** — searchable, sortable, and paginated.
-2. **Selected user detail** — identity context, four summary metrics, and a
-   full model-usage table.
+2. **Selected user detail** — identity context, four summary metrics, and a full model-usage table.
 
-Selecting a user updates the second stage and scrolls it into view. The tables
-remain full width so Cache/Input/Output values can be compared as columns
-instead of being compressed into prose or progress bars.
+Selecting a user updates the second stage and scrolls it into view. The tables remain full width so Cache/Input/Output values can be compared as columns instead of being compressed into prose or progress bars.
 
 ## Canonical metric semantics
 
-The frontend must not treat the backend `total_tokens` field as the displayed
-grand total. The canonical display total is:
+The frontend must not treat the backend `total_tokens` field as the displayed grand total. The canonical display total is:
 
 ```text
 display_total = input + output + cache_read
@@ -94,10 +78,7 @@ The critical invariant is:
 cache_write_tokens ⊂ total_input_tokens
 ```
 
-Cache writes are already included in Input. They must never become an addend in
-a total, a fourth chart stack, or a fourth donut slice. Doing so double counts
-the same tokens. See `.design/stream-usage-tracking.md` for protocol
-normalization and billing details.
+Cache writes are already included in Input. They must never become an addend in a total, a fourth chart stack, or a fourth donut slice. Doing so double counts the same tokens. See `.design/stream-usage-tracking.md` for protocol normalization and billing details.
 
 Cache writes appear only as attribution:
 
@@ -111,8 +92,7 @@ The cache hit rate is:
 cache_hit_rate = cache_read / (cache_read + input)
 ```
 
-Because Input contains writes, a write correctly counts as a miss. The helper
-`getCacheHitRate()` owns the formula.
+Because Input contains writes, a write correctly counts as a miss. The helper `getCacheHitRate()` owns the formula.
 
 Vocabulary is deliberate:
 
@@ -130,17 +110,11 @@ Three gzip-compressed JSON endpoints live under `/api/v1/usage/`:
 | `/timeseries` | Dashboard Summary and Activity | `interval=minute\|hour\|day\|week`, time bounds, provider/model/scenario/user filters |
 | `/records` | Dashboard By Request | time bounds, provider/model/scenario/user/status filters, `limit` ≤ 1000, `offset` |
 
-The stats response is `{ meta, data }`; `data` contains additive counts plus
-derived rates. The records response uses `meta: { total, limit, offset }` for
-the real filtered range.
+The stats response is `{ meta, data }`; `data` contains additive counts plus derived rates. The records response uses `meta: { total, limit, offset }` for the real filtered range.
 
-`status` values stored by usage tracking are `success` or `error`, matching the
-By Request filter. The public query type also documents `partial`, so any new
-producer or filter must be checked against the values actually persisted.
+`status` values stored by usage tracking are `success` or `error`, matching the By Request filter. The public query type also documents `partial`, so any new producer or filter must be checked against the values actually persisted.
 
-All frontend time bounds are local ISO strings with an explicit timezone
-offset. The SQLite path stores and compares server-local time strings, so
-sending UTC-only bounds can shift the intended range.
+All frontend time bounds are local ISO strings with an explicit timezone offset. The SQLite path stores and compares server-local time strings, so sending UTC-only bounds can shift the intended range.
 
 ### Surface-specific calls
 
@@ -155,43 +129,28 @@ Team Usage:
 
 - `listAPITokens({ limit: 500 })` for the registered-user roster.
 - `/stats`, `group_by=user`, `limit=500` for user aggregates.
-- `/stats`, `group_by=model`, `user_id=<selection>`, `limit=1000` for the
-  selected user’s model breakdown.
+- `/stats`, `group_by=model`, `user_id=<selection>`, `limit=1000` for the selected user’s model breakdown.
 
-The Team table intentionally starts from registered tokens, then left-joins
-usage by `user_id`. A registered but unused or disabled sharing key therefore
-remains visible with zero usage. Usage associated with an unknown/unregistered
-identity is not added as a synthetic roster row.
+The Team table intentionally starts from registered tokens, then left-joins usage by `user_id`. A registered but unused or disabled sharing key therefore remains visible with zero usage. Usage associated with an unknown/unregistered identity is not added as a synthetic roster row.
 
 ### Contract maintenance note
 
-The frontend transport uses the generated OpenAPI client, while dashboard view
-components keep small local interfaces (`AggregatedStat`, `TimeSeriesData`,
-`UsageRecord`) for rendering.
+The frontend transport uses the generated OpenAPI client, while dashboard view components keep small local interfaces (`AggregatedStat`, `TimeSeriesData`, `UsageRecord`) for rendering.
 
-The runtime handlers accept `user_id` for `/timeseries` and `/records`, and the
-frontend sends it. At the time of writing, those two query parameters are not
-declared in `TimeSeriesQuery` / `UsageRecordsQuery` and their Swagger route
-configuration, so `api.ts` uses a cast around the generated query type. If the
-usage API contract is touched, add the missing Swagger query definitions and
-run `task codegen`; do not hand-edit `openapi.json` or
-`frontend/src/client/schema.d.ts`.
+The runtime handlers accept `user_id` for `/timeseries` and `/records`, and the frontend sends it. At the time of writing, those two query parameters are not declared in `TimeSeriesQuery` / `UsageRecordsQuery` and their Swagger route configuration, so `api.ts` uses a cast around the generated query type. If the usage API contract is touched, add the missing Swagger query definitions and run `task codegen`; do not hand-edit `openapi.json` or `frontend/src/client/schema.d.ts`.
 
 ## Backend query and aggregation path
 
 ### Raw records
 
-`usage_records` stores one row per request, including provider, model, scenario,
-rule, `user_id`, request/input/output/cache token counts, status, streaming
-state, latency, and timestamps.
+`usage_records` stores one row per request, including provider, model, scenario, rule, `user_id`, request/input/output/cache token counts, status, streaming state, latency, and timestamps.
 
 `GetRecords`:
 
 - filters in SQL;
 - orders by `timestamp DESC`;
 - pages with `LIMIT/OFFSET`;
-- skips `COUNT(*)` when a returned page is short, deriving total as
-  `offset + len(records)`.
+- skips `COUNT(*)` when a returned page is short, deriving total as `offset + len(records)`.
 
 ### Daily pre-aggregation
 
@@ -201,9 +160,7 @@ state, latency, and timestamps.
 (UTC day, provider_uuid, model, user_id)
 ```
 
-It contains additive sums needed to reconstruct request counts, token totals,
-errors, streaming rate, and average latency. Completed days are lazily
-backfilled on the first eligible query, at least one hour after UTC midnight.
+It contains additive sums needed to reconstruct request counts, token totals, errors, streaming rate, and average latency. Completed days are lazily backfilled on the first eligible query, at least one hour after UTC midnight.
 
 `GetAggregatedStats` can use the merged daily path for:
 
@@ -212,59 +169,38 @@ backfilled on the first eligible query, at least one hour after UTC midnight.
 - `group_by=user`
 - `group_by=daily`
 
-provided there is a bounded multi-day window and no scenario/rule/status
-filter. Complete middle days come from `usage_daily`; partial edge days come
-from `usage_records`. The additive buckets are merged before error, streaming,
-and latency rates are derived.
+provided there is a bounded multi-day window and no scenario/rule/status filter. Complete middle days come from `usage_daily`; partial edge days come from `usage_records`. The additive buckets are merged before error, streaming, and latency rates are derived.
 
-`GetTimeSeries(interval=day)` uses the same completed-day/edge-day strategy when
-its filters are limited to provider/model/user. Unsupported shapes or an
-aggregation failure fall back to a raw scan.
+`GetTimeSeries(interval=day)` uses the same completed-day/edge-day strategy when its filters are limited to provider/model/user. Unsupported shapes or an aggregation failure fall back to a raw scan.
 
-The steady-state query cost of the daily path is effectively flat in raw record
-count; the original benchmark measured roughly 25× faster reads around 200k
-records over 90 days.
+The steady-state query cost of the daily path is effectively flat in raw record count; the original benchmark measured roughly 25× faster reads around 200k records over 90 days.
 
-All usage reads take `UsageStore.mu.RLock()`, so concurrent dashboard requests
-do not serialize behind one another.
+All usage reads take `UsageStore.mu.RLock()`, so concurrent dashboard requests do not serialize behind one another.
 
 ## Usage Dashboard frontend data flow
 
-All asynchronous loaders use monotonic request sequence refs. A response is
-discarded when a newer request was issued while it was in flight. New loaders
-must follow the same rule.
+All asynchronous loaders use monotonic request sequence refs. A response is discarded when a newer request was issued while it was in flight. New loaders must follow the same rule.
 
 ### Metadata and filters
 
-Provider and API-token metadata load once on mount and again on manual refresh.
-They do not reload on every filter or auto-refresh tick.
+Provider and API-token metadata load once on mount and again on manual refresh. They do not reload on every filter or auto-refresh tick.
 
 Provider and model options derived from stats use a snapshot pattern:
 
 - Snapshot provider options only while Provider is `all`.
 - Snapshot model options only while Model is `all`.
 
-Deriving options continuously from already-filtered stats would collapse a
-dropdown to the selected value. Selections are reset only when their backing
-metadata disappears, not when a valid filter combination happens to return no
-data.
+Deriving options continuously from already-filtered stats would collapse a dropdown to the selected value. Selections are reset only when their backing metadata disappears, not when a valid filter combination happens to return no data.
 
 ### Main load
 
-`loadData` fetches stats and time series concurrently. After a successful load,
-it publishes a fresh `recordsParams` object containing the exact time window
-and filters. `RequestsView` keys its fetch to that object, so records load once
-per dashboard refresh instead of once per individual dependency change.
+`loadData` fetches stats and time series concurrently. After a successful load, it publishes a fresh `recordsParams` object containing the exact time window and filters. `RequestsView` keys its fetch to that object, so records load once per dashboard refresh instead of once per individual dependency change.
 
-Manual refresh reloads metadata, stats, time series, request data, and the
-heatmap. Optional auto-refresh repeats the data load every 60 seconds and bumps
-the heatmap refresh key.
+Manual refresh reloads metadata, stats, time series, request data, and the heatmap. Optional auto-refresh repeats the data load every 60 seconds and bumps the heatmap refresh key.
 
 ### Stat cards
 
-Card totals are summed from the full `group_by=model` result. The dashboard
-requests the maximum stats limit because a truncated model list would
-under-count every card.
+Card totals are summed from the full `group_by=model` result. The dashboard requests the maximum stats limit because a truncated model list would under-count every card.
 
 Cards show:
 
@@ -278,50 +214,37 @@ Cards show:
 
 ### Summary
 
-`HourlyTokenHistoryChart` is used for today/yesterday;
-`DailyTokenHistoryChart` for all other ranges.
+`HourlyTokenHistoryChart` is used for today/yesterday; `DailyTokenHistoryChart` for all other ranges.
 
-The stack order is Cache Read → Input → Output. Cache Write is carried in each
-data point for tooltips but is never rendered as a fourth series.
+The stack order is Cache Read → Input → Output. Cache Write is carried in each data point for tooltips but is never rendered as a fourth series.
 
 ### By Request
 
 The dashboard first loads the most recent 500 records plus `meta.total`.
 
 - If `total ≤ 500`, status filtering and pagination remain client-side.
-- If `total > 500`, the table switches to server paging and pushes status,
-  limit, and offset into SQL.
+- If `total > 500`, the table switches to server paging and pushes status, limit, and offset into SQL.
 
-The charts always describe the 500-record sample. When the range is larger, a
-caption explicitly says that the charts reflect the most recent N of M
-requests.
+The charts always describe the 500-record sample. When the range is larger, a caption explicitly says that the charts reflect the most recent N of M requests.
 
-The page resets request pagination when filters or the range start change, but
-not when auto-refresh only advances the range end.
+The page resets request pagination when filters or the range start change, but not when auto-refresh only advances the range end.
 
 ### Activity
 
-`DashboardHeatmapSection` renders a fixed trailing 365-day window. It ignores
-the route range selector but shares Provider, Model, and Identity filters. An
-info tooltip explains the fixed window.
+`DashboardHeatmapSection` renders a fixed trailing 365-day window. It ignores the route range selector but shares Provider, Model, and Identity filters. An info tooltip explains the fixed window.
 
-The client fills missing dates so every day has a cell. Color levels use
-p25/p50/p75 quantiles of active days; a linear value/max scale would collapse
-most cells into one shade when traffic is skewed.
+The client fills missing dates so every day has a cell. Color levels use p25/p50/p75 quantiles of active days; a linear value/max scale would collapse most cells into one shade when traffic is skewed.
 
 Layout invariants:
 
 - A `ResizeObserver` derives responsive cell size, clamped to 10–16px.
 - The day-label column uses the same fixed width subtracted by grid sizing.
 - Narrow grids scroll horizontally and initially reveal the most recent weeks.
-- Cell hover may change outline/opacity, but must not use `transform`; a
-  transformed edge cell expands scrollable bounds and causes scrollbar
-  flicker.
+- Cell hover may change outline/opacity, but must not use `transform`; a transformed edge cell expands scrollable bounds and causes scrollbar flicker.
 
 ### Usage by Model
 
-`ServiceStatsTable` adds Provider and Model identity columns, then delegates
-all metric columns to the shared usage metric components. It paginates locally.
+`ServiceStatsTable` adds Provider and Model identity columns, then delegates all metric columns to the shared usage metric components. It paginates locally.
 
 Dashboard preserves its existing display conventions:
 
@@ -331,26 +254,20 @@ Dashboard preserves its existing display conventions:
 
 ## Team Usage frontend data flow
 
-`loadUsers` fetches the token roster and `group_by=user` stats concurrently.
-It synthesizes the primary `admin` account, filters `admin` out of sharing-key
-metadata, then maps every registered identity to a `UserUsageRow`.
+`loadUsers` fetches the token roster and `group_by=user` stats concurrently. It synthesizes the primary `admin` account, filters `admin` out of sharing-key metadata, then maps every registered identity to a `UserUsageRow`.
 
 User and detail requests have independent sequence refs:
 
 - `requestSeq` protects roster/aggregate loads.
 - `detailSeq` protects selected-user model loads.
 
-Search and sorting are client-side. The selected user is kept when still
-visible; otherwise the first visible row becomes selected. Changing range or
-selection reloads model stats.
+Search and sorting are client-side. The selected user is kept when still visible; otherwise the first visible row becomes selected. Changing range or selection reloads model stats.
 
-The user summary is derived in one pass across roster rows. “Active” means
-`request_count > 0`.
+The user summary is derived in one pass across roster rows. “Active” means `request_count > 0`.
 
 ### Registered users table
 
-The user identity cell is page-specific. All numeric columns come from the
-shared usage metric definition:
+The user identity cell is page-specific. All numeric columns come from the shared usage metric definition:
 
 ```text
 Requests → Total → Cache Read → [Cache Write] → Cache Hit
@@ -368,31 +285,17 @@ The table:
 
 ### Selected user detail
 
-The header keeps identity/status context separate from usage numbers. Four
-summary cells show Input, Output, Cache Read, and Cache Hit Rate. Cache Write is
-annotated beneath Input because it is a subset.
+The header keeps identity/status context separate from usage numbers. Four summary cells show Input, Output, Cache Read, and Cache Hit Rate. Cache Write is annotated beneath Input because it is a subset.
 
-The model table adds Provider and Model columns, then uses the same shared
-metric sequence as the user table. It requests up to 1000 model groups and
-does not add a second pagination control; the table body has a bounded,
-internally scrollable height.
+The model table adds Provider and Model columns, then uses the same shared metric sequence as the user table. It requests up to 1000 model groups and does not add a second pagination control; the table body has a bounded, internally scrollable height.
 
-Backend model results are requested with `sort_by=total_tokens`, whose stored
-meaning is input + output. The displayed Total includes cache reads. If model
-ordering must exactly follow displayed Total, sort the returned rows by
-`getTotalTokens()` on the client or add a distinct backend sort contract—do not
-silently redefine `total_tokens`.
+Backend model results are requested with `sort_by=total_tokens`, whose stored meaning is input + output. The displayed Total includes cache reads. If model ordering must exactly follow displayed Total, sort the returned rows by `getTotalTokens()` on the client or add a distinct backend sort contract—do not silently redefine `total_tokens`.
 
-Manual refresh currently reloads the roster and user aggregates. Selected-user
-model data reloads when the selected identity or range changes. If refresh is
-expanded to reload detail explicitly, keep the independent sequence guard.
+Manual refresh currently reloads the roster and user aggregates. Selected-user model data reloads when the selected identity or range changes. If refresh is expanded to reload detail explicitly, keep the independent sequence guard.
 
 ## Shared metric table architecture
 
-The shared layer intentionally owns metric columns, not the entire table.
-Dashboard and Team Usage have different identity columns, selection behavior,
-sorting, pagination, localization, and empty states; forcing those into one
-generic table component would couple unrelated UX.
+The shared layer intentionally owns metric columns, not the entire table. Dashboard and Team Usage have different identity columns, selection behavior, sorting, pagination, localization, and empty states; forcing those into one generic table component would couple unrelated UX.
 
 ### `usageMetricColumns.ts`
 
@@ -404,8 +307,7 @@ Owns:
 - optional Total and Cache Write insertion
 - the minimal `UsageMetricSource` shape
 
-Pure definitions live in `.ts`, separate from React exports, so Vite Fast
-Refresh keeps a stable component boundary.
+Pure definitions live in `.ts`, separate from React exports, so Vite Fast Refresh keeps a stable component boundary.
 
 ### `UsageMetricCells.tsx`
 
@@ -427,23 +329,15 @@ Callers choose presentation-only differences:
 
 ### Column-count rule
 
-Empty rows and spacer rows must derive `colSpan` from
-`getUsageMetricColumns(...)`. Never hard-code the span while optional columns
-exist.
+Empty rows and spacer rows must derive `colSpan` from `getUsageMetricColumns(...)`. Never hard-code the span while optional columns exist.
 
 ## Responsive and interaction behavior
 
-Both Team tables have a concrete minimum width. On narrow screens,
-`TableContainer` owns horizontal scrolling; the document itself must not gain a
-horizontal scrollbar. This scopes the side effect to the table surface.
+Both Team tables have a concrete minimum width. On narrow screens, `TableContainer` owns horizontal scrolling; the document itself must not gain a horizontal scrollbar. This scopes the side effect to the table surface.
 
-The Team user and model tables are stacked rather than split into narrow
-side-by-side cards. This preserves direct column comparison at desktop widths
-and keeps the selection → detail relationship explicit.
+The Team user and model tables are stacked rather than split into narrow side-by-side cards. This preserves direct column comparison at desktop widths and keeps the selection → detail relationship explicit.
 
-Loading states use skeletons rather than briefly rendering empty-state copy.
-Registered-but-unused users intentionally render as zero rows, not as missing
-data.
+Loading states use skeletons rather than briefly rendering empty-state copy. Registered-but-unused users intentionally render as zero rows, not as missing data.
 
 ## Mock data and verification
 
@@ -454,10 +348,7 @@ Mock usage endpoints live in `frontend/src/mocks/handlers.ts`. They must include
 - non-zero Cache Read and Cache Write values;
 - enough variation to exercise sorting and responsive widths.
 
-Shared column ordering is covered by
-`frontend/src/components/dashboard/usageMetricColumns.test.ts`. Cache hit and
-read/write formatting invariants are covered by
-`frontend/src/components/dashboard/cacheBreakdown.test.ts`.
+Shared column ordering is covered by `frontend/src/components/dashboard/usageMetricColumns.test.ts`. Cache hit and read/write formatting invariants are covered by `frontend/src/components/dashboard/cacheBreakdown.test.ts`.
 
 For frontend changes, verify at minimum:
 
@@ -481,22 +372,14 @@ Use the repository `ui-preview` workflow to inspect:
 - Derive displayed Total with `getTotalTokens()`.
 - Derive Cache Hit with `getCacheHitRate()`.
 - Use `hasCacheWrites()` for conditional write columns.
-- Extend `usageMetricColumns.ts` when adding a shared metric; do not add the
-  same column independently to each table.
+- Extend `usageMetricColumns.ts` when adding a shared metric; do not add the same column independently to each table.
 - Preserve caller-specific precision and request formatting.
 - Use request sequence guards for new asynchronous loads.
 - Keep filter option snapshots independent of filtered result emptiness.
 - Keep Team roster membership metadata-driven.
-- Parse `YYYY-MM-DD` as local midnight
-  (`new Date(\`${date}T00:00:00\`)`), not bare UTC-parsed dates.
-- `usage_daily` has no scenario/rule/status dimension; those filters require
-  raw scans unless the aggregate schema is extended.
-- Adding a new summed column to both `usage_records` and `usage_daily` does not
-  require dropping `usage_daily`; historical source rows contribute the
-  migrated zero value.
-- A true aggregate layout change must update the schema-rebuild condition and
-  preserve merged/raw equivalence tests in
-  `internal/data/db/usage_daily_test.go`.
+- Parse `YYYY-MM-DD` as local midnight (`new Date(\`${date}T00:00:00\`)`), not bare UTC-parsed dates.
+- `usage_daily` has no scenario/rule/status dimension; those filters require raw scans unless the aggregate schema is extended.
+- Adding a new summed column to both `usage_records` and `usage_daily` does not require dropping `usage_daily`; historical source rows contribute the migrated zero value.
+- A true aggregate layout change must update the schema-rebuild condition and preserve merged/raw equivalence tests in `internal/data/db/usage_daily_test.go`.
 - `middleware.Gzip()` is JSON-only; never attach it to streaming/SSE routes.
-- API additions start from backend models and Swagger definitions, followed by
-  `task codegen`; generated files are never hand-edited.
+- API additions start from backend models and Swagger definitions, followed by `task codegen`; generated files are never hand-edited.
