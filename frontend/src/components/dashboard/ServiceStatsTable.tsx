@@ -13,7 +13,12 @@ import {
     useTheme,
 } from '@mui/material';
 import { useState } from 'react';
-import { formatNumber, hasCacheWrites } from './chartStyles';
+import { hasCacheWrites } from './chartStyles';
+import {
+    UsageMetricHeaderCells,
+    UsageMetricValueCells,
+} from './UsageMetricCells';
+import { getUsageMetricColumns } from './usageMetricColumns';
 
 export interface AggregatedStat {
     key: string;
@@ -52,12 +57,6 @@ export default function ServiceStatsTable({ stats }: ServiceStatsTableProps) {
         return 'rgba(100, 116, 139, 0.1)';
     };
 
-    const formatTokens = formatNumber;
-
-    const formatRequests = (num: number): string => {
-        return num.toLocaleString();
-    };
-
     const handleChangePage = (_event: unknown, newPage: number) => {
         setPage(newPage);
     };
@@ -71,6 +70,7 @@ export default function ServiceStatsTable({ stats }: ServiceStatsTableProps) {
     const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - stats.length) : 0;
 
     const visibleStats = stats.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+    const columnCount = 2 + getUsageMetricColumns({ showCacheWrite }).length;
 
     return (
         <Paper
@@ -118,36 +118,13 @@ export default function ServiceStatsTable({ stats }: ServiceStatsTableProps) {
                         >
                             <TableCell sx={{ fontWeight: 600 }}>Provider</TableCell>
                             <TableCell sx={{ fontWeight: 600 }}>Model</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                Requests
-                            </TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                Cache Read
-                            </TableCell>
-                            {showCacheWrite && (
-                                <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                    Cache Write
-                                </TableCell>
-                            )}
-                            <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                Cache Hit
-                            </TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                Input Tokens
-                            </TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                Output Tokens
-                            </TableCell>
-                            {/* <TableCell align="right" sx={{ fontWeight: 600 }}>Avg Latency</TableCell> */}
-                            <TableCell align="right" sx={{ fontWeight: 600 }}>
-                                Error Rate
-                            </TableCell>
+                            <UsageMetricHeaderCells showCacheWrite={showCacheWrite} />
                         </TableRow>
                     </TableHead>
                     <TableBody>
                         {stats.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={8} align="center" sx={{ py: 8 }}>
+                                <TableCell colSpan={columnCount} align="center" sx={{ py: 8 }}>
                                     <Box sx={{ textAlign: 'center' }}>
                                         <Box
                                             sx={{
@@ -221,48 +198,18 @@ export default function ServiceStatsTable({ stats }: ServiceStatsTableProps) {
                                                 {stat.model || stat.key}
                                             </Typography>
                                         </TableCell>
-                                        <TableCell align="right">{formatRequests(stat.request_count)}</TableCell>
-                                        <TableCell align="right">{formatTokens(stat.cache_read_tokens || 0)}</TableCell>
-                                        {showCacheWrite && (
-                                            <TableCell align="right">{formatTokens(stat.cache_write_tokens || 0)}</TableCell>
-                                        )}
-                                        <TableCell align="right">
-                                            <Typography
-                                                variant="body2"
-                                                sx={{
-                                                    color: 'text.secondary',
-                                                }}
-                                            >
-                                                {(() => {
-                                                    const cacheTokens = stat.cache_read_tokens || 0;
-                                                    const inputTokens = stat.total_input_tokens || 0;
-                                                    const ratio = (cacheTokens + inputTokens) > 0
-                                                        ? (cacheTokens / (cacheTokens + inputTokens)) * 100
-                                                        : 0;
-                                                    return `${ratio.toFixed(2)}%`;
-                                                })()}
-                                            </Typography>
-                                        </TableCell>
-                                        <TableCell align="right">{formatTokens(stat.total_input_tokens)}</TableCell>
-                                        <TableCell align="right">{formatTokens(stat.total_output_tokens)}</TableCell>
-                                        {/* <TableCell align="right">
-                                            {stat.avg_latency_ms > 0 ? `${stat.avg_latency_ms.toFixed(0)}ms` : '-'}
-                                        </TableCell> */}
-                                        <TableCell align="right">
-                                            <Typography
-                                                variant="body2"
-                                                sx={{
-                                                    color: (stat.error_rate ?? 0) > 0.05 ? 'error.main' : 'text.secondary',
-                                                }}
-                                            >
-                                                {((stat.error_rate ?? 0) * 100).toFixed(2)}%
-                                            </Typography>
-                                        </TableCell>
+                                        <UsageMetricValueCells
+                                            usage={stat}
+                                            showCacheWrite={showCacheWrite}
+                                            cacheHitDigits={2}
+                                            errorDigits={2}
+                                            requestFormatter={(value) => value.toLocaleString()}
+                                        />
                                     </TableRow>
                                 ))}
                                 {emptyRows > 0 && (
                                     <TableRow style={{ height: 53 * emptyRows }}>
-                                        <TableCell colSpan={8} />
+                                        <TableCell colSpan={columnCount} />
                                     </TableRow>
                                 )}
                             </>

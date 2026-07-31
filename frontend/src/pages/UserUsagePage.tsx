@@ -52,12 +52,15 @@ import {
     formatCacheBreakdown,
     hasCacheWrites,
     getErrorRateColor,
+    getUsageMetricColumns,
+    UsageMetricHeaderCells,
+    UsageMetricValueCells,
 } from '@/components/dashboard';
-import type { AggregatedStat } from '@/components/dashboard';
+import type { AggregatedStat, UsageMetricKey, UsageMetricLabels } from '@/components/dashboard';
 import api from '@/services/api';
 
 type TimeRange = 'today' | '7d' | '30d' | '90d';
-type SortField = 'name' | 'requests' | 'tokens' | 'cacheRead' | 'cacheWrite' | 'cacheHit' | 'input' | 'output' | 'errors';
+type SortField = 'name' | UsageMetricKey;
 type SortDirection = 'asc' | 'desc';
 
 interface APITokenInfo {
@@ -157,7 +160,7 @@ export default function UserUsagePage() {
     const [modelStats, setModelStats] = useState<AggregatedStat[]>([]);
     const [selectedUserID, setSelectedUserID] = useState('');
     const [search, setSearch] = useState('');
-    const [sortField, setSortField] = useState<SortField>('tokens');
+    const [sortField, setSortField] = useState<SortField>('total');
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
     const [page, setPage] = useState(0);
     const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -290,7 +293,7 @@ export default function UserUsagePage() {
                 }
                 if (sortField === 'input') return direction * (a.total_input_tokens - b.total_input_tokens);
                 if (sortField === 'output') return direction * (a.total_output_tokens - b.total_output_tokens);
-                if (sortField === 'errors') return direction * (a.error_rate - b.error_rate);
+                if (sortField === 'errorRate') return direction * (a.error_rate - b.error_rate);
                 return direction * (a.total_tokens - b.total_tokens);
             });
     }, [rows, search, sortField, sortDirection]);
@@ -421,6 +424,16 @@ export default function UserUsagePage() {
         },
     ];
 
+    const usageMetricLabels: UsageMetricLabels = {
+        requests: t('dashboard.userUsage.requests', { defaultValue: 'Requests' }),
+        total: t('dashboard.userUsage.total', { defaultValue: 'Total' }),
+        cacheRead: t('dashboard.userUsage.cacheRead', { defaultValue: 'Cache Read' }),
+        cacheWrite: t('dashboard.userUsage.cacheWrite', { defaultValue: 'Cache Write' }),
+        cacheHit: t('dashboard.userUsage.cacheHit', { defaultValue: 'Cache Hit' }),
+        input: t('dashboard.userUsage.input', { defaultValue: 'Input' }),
+        output: t('dashboard.userUsage.output', { defaultValue: 'Output' }),
+        errorRate: t('dashboard.userUsage.errorRate', { defaultValue: 'Error rate' }),
+    };
     const userColumns: Array<{
         field: SortField;
         label: string;
@@ -428,19 +441,15 @@ export default function UserUsagePage() {
         defaultDir: SortDirection;
     }> = [
         { field: 'name', label: t('dashboard.userUsage.user', { defaultValue: 'User' }), defaultDir: 'asc' },
-        { field: 'requests', label: t('dashboard.userUsage.requests', { defaultValue: 'Requests' }), align: 'right', defaultDir: 'desc' },
-        { field: 'tokens', label: t('dashboard.userUsage.total', { defaultValue: 'Total' }), align: 'right', defaultDir: 'desc' },
-        { field: 'cacheRead', label: t('dashboard.userUsage.cacheRead', { defaultValue: 'Cache Read' }), align: 'right', defaultDir: 'desc' },
-        ...(showUserCacheWrite ? [{
-            field: 'cacheWrite' as const,
-            label: t('dashboard.userUsage.cacheWrite', { defaultValue: 'Cache Write' }),
+        ...getUsageMetricColumns({
+            showTotal: true,
+            showCacheWrite: showUserCacheWrite,
+        }, usageMetricLabels).map((column) => ({
+            field: column.key,
+            label: column.label,
             align: 'right' as const,
             defaultDir: 'desc' as const,
-        }] : []),
-        { field: 'cacheHit', label: t('dashboard.userUsage.cacheHit', { defaultValue: 'Cache Hit' }), align: 'right', defaultDir: 'desc' },
-        { field: 'input', label: t('dashboard.userUsage.input', { defaultValue: 'Input' }), align: 'right', defaultDir: 'desc' },
-        { field: 'output', label: t('dashboard.userUsage.output', { defaultValue: 'Output' }), align: 'right', defaultDir: 'desc' },
-        { field: 'errors', label: t('dashboard.userUsage.errorRate', { defaultValue: 'Error rate' }), align: 'right', defaultDir: 'desc' },
+        })),
     ];
 
     const handleSelectUser = (userID: string) => {
@@ -659,27 +668,11 @@ export default function UserUsagePage() {
                                                         </Box>
                                                     </Stack>
                                                 </TableCell>
-                                                <TableCell align="right">{formatNumber(row.request_count)}</TableCell>
-                                                <TableCell align="right" sx={{ fontWeight: 600 }}>{formatNumber(row.total_tokens)}</TableCell>
-                                                <TableCell align="right">{formatNumber(row.cache_read_tokens)}</TableCell>
-                                                {showUserCacheWrite && (
-                                                    <TableCell align="right">{formatNumber(row.cache_write_tokens)}</TableCell>
-                                                )}
-                                                <TableCell align="right">
-                                                    {getCacheHitRate(row.cache_read_tokens, row.total_input_tokens).toFixed(1)}%
-                                                </TableCell>
-                                                <TableCell align="right">{formatNumber(row.total_input_tokens)}</TableCell>
-                                                <TableCell align="right">{formatNumber(row.total_output_tokens)}</TableCell>
-                                                <TableCell align="right">
-                                                    <Typography
-                                                        variant="body2"
-                                                        sx={{
-                                                            color: row.error_rate > 0.05 ? 'error.main' : 'text.secondary',
-                                                        }}
-                                                    >
-                                                        {(row.error_rate * 100).toFixed(1)}%
-                                                    </Typography>
-                                                </TableCell>
+                                                <UsageMetricValueCells
+                                                    usage={row}
+                                                    showTotal
+                                                    showCacheWrite={showUserCacheWrite}
+                                                />
                                                 <TableCell padding="checkbox">
                                                     <ArrowForward sx={{ fontSize: 18, opacity: selected ? 1 : 0.22 }} color={selected ? 'primary' : 'inherit'} />
                                                 </TableCell>
@@ -688,7 +681,7 @@ export default function UserUsagePage() {
                                     })}
                                     {visibleRows.length === 0 && (
                                         <TableRow>
-                                            <TableCell colSpan={showUserCacheWrite ? 10 : 9} align="center" sx={{ py: 8 }}>
+                                            <TableCell colSpan={userColumns.length + 1} align="center" sx={{ py: 8 }}>
                                                 <Typography variant="body1" sx={{ color: 'text.secondary' }}>
                                                     {t('dashboard.userUsage.noUsers', { defaultValue: 'No users match your search.' })}
                                                 </Typography>
@@ -904,16 +897,11 @@ export default function UserUsagePage() {
                                                     >
                                                         <TableCell>{t('dashboard.userUsage.provider', { defaultValue: 'Provider' })}</TableCell>
                                                         <TableCell>{t('dashboard.userUsage.model', { defaultValue: 'Model' })}</TableCell>
-                                                        <TableCell align="right">{t('dashboard.userUsage.requests', { defaultValue: 'Requests' })}</TableCell>
-                                                        <TableCell align="right">{t('dashboard.userUsage.total', { defaultValue: 'Total' })}</TableCell>
-                                                        <TableCell align="right">{t('dashboard.userUsage.cacheRead', { defaultValue: 'Cache Read' })}</TableCell>
-                                                        {showModelCacheWrite && (
-                                                            <TableCell align="right">{t('dashboard.userUsage.cacheWrite', { defaultValue: 'Cache Write' })}</TableCell>
-                                                        )}
-                                                        <TableCell align="right">{t('dashboard.userUsage.cacheHit', { defaultValue: 'Cache Hit' })}</TableCell>
-                                                        <TableCell align="right">{t('dashboard.userUsage.input', { defaultValue: 'Input' })}</TableCell>
-                                                        <TableCell align="right">{t('dashboard.userUsage.output', { defaultValue: 'Output' })}</TableCell>
-                                                        <TableCell align="right">{t('dashboard.userUsage.errorRate', { defaultValue: 'Error rate' })}</TableCell>
+                                                        <UsageMetricHeaderCells
+                                                            labels={usageMetricLabels}
+                                                            showTotal
+                                                            showCacheWrite={showModelCacheWrite}
+                                                        />
                                                     </TableRow>
                                                 </TableHead>
                                                 <TableBody>
@@ -931,25 +919,11 @@ export default function UserUsagePage() {
                                                         >
                                                             <TableCell>{model.provider_name || '—'}</TableCell>
                                                             <TableCell sx={{ fontWeight: 600 }}>{model.model || model.key}</TableCell>
-                                                            <TableCell align="right">{formatNumber(model.request_count)}</TableCell>
-                                                            <TableCell align="right" sx={{ fontWeight: 600 }}>{formatNumber(getTotalTokens(model))}</TableCell>
-                                                            <TableCell align="right">{formatNumber(model.cache_read_tokens || 0)}</TableCell>
-                                                            {showModelCacheWrite && (
-                                                                <TableCell align="right">{formatNumber(model.cache_write_tokens || 0)}</TableCell>
-                                                            )}
-                                                            <TableCell align="right">
-                                                                {getCacheHitRate(model.cache_read_tokens || 0, model.total_input_tokens || 0).toFixed(1)}%
-                                                            </TableCell>
-                                                            <TableCell align="right">{formatNumber(model.total_input_tokens || 0)}</TableCell>
-                                                            <TableCell align="right">{formatNumber(model.total_output_tokens || 0)}</TableCell>
-                                                            <TableCell align="right">
-                                                                <Typography
-                                                                    variant="body2"
-                                                                    sx={{ color: (model.error_rate || 0) > 0.05 ? 'error.main' : 'text.secondary' }}
-                                                                >
-                                                                    {((model.error_rate || 0) * 100).toFixed(1)}%
-                                                                </Typography>
-                                                            </TableCell>
+                                                            <UsageMetricValueCells
+                                                                usage={model}
+                                                                showTotal
+                                                                showCacheWrite={showModelCacheWrite}
+                                                            />
                                                         </TableRow>
                                                     ))}
                                                 </TableBody>
