@@ -27,18 +27,6 @@ func joinTextContentParts(parts []openai.ChatCompletionContentPartTextParam) str
 	return strings.Join(texts, "\n")
 }
 
-// joinAssistantTextContentParts concatenates the text fields of assistant array
-// content parts into a single newline-separated string, ignoring refusal parts.
-func joinAssistantTextContentParts(parts []openai.ChatCompletionAssistantMessageParamContentArrayOfContentPartUnion) string {
-	textParts := make([]openai.ChatCompletionContentPartTextParam, 0, len(parts))
-	for _, part := range parts {
-		if part.OfText != nil {
-			textParts = append(textParts, *part.OfText)
-		}
-	}
-	return joinTextContentParts(textParts)
-}
-
 // ConvertChatToOpenAIResponses converts OpenAI Chat Completions params to Responses API format.
 // This enables using Chat Completions format with Responses API providers.
 func ConvertChatToOpenAIResponses(params *openai.ChatCompletionNewParams, defaultMaxTokens int64) *responses.ResponseNewParams {
@@ -48,11 +36,26 @@ func ConvertChatToOpenAIResponses(params *openai.ChatCompletionNewParams, defaul
 
 	var systemParts []string
 	var otherMessages []openai.ChatCompletionMessageParamUnion
+	preserveSystemMessages := false
+	for _, msg := range params.Messages {
+		if msg.OfSystem != nil &&
+			chatTextPartsHaveCacheBreakpoint(msg.OfSystem.Content.OfArrayOfContentParts) {
+			preserveSystemMessages = true
+			break
+		}
+	}
 
 	// Separate system messages from other messages
 	for _, msg := range params.Messages {
 		switch {
 		case !param.IsOmitted(msg.OfSystem):
+			if preserveSystemMessages {
+				// Responses' instructions field is a plain string and cannot
+				// carry explicit cache boundaries. Keep every system message
+				// in input so their order and breakpoints remain intact.
+				otherMessages = append(otherMessages, msg)
+				continue
+			}
 			// Extract system message content (string or array-of-text form)
 			sysMsg := msg.OfSystem
 			if !param.IsOmitted(sysMsg.Content.OfString) && sysMsg.Content.OfString.Value != "" {
@@ -111,6 +114,13 @@ func ConvertChatToOpenAIResponses(params *openai.ChatCompletionNewParams, defaul
 		}
 	}
 
+	result.PromptCacheKey = params.PromptCacheKey
+	result.PromptCacheOptions = responses.ResponseNewParamsPromptCacheOptions{
+		Mode: params.PromptCacheOptions.Mode,
+		Ttl:  params.PromptCacheOptions.Ttl,
+	}
+	result.PromptCacheRetention = responses.ResponseNewParamsPromptCacheRetention(params.PromptCacheRetention)
+
 	return result
 }
 
@@ -120,11 +130,15 @@ func ConvertChatMessagesToResponsesInput(messages []openai.ChatCompletionMessage
 
 	for _, msg := range messages {
 		switch {
+		case !param.IsOmitted(msg.OfSystem):
+			result = append(result, convertChatSystemMessageToResponses(msg.OfSystem)...)
+
 		case !param.IsOmitted(msg.OfUser):
 			result = append(result, convertChatUserMessageToResponses(msg.OfUser)...)
 
 		case !param.IsOmitted(msg.OfAssistant):
 			assistantMsg := msg.OfAssistant
+			result = append(result, convertChatAssistantMessageToResponses(assistantMsg)...)
 			// Check if assistant has tool calls
 			if len(assistantMsg.ToolCalls) > 0 {
 				// Convert each tool call to function_call item
@@ -140,8 +154,6 @@ func ConvertChatMessagesToResponsesInput(messages []openai.ChatCompletionMessage
 						})
 					}
 				}
-			} else {
-				result = append(result, convertChatAssistantMessageToResponses(assistantMsg)...)
 			}
 
 		case !param.IsOmitted(msg.OfTool):
@@ -150,6 +162,17 @@ func ConvertChatMessagesToResponsesInput(messages []openai.ChatCompletionMessage
 	}
 
 	return result
+}
+
+func convertChatSystemMessageToResponses(systemMsg *openai.ChatCompletionSystemMessageParam) []responses.ResponseInputItemUnionParam {
+	if systemMsg.Content.OfString.Valid() && systemMsg.Content.OfString.Value != "" {
+		return []responses.ResponseInputItemUnionParam{responseMessageWithString("system", systemMsg.Content.OfString.Value)}
+	}
+	content := responseContentFromChatTextParts(systemMsg.Content.OfArrayOfContentParts)
+	if len(content) == 0 {
+		return nil
+	}
+	return []responses.ResponseInputItemUnionParam{responseMessageWithContent("system", content)}
 }
 
 // convertChatUserMessageToResponses converts a Chat user message to Responses format.
@@ -173,19 +196,23 @@ func convertChatUserMessageToResponses(userMsg *openai.ChatCompletionUserMessage
 		for _, part := range userMsg.Content.OfArrayOfContentParts {
 			switch {
 			case part.OfText != nil:
+				inputText := &responses.ResponseInputTextParam{Text: part.OfText.Text}
+				if hasOpenAITextCacheBreakpoint(*part.OfText) {
+					inputText.PromptCacheBreakpoint = responses.NewResponseInputTextPromptCacheBreakpointParam()
+				}
 				contentList = append(contentList, responses.ResponseInputContentUnionParam{
-					OfInputText: &responses.ResponseInputTextParam{Text: part.OfText.Text},
+					OfInputText: inputText,
 				})
 			case part.OfImageURL != nil:
 				url := part.OfImageURL.ImageURL.URL
 				if url == "" {
 					continue
 				}
-				contentList = append(contentList, responses.ResponseInputContentUnionParam{
-					OfInputImage: &responses.ResponseInputImageParam{
-						ImageURL: param.NewOpt(url),
-					},
-				})
+				inputImage := &responses.ResponseInputImageParam{ImageURL: param.NewOpt(url)}
+				if !param.IsOmitted(part.OfImageURL.PromptCacheBreakpoint) {
+					inputImage.PromptCacheBreakpoint = responses.NewResponseInputImagePromptCacheBreakpointParam()
+				}
+				contentList = append(contentList, responses.ResponseInputContentUnionParam{OfInputImage: inputImage})
 			}
 		}
 		if len(contentList) > 0 {
@@ -208,40 +235,102 @@ func convertChatUserMessageToResponses(userMsg *openai.ChatCompletionUserMessage
 // convertChatAssistantMessageToResponses converts a Chat assistant message to Responses format.
 // Returns nil if the message has no usable text content.
 func convertChatAssistantMessageToResponses(assistantMsg *openai.ChatCompletionAssistantMessageParam) []responses.ResponseInputItemUnionParam {
-	content := assistantMsg.Content.OfString.Value
-	if content == "" {
-		content = joinAssistantTextContentParts(assistantMsg.Content.OfArrayOfContentParts)
+	if content := assistantMsg.Content.OfString.Value; content != "" {
+		return []responses.ResponseInputItemUnionParam{responseMessageWithString("assistant", content)}
 	}
-	if content == "" {
+	var parts []openai.ChatCompletionContentPartTextParam
+	for _, part := range assistantMsg.Content.OfArrayOfContentParts {
+		if part.OfText != nil {
+			parts = append(parts, *part.OfText)
+		}
+	}
+	if !chatTextPartsHaveCacheBreakpoint(parts) {
+		content := joinTextContentParts(parts)
+		if content == "" {
+			return nil
+		}
+		return []responses.ResponseInputItemUnionParam{responseMessageWithString("assistant", content)}
+	}
+	content := responseContentFromChatTextParts(parts)
+	if len(content) == 0 {
 		return nil
 	}
-
-	return []responses.ResponseInputItemUnionParam{{
-		OfMessage: &responses.EasyInputMessageParam{
-			Type: responses.EasyInputMessageTypeMessage,
-			Role: responses.EasyInputMessageRole("assistant"),
-			Content: responses.EasyInputMessageContentUnionParam{
-				OfString: param.NewOpt(content),
-			},
-		},
-	}}
+	return []responses.ResponseInputItemUnionParam{responseMessageWithContent("assistant", content)}
 }
 
 // convertChatToolMessageToResponses converts a Chat tool message to Responses function_call_output format.
 func convertChatToolMessageToResponses(toolMsg *openai.ChatCompletionToolMessageParam) responses.ResponseInputItemUnionParam {
 	content := toolMsg.Content.OfString.Value
-	if content == "" {
-		content = joinTextContentParts(toolMsg.Content.OfArrayOfContentParts)
+	output := responses.ResponseInputItemFunctionCallOutputOutputUnionParam{}
+	if content != "" {
+		output.OfString = param.NewOpt(content)
+	} else if !chatTextPartsHaveCacheBreakpoint(toolMsg.Content.OfArrayOfContentParts) {
+		output.OfString = param.NewOpt(joinTextContentParts(toolMsg.Content.OfArrayOfContentParts))
+	} else {
+		items := make(responses.ResponseFunctionCallOutputItemListParam, 0, len(toolMsg.Content.OfArrayOfContentParts))
+		for _, part := range toolMsg.Content.OfArrayOfContentParts {
+			if part.Text == "" {
+				continue
+			}
+			item := &responses.ResponseInputTextContentParam{Text: part.Text}
+			if hasOpenAITextCacheBreakpoint(part) {
+				item.PromptCacheBreakpoint = responses.NewResponseInputTextContentPromptCacheBreakpointParam()
+			}
+			items = append(items, responses.ResponseFunctionCallOutputItemUnionParam{OfInputText: item})
+		}
+		if len(items) > 0 {
+			output.OfResponseFunctionCallOutputItemArray = items
+		} else {
+			output.OfString = param.NewOpt("")
+		}
 	}
 
 	return responses.ResponseInputItemUnionParam{
 		OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
 			CallID: toolMsg.ToolCallID,
-			Output: responses.ResponseInputItemFunctionCallOutputOutputUnionParam{
-				OfString: param.NewOpt(content),
-			},
+			Output: output,
 		},
 	}
+}
+
+func responseContentFromChatTextParts(parts []openai.ChatCompletionContentPartTextParam) responses.ResponseInputMessageContentListParam {
+	content := make(responses.ResponseInputMessageContentListParam, 0, len(parts))
+	for _, part := range parts {
+		if part.Text == "" {
+			continue
+		}
+		item := &responses.ResponseInputTextParam{Text: part.Text}
+		if hasOpenAITextCacheBreakpoint(part) {
+			item.PromptCacheBreakpoint = responses.NewResponseInputTextPromptCacheBreakpointParam()
+		}
+		content = append(content, responses.ResponseInputContentUnionParam{OfInputText: item})
+	}
+	return content
+}
+
+func responseMessageWithString(role, content string) responses.ResponseInputItemUnionParam {
+	return responses.ResponseInputItemUnionParam{OfMessage: &responses.EasyInputMessageParam{
+		Type:    responses.EasyInputMessageTypeMessage,
+		Role:    responses.EasyInputMessageRole(role),
+		Content: responses.EasyInputMessageContentUnionParam{OfString: param.NewOpt(content)},
+	}}
+}
+
+func responseMessageWithContent(role string, content responses.ResponseInputMessageContentListParam) responses.ResponseInputItemUnionParam {
+	return responses.ResponseInputItemUnionParam{OfMessage: &responses.EasyInputMessageParam{
+		Type:    responses.EasyInputMessageTypeMessage,
+		Role:    responses.EasyInputMessageRole(role),
+		Content: responses.EasyInputMessageContentUnionParam{OfInputItemContentList: content},
+	}}
+}
+
+func chatTextPartsHaveCacheBreakpoint(parts []openai.ChatCompletionContentPartTextParam) bool {
+	for _, part := range parts {
+		if hasOpenAITextCacheBreakpoint(part) {
+			return true
+		}
+	}
+	return false
 }
 
 // ConvertChatToolsToResponsesTools converts Chat Completion tools to Responses API tools.
