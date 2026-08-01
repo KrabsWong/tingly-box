@@ -1,8 +1,8 @@
 package remoteagent
 
 import (
-	"errors"
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/sirupsen/logrus"
