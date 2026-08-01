@@ -134,7 +134,7 @@ const ImageGenPlaygroundCard: React.FC<ImageGenPlaygroundCardProps> = ({
         } catch (error: any) {
             updateRuns((currentRuns) => currentRuns.filter((run) => run.id !== runId));
             const status = error?.status ? `${error.status}: ` : '';
-            const message = error?.error?.message || error?.message || 'Request failed';
+            const message = error?.error?.message || error?.message || t('playground.requestFailed', { defaultValue: 'Request failed' });
             showNotification(`${status}${message}`, 'error');
         }
     }, [count, model, prompt, quality, showNotification, size, updateRuns]);
@@ -349,10 +349,12 @@ const ImageGenPlaygroundCard: React.FC<ImageGenPlaygroundCardProps> = ({
                                             whiteSpace: 'nowrap',
                                         }}
                                     >
-                                        {t('playground.runCount', {
-                                            defaultValue: runs.length === 1 ? '1 generation' : '{{count}} generations',
-                                            count: runs.length,
-                                        })}
+                                        {runs.length === 1
+                                            ? t('playground.runCountOne', { defaultValue: '1 generation' })
+                                            : t('playground.runCount', {
+                                                defaultValue: '{{count}} generations',
+                                                count: runs.length,
+                                            })}
                                     </Typography>
                                 </Box>
 

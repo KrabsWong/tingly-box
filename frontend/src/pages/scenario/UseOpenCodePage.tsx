@@ -8,6 +8,7 @@ import OpenCodeConfigModal from './components/OpenCodeConfigModal';
 import { Box, Button, IconButton, Tooltip } from '@mui/material';
 import { Info as InfoIcon } from '@/components/icons';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import PageLayout from '@/components/PageLayout';
 import ScenarioPageSkeleton from './components/ScenarioPageSkeleton';
 import TemplatePage from './components/TemplatePage.tsx';
@@ -16,6 +17,7 @@ import { api } from '@/services/api';
 import { ScenarioPageModalProvider } from '@/pages/scenario/context/ScenarioPageContext';
 const scenario = "opencode";
 const UseOpenCodePageContent: React.FC = () => {
+    const { t } = useTranslation();
     const {
         isLoading,
         notification,
@@ -46,14 +48,14 @@ const UseOpenCodePageContent: React.FC = () => {
                 setConfigJson('// Error: ' + (result.message || 'Failed to load config'));
                 setScriptWindows('// Error loading config');
                 setScriptUnix('// Error: Failed to connect to server');
-                showNotification('Failed to load config preview: ' + (result.message || 'Unknown error'), 'error');
+                showNotification(t('scenarioPage.opencode.previewFailed', { reason: result.message || t('scenarioPage.unknownError') }), 'error');
             }
         } catch (err) {
             console.error('Failed to fetch config preview:', err);
             setConfigJson('// Error: Failed to connect to server');
             setScriptWindows('// Error: Failed to connect to server');
             setScriptUnix('// Error: Failed to connect to server');
-            showNotification('Failed to load config preview', 'error');
+            showNotification(t('scenarioPage.opencode.previewFailedGeneric'), 'error');
         } finally {
             setIsConfigLoading(false);
         }
@@ -75,9 +77,9 @@ const UseOpenCodePageContent: React.FC = () => {
                     files: ['~/.config/opencode/opencode.json'],
                 };
             }
-            return { success: false, error: result.message || 'Unknown error' };
+            return { success: false, error: result.message || t('scenarioPage.unknownError') };
         } catch {
-            return { success: false, error: 'Failed to apply OpenCode config' };
+            return { success: false, error: t('scenarioPage.opencode.applyFailed') };
         } finally {
             setIsApplyLoading(false);
         }
@@ -90,7 +92,7 @@ const UseOpenCodePageContent: React.FC = () => {
                     title={
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                             <span>OpenCode</span>
-                            <Tooltip title="OpenCode AI development environment with BYOK support">
+                            <Tooltip title={t('scenarioPage.tooltip.opencode')}>
                                 <IconButton size="small" sx={{ ml: 0.5 }}>
                                     <InfoIcon fontSize="small" sx={{ color: 'text.secondary' }} />
                                 </IconButton>
@@ -104,12 +106,12 @@ const UseOpenCodePageContent: React.FC = () => {
                             variant="contained"
                             size="small"
                         >
-                            Auto Config
+                            {t('scenarioPage.autoConfig')}
                         </Button>
                     }
                 >
                     <ProviderConfigCard
-                        title="OpenCode Configuration"
+                        title={t('scenarioPage.opencode.configTitle')}
                         baseUrlPath="/tingly/opencode"
                         baseUrl={baseUrl}
                         onCopy={copyToClipboard}

@@ -1,6 +1,7 @@
 import ApiKeyModal from '@/components/ApiKeyModal';
 import ScenarioLogDialog from '@/components/RuleLogDialog';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
+import {useTranslation} from 'react-i18next';
 import {Box, Fab} from '@mui/material';
 import { KeyboardArrowUp as KeyboardArrowUpIcon } from '@/components/icons';
 import {useNavigate} from 'react-router-dom';
@@ -41,13 +42,14 @@ let routingGuideAutoOpenedThisSession = false;
  */
 const TemplatePage: React.FC<TemplatePageProps> = (props) => {
     // Get modal state from context (shared with ProviderConfigCard)
+    const { t } = useTranslation();
     const { showTokenModal, setShowTokenModal, token, copyToClipboard } = useScenarioPageModal();
 
     // Internal mode: fetch all data internally (excluding modal - that's from context)
     const internalData = useScenarioPageInternal(props.scenario);
 
     const {
-        title = "Model Rules",
+        title = t('scenarioPage.modelRules'),
         collapsible = false,
         allowDeleteRule = false,
         allowToggleRule = true,
@@ -320,10 +322,10 @@ const TemplatePage: React.FC<TemplatePageProps> = (props) => {
         return (
             <UnifiedCard size="full" title={title}>
                 <EmptyState
-                    title={"No Providers Configured"}
-                    description={"Add an API key provider to start routing requests"}
+                    title={t('templatePage.noProviders.title')}
+                    description={t('templatePage.noProviders.description')}
                     primaryAction={{
-                        label: 'Get started',
+                        label: t('templatePage.noProviders.action'),
                         onClick: onAddApiKeyClick || (() => navigate('/onboarding')),
                     }}
                 />
@@ -357,7 +359,7 @@ const TemplatePage: React.FC<TemplatePageProps> = (props) => {
                             py: 8,
                             color: 'text.secondary'
                         }}>
-                            No rules yet. Click "New Rule" to add one.
+                            {t('templatePage.noRules')}
                         </Box>
                     ) : (
                         rules.map((rule, index) => {
@@ -405,7 +407,7 @@ const TemplatePage: React.FC<TemplatePageProps> = (props) => {
                 token={token}
                 onCopy={async (text, label) => {
                     await copyToClipboard(text, label);
-                    showNotification(`${label} copied to clipboard!`, 'success');
+                    showNotification(t('templatePage.copiedToClipboard', { label }), 'success');
                 }}
             />
 
