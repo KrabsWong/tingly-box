@@ -23,6 +23,24 @@ func (h *BotHandler) HandleMessage(msg imbot.Message, platform imbot.Platform, b
 		return
 	}
 
+	// Blocklist gate: a disabled chat's traffic — messages AND button
+	// callbacks — is dropped before any handler runs. Silently: replying
+	// would give a blocked party a probe signal and generate outbound
+	// traffic for exactly the chats disable exists to stop.
+	//
+	// This check is duplicated in bot/manager.go's disabledChatGate on
+	// purpose: that gate runs at the host level, ahead of every consumer
+	// (including promptReplyRouter), and is what stops a disabled chat with a
+	// pending permission prompt from being answered in managed mode. This
+	// copy is the standalone / host-less path (the CLI and the test harness —
+	// see remoteagent.BootForTest), which never enters manager.go's dispatch
+	// chain. Two paths into the handler → two gates; see the spec
+	// (bot-chat-lifecycle-collapse §3b).
+	if h.chatStore.IsChatDisabled(chatID) {
+		logrus.Debugf("chat %s is disabled, dropping message", chatID)
+		return
+	}
+
 	// An action firing (a button press) dispatches on its payload, not on
 	// message text.
 	if msg.IsCallback() {
@@ -30,7 +48,8 @@ func (h *BotHandler) HandleMessage(msg imbot.Message, platform imbot.Platform, b
 		return
 	}
 
-	// Create handler context
+	// Build the per-message context once, ahead of the access gates and every
+	// handler below — a cheap struct literal with no side effects.
 	hCtx := HandlerContext{
 		Bot:       b,
 		BotUUID:   botUUID,
@@ -41,53 +60,11 @@ func (h *BotHandler) HandleMessage(msg imbot.Message, platform imbot.Platform, b
 		Message:   msg,
 	}
 
-	switch {
-	case msg.IsDirectMessage():
-		logrus.Infof("Chat ID: %s", chatID)
-		// Check chat ID lock
-		if h.botSetting.ChatIDLock != "" && chatID != h.botSetting.ChatIDLock {
-			return
-		}
-		// Pairing gate: when RequirePairing is enabled, only paired chats may
-		// reach the regular handlers. Unpaired chats are limited to /bind.
-		if h.botSetting.IsRequirePairing() && !h.chatStore.IsChatPaired(chatID, botUUID) {
-			text := strings.TrimSpace(msg.GetText())
-			if !isBindCommand(text) {
-				h.auditWarn("imbot.pair.unpaired_message", msg.Sender.ID,
-					"rejected unpaired direct message", map[string]interface{}{
-						"bot_uuid": botUUID,
-						"chat_id":  chatID,
-						"platform": string(platform),
-					})
-				h.SendText(hCtx, pairingHintMessage())
-				return
-			}
-			// fall through; the /bind handler verifies the code
-		}
-	case msg.IsGroupMessage():
-		logrus.Infof("Group chat ID: %s", chatID)
-		// Check whitelist first
-		if !h.chatStore.IsWhitelisted(chatID) {
-			logrus.Debugf("Group %s is not whitelisted, ignoring message", chatID)
-			h.SendText(hCtx, fmt.Sprintf("This group is not enabled. Please DM the bot with `%s %s` to enable.", cmdJoinPrimary, chatID))
-			return
-		}
-		// When pairing is required, the operator who whitelisted the group
-		// must themselves be paired in DM.
-		if h.botSetting.IsRequirePairing() && !h.isWhitelisterPaired(chatID, botUUID) {
-			h.auditWarn("imbot.pair.unpaired_message", msg.Sender.ID,
-				"rejected group whitelisted by unpaired operator",
-				map[string]interface{}{
-					"bot_uuid": botUUID,
-					"chat_id":  chatID,
-					"platform": string(platform),
-				})
-			h.SendText(hCtx, "🔒 This group's operator has not paired with the bot. Ask them to send /bind <code> in a DM first.")
-			return
-		}
-	default:
-		logrus.Errorf("Unsupported message from upstream: %v", msg)
-		h.SendText(hCtx, fmt.Sprintf("Unsupported message from upstream %s %s.", msg.ChatType, chatID))
+	// Access gates: chat-id lock, then the message-shape-specific gate
+	// (pairing for a DM, whitelist for a group). handleInboundGate returns
+	// true when the message is rejected — a rejection reply was already sent
+	// (or, for the disabled case above, silently dropped).
+	if h.handleInboundGate(hCtx) {
 		return
 	}
 
@@ -165,6 +142,87 @@ func (h *BotHandler) HandleMessage(msg imbot.Message, platform imbot.Platform, b
 		logrus.WithError(routeErr).Error("Failed to route to agent")
 		h.SendText(hCtx, executionErrorMessage(routeErr))
 	}
+}
+
+// handleInboundGate runs the ordered access checks a non-callback message
+// must pass before reaching a handler: chat-id lock (DM only, unconditional),
+// then the message-shape-specific gate — pairing for a direct message,
+// whitelist for a group. Returns true when the message is rejected (a
+// rejection reply was already sent).
+//
+// DM and group are two explicit branches rather than one flat gate list
+// because their semantics genuinely differ: the pairing gate lets an unpaired
+// chat fall through to the /bind handler (so a chat can still pair itself),
+// while the whitelist gate does not — collapsing both into one uniform
+// func(ctx) bool would either drop the /bind escape hatch or fake it with a
+// side channel. See the spec (bot-chat-lifecycle-collapse §3a).
+func (h *BotHandler) handleInboundGate(hCtx HandlerContext) bool {
+	msg := hCtx.Message
+	switch {
+	case msg.IsDirectMessage():
+		logrus.Infof("Chat ID: %s", hCtx.ChatID)
+		// Chat-id lock: a locked bot accepts traffic from one chat only.
+		if h.botSetting.ChatIDLock != "" && hCtx.ChatID != h.botSetting.ChatIDLock {
+			return true
+		}
+		return h.handlePairingGate(hCtx)
+	case msg.IsGroupMessage():
+		logrus.Infof("Group chat ID: %s", hCtx.ChatID)
+		return h.handleWhitelistGate(hCtx)
+	default:
+		logrus.Errorf("Unsupported message from upstream: %v", msg)
+		h.SendText(hCtx, fmt.Sprintf("Unsupported message from upstream %s %s.", msg.ChatType, hCtx.ChatID))
+		return true
+	}
+}
+
+// handlePairingGate enforces pairing for a direct message: when
+// RequirePairing is on, only paired chats reach the regular handlers — but an
+// unpaired chat may still send /bind, which falls through to the bind handler
+// that verifies the code. Returns true when the message is rejected (a
+// pairing hint was sent).
+func (h *BotHandler) handlePairingGate(hCtx HandlerContext) bool {
+	if !h.botSetting.IsRequirePairing() {
+		return false
+	}
+	if h.chatStore.IsChatPaired(hCtx.ChatID, hCtx.BotUUID) {
+		return false
+	}
+	if isBindCommand(hCtx.Text()) {
+		return false // fall through; the /bind handler verifies the code
+	}
+	h.auditWarn("imbot.pair.unpaired_message", hCtx.Message.Sender.ID,
+		"rejected unpaired direct message", map[string]interface{}{
+			"bot_uuid": hCtx.BotUUID,
+			"chat_id":  hCtx.ChatID,
+			"platform": string(hCtx.Platform),
+		})
+	h.SendText(hCtx, pairingHintMessage())
+	return true
+}
+
+// handleWhitelistGate enforces the group whitelist: a group must be
+// whitelisted, and (when pairing is required) whitelisted by an operator who
+// is themselves paired in DM. Returns true when the message is rejected (a
+// hint was sent).
+func (h *BotHandler) handleWhitelistGate(hCtx HandlerContext) bool {
+	if !h.chatStore.IsWhitelisted(hCtx.ChatID) {
+		logrus.Debugf("Group %s is not whitelisted, ignoring message", hCtx.ChatID)
+		h.SendText(hCtx, fmt.Sprintf("This group is not enabled. Please DM the bot with `%s %s` to enable.", cmdJoinPrimary, hCtx.ChatID))
+		return true
+	}
+	if h.botSetting.IsRequirePairing() && !h.isWhitelisterPaired(hCtx.ChatID, hCtx.BotUUID) {
+		h.auditWarn("imbot.pair.unpaired_message", hCtx.Message.Sender.ID,
+			"rejected group whitelisted by unpaired operator",
+			map[string]interface{}{
+				"bot_uuid": hCtx.BotUUID,
+				"chat_id":  hCtx.ChatID,
+				"platform": string(hCtx.Platform),
+			})
+		h.SendText(hCtx, "🔒 This group's operator has not paired with the bot. Ask them to send /bind <code> in a DM first.")
+		return true
+	}
+	return false
 }
 
 // handleMediaMessage handles messages with media attachments

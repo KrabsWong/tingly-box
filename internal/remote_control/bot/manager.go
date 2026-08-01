@@ -22,9 +22,12 @@ import (
 // prompt replies — because the channel is a property of a running bot, not of
 // any one purpose. The bot's behavior is supplied by the injected Consumers
 // (remote_agent, notify, …), which are users of that channel; inbound
-// messages go to the host's prompt-reply router first, then through the
-// consumers in order until one claims, so the catch-all (remote_agent) sits
-// last.
+// messages go to the host's disabled-chat gate first, then the prompt-reply
+// router, then through the consumers in order until one claims, so the
+// catch-all (remote_agent) sits last. The gate must run before the
+// prompt-reply router: it is the one place that can drop a disabled chat's
+// traffic before promptReplyRouter, which sits ahead of every consumer's own
+// blocklist check, gets to answer it.
 //
 // chatStore is injected into the Manager and shared by every bot it runs —
 // see Manager.SetChatStore. This function must not close it.
@@ -86,7 +89,8 @@ func runBotWithSettings(ctx context.Context, setting BotSetting, chatStore ChatS
 		}
 		attachedList = append(attachedList, attached)
 	}
-	handlers := make([]OnMessage, 0, len(attachedList)+1)
+	handlers := make([]OnMessage, 0, len(attachedList)+2)
+	handlers = append(handlers, disabledChatGate(chatStore))
 	handlers = append(handlers, promptReplyRouter(manager, prompter))
 	for _, attached := range attachedList {
 		if attached.OnMessage != nil {

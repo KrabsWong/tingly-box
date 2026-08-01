@@ -246,24 +246,26 @@ func TestBotAPI_Interact_UnknownBot_404(t *testing.T) {
 
 // TestListChats_ReturnsSummaries asserts the /chats endpoint surfaces the
 // chat_id values a caller needs for /notify and /interact, scoped through the
-// injected ChatLister (the server wires the real platform/lock scoping).
+// injected BotChatManager (the server wires the real platform/lock scoping).
 func TestListChats_ReturnsSummaries(t *testing.T) {
 	ch := newFakeChannel("bot-1")
-	lister := func(botUUID string) ([]ChatSummary, error) {
-		if botUUID != "bot-1" {
-			return nil, nil
-		}
-		return []ChatSummary{
-			{ChatID: "telegram:123", Platform: "telegram", IsPaired: true},
-			{ChatID: "telegram:456", Platform: "telegram"},
-		}, nil
+	mgr := &fakeBotChatManager{
+		listChats: func(botUUID string, includeDisabled bool) ([]ChatSummary, error) {
+			if botUUID != "bot-1" {
+				return nil, nil
+			}
+			return []ChatSummary{
+				{ChatID: "telegram:123", Platform: "telegram", IsPaired: true},
+				{ChatID: "telegram:456", Platform: "telegram"},
+			}, nil
+		},
 	}
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	registry := channel.NewRegistry()
 	registry.Register(ch)
-	handler := NewBotAPIHandler(registry, nil, lister)
+	handler := NewBotAPIHandler(registry, nil, mgr)
 	g := r.Group("/api/v1")
 	g.GET("/bots/:bot/chats", handler.ListChats)
 
@@ -286,13 +288,15 @@ func TestListChats_ReturnsSummaries(t *testing.T) {
 // frontend always receives a stable array shape.
 func TestListChats_EmptyArray(t *testing.T) {
 	ch := newFakeChannel("bot-2")
-	lister := func(string) ([]ChatSummary, error) { return nil, nil }
+	mgr := &fakeBotChatManager{
+		listChats: func(string, bool) ([]ChatSummary, error) { return nil, nil },
+	}
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	registry := channel.NewRegistry()
 	registry.Register(ch)
-	handler := NewBotAPIHandler(registry, nil, lister)
+	handler := NewBotAPIHandler(registry, nil, mgr)
 	g := r.Group("/api/v1")
 	g.GET("/bots/:bot/chats", handler.ListChats)
 
@@ -312,9 +316,11 @@ func TestListChats_EmptyArray(t *testing.T) {
 func TestListChats_NotRunning(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	handler := NewBotAPIHandler(channel.NewRegistry(), nil, func(string) ([]ChatSummary, error) {
-		t.Fatalf("lister should not be called for an unknown bot")
-		return nil, nil
+	handler := NewBotAPIHandler(channel.NewRegistry(), nil, &fakeBotChatManager{
+		listChats: func(string, bool) ([]ChatSummary, error) {
+			t.Fatalf("lister should not be called for an unknown bot")
+			return nil, nil
+		},
 	})
 	g := r.Group("/api/v1")
 	g.GET("/bots/:bot/chats", handler.ListChats)
