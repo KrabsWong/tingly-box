@@ -112,6 +112,7 @@ func NewTinglyBoxAgent(config *AgentConfig) (*TinglyBoxAgent, error) {
 		System:        config.SmartGuideConfig.GetSystemPrompt(),
 		Temperature:   &config.SmartGuideConfig.Temperature,
 		Thinking:      afk.ThinkingMode(config.SmartGuideConfig.Thinking),
+		Effort:        afk.EffortLevel(config.SmartGuideConfig.Effort),
 		MaxIterations: config.SmartGuideConfig.MaxIterations,
 		Tools:         tools,
 	})

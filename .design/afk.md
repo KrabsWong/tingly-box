@@ -62,7 +62,7 @@ the agent's.
 
 | Layer | File | Owns |
 |---|---|---|
-| `Engine` | `afk/engine.go` | The model client, tools, cache breakpoints, one step |
+| `Engine` | `afk/engine.go` | The model client, tools, thinking/effort, cache breakpoints, one step |
 | `Harness` | `afk/harness.go` | The run loop, checkpoints, steering, compaction, invariants |
 | `Session` | `afk/session/session.go` | The durable log and its projection |
 | Compaction | `afk/compact.go` | Boundary selection and summarization |
@@ -158,7 +158,25 @@ definition supported. An unrecognized value falls back to sending nothing —
 the mode arrives as a plain string from `SmartGuideConfig.Thinking`, and a typo
 must not become a 400.
 
-### 3.4 Skills are discovered once per agent
+### 3.4 Effort is a separate knob from thinking
+
+`Config.Effort` maps to `output_config.effort` — `low` / `medium` / `high` /
+`xhigh` / `max`, with the zero value sending nothing. It is the API's primary
+intelligence/latency/cost control: it governs how much the model spends on the
+whole response, not only on reasoning.
+
+It stays its own field rather than more values on `ThinkingMode`, because the two
+are genuinely orthogonal: thinking is *whether the model reasons and whether we
+see it*, effort is *how much of everything it spends*. Folding them together
+would produce a twenty-value picker whose cells mostly mean the same request.
+
+They interact only at the edges — on some models, disabling thinking is rejected
+above `high` effort. AFK cannot check that: it does not know which model the
+gateway routed to. As with thinking, an unrecognized value sends nothing rather
+than becoming a 400, because the value arrives as a plain string from
+`SmartGuideConfig.Effort`.
+
+### 3.5 Skills are discovered once per agent
 
 The skill catalog is rendered into the `activate_skill` tool description, and
 tools sit at the very front of the prompt. A catalog that changed mid-conversation
@@ -170,7 +188,7 @@ with skills does not pick them up until the session restarts. That is the
 accepted cost of a stable prefix; a fresh agent is built per session, so
 `/clear` or a restart picks up changes.
 
-### 3.5 Tool output is capped, and the direction is per tool
+### 3.6 Tool output is capped, and the direction is per tool
 
 Two independent limits, whichever binds first: 2000 lines
 (`DefaultMaxOutputLines`) or 50KB (`DefaultMaxOutputBytes`). The byte cap is
@@ -188,7 +206,7 @@ stripped. That line is how the tool tracks the working directory; tail-truncatin
 first would cut it off and strand the session in the previous directory. There is
 a test for exactly this.
 
-### 3.6 Compaction is the platform's, not ours
+### 3.7 Compaction is the platform's, not ours
 
 Server-side compaction from the Beta Messages API, on by default:
 `context_management` carrying a `compact_20260112` edit in the body, plus the
@@ -217,7 +235,7 @@ summarization prompt of our own, and a boundary rule that had to avoid cutting a
 one-protocol thesis (§1) applied — the reason to speak one protocol is to use its
 whole surface, not to reimplement it.
 
-### 3.7 Steering lands where the transcript allows
+### 3.8 Steering lands where the transcript allows
 
 A message sent while a turn is running is delivered at the next checkpoint.
 Where it lands depends on what the step ended with: after a tool step it joins
@@ -233,7 +251,7 @@ it would answer a question nobody is asking any more.
 Only `@tb` registers as steerable. `@cc` drives a subprocess and still falls
 through to the busy path.
 
-### 3.8 The log is append-only
+### 3.9 The log is append-only
 
 One JSONL entry per line, `O_APPEND`, never rewritten. An unreadable line costs
 one message rather than the conversation — the previous whole-file store treated
@@ -243,7 +261,7 @@ history with it.
 
 Entries are typed even though there is currently only `message`. The envelope is
 the file format: adding a kind of record later should not mean rewriting every
-log that already exists. Compaction does not need one (§3.6).
+log that already exists. Compaction does not need one (§3.7).
 
 A persistence failure is logged, never returned. The run's work is real whether
 or not it was recorded, and failing the turn over a disk error would discard
@@ -266,7 +284,7 @@ Also not taken, and not currently wanted:
 | Conversation branching / tree navigation | No product surface asks for it. |
 | Refs (parallel operations on one session) | A chat is one conversation at a time. |
 | Hooks / extension points | Approval is wired directly today. Worth revisiting when there is a second consumer — see §6. |
-| An in-process compaction fallback | The beta API does it (§3.6). A second mechanism would need a threshold ordered against the server's trigger, and would fire on exactly the conversations where its worse summaries hurt most. |
+| An in-process compaction fallback | The beta API does it (§3.7). A second mechanism would need a threshold ordered against the server's trigger, and would fire on exactly the conversations where its worse summaries hurt most. |
 
 The guiding rule: the loop and the checkpoint are what everything else needs.
 The rest is weight this product has no use for yet.
@@ -285,16 +303,17 @@ context window, because `@tb` routes by bot-UUID rule and the window is not know
 at runtime. 120k suits the models compaction is available on (all 1M-window) and
 would be too high for a small one.
 
-**Thinking is configurable but off by default** (§3.3) — "off" meaning the
-parameter is not sent, which on current models still means the model thinks. The
-default is unset rather than `ThinkingVisible` for the same reason the trigger is
-a fixed number: the model is not known at runtime, and its own default is the
-only setting guaranteed to be accepted.
+**Thinking and effort are configurable but unset by default** (§3.3, §3.4) —
+"unset" meaning the parameter is not sent, which on current models still means the
+model thinks. The default is unset rather than `ThinkingVisible` or a named effort
+for the same reason the trigger is a fixed number: the model is not known at
+runtime, and its own default is the only setting guaranteed to be accepted.
 
-**`output_config.effort` is not wired.** It is the API's primary
-intelligence/latency/cost control and would be a second one-field knob on the
-same axis as thinking. Left out because nothing has asked for it; adding it is
-`Config.Effort` plus three lines in `streamTurn`.
+**Thinking and effort can conflict on some models** (§3.4): disabling thinking is
+rejected above `high` effort. AFK sends both as configured and does not
+cross-validate them, because the pair is only invalid for certain models and AFK
+does not know which model the gateway routed to. Both default to unset, so the
+conflict requires setting both explicitly.
 
 **`Temperature` is sent unconditionally** (`smart_guide/agent.go`, from
 `SmartGuideConfig`). Current Anthropic models — Opus 5, 4.8, 4.7, Fable 5,
@@ -344,11 +363,14 @@ means designing it against a single caller.
   pinned trigger and no per-chat setting. Both compaction knobs
   (`DisableServerCompaction`, `ServerCompactTrigger`) are escape hatches, not
   settings anyone is expected to tune.
-- **#4 separate orthogonal axes / #2 no mode pickers** — thinking is the one
-  place with a genuine multi-value setting. It stays a single field because its
-  values are not orthogonal (§3.3): splitting it into on/off plus visible/hidden
-  would invent a fourth combination the API has no shape for, and would hide
-  that *unset* is meaningfully different from both.
+- **#4 separate orthogonal axes / #2 no mode pickers** — thinking and effort are
+  the two genuine multi-value settings, and the principle cuts both ways here.
+  Thinking stays a *single* field because its values are not orthogonal (§3.3):
+  splitting it into on/off plus visible/hidden would invent a fourth combination
+  the API has no shape for, and would hide that *unset* differs from both.
+  Effort stays a *separate* field for the mirror-image reason (§3.4): it is a
+  different axis — how much is spent, not whether we reason — so merging it into
+  thinking would produce a mode picker of mostly-identical cells.
 - **#10 done ≠ locked** — `/clear` archives rather than deletes, and the
   append-only log never rewrites what it already wrote.
 - **#12 side effects scoped to the current surface** — a steering message

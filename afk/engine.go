@@ -165,6 +165,45 @@ func (m ThinkingMode) thinkingParam() (anthropic.BetaThinkingConfigParamUnion, b
 	}
 }
 
+// EffortLevel is how hard the model works on a turn — the API's primary
+// intelligence/latency/cost control.
+//
+// Orthogonal to ThinkingMode and kept as its own field for that reason: thinking
+// is *whether* the model reasons and whether we see it, effort is *how much* of
+// everything it spends. They interact only at the edges — on some models
+// disabling thinking is rejected above `high` — which is a model-specific rule
+// this package cannot check, because it does not know which model the gateway
+// routed to.
+type EffortLevel string
+
+const (
+	// EffortModelDefault sends nothing, letting the model's own default apply.
+	// Same reasoning as ThinkingModelDefault: the default is the only setting
+	// guaranteed to be accepted by an unknown model.
+	EffortModelDefault EffortLevel = ""
+
+	EffortLow    EffortLevel = "low"
+	EffortMedium EffortLevel = "medium"
+	EffortHigh   EffortLevel = "high"
+	EffortXHigh  EffortLevel = "xhigh"
+	EffortMax    EffortLevel = "max"
+)
+
+// outputConfig renders the level as the request parameter, and reports whether
+// there is one to send. An unrecognized value sends nothing rather than being
+// forwarded: it arrives as a plain string from config, and a typo must not
+// become a rejected request.
+func (e EffortLevel) outputConfig() (anthropic.BetaOutputConfigParam, bool) {
+	switch e {
+	case EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax:
+		return anthropic.BetaOutputConfigParam{
+			Effort: anthropic.BetaOutputConfigEffort(e),
+		}, true
+	default:
+		return anthropic.BetaOutputConfigParam{}, false
+	}
+}
+
 // Engine runs the ReAct loop against a configured model and toolset.
 type Engine struct {
 	client        anthropic.Client
@@ -175,6 +214,7 @@ type Engine struct {
 	maxIterations int
 	streamText    bool
 	thinking      ThinkingMode
+	effort        EffortLevel
 	serverCompact bool
 	serverTrigger int64
 	tools         []Tool
@@ -210,6 +250,9 @@ type Config struct {
 	// Thinking selects the model's reasoning mode. Zero value leaves the
 	// parameter unset; see ThinkingMode.
 	Thinking ThinkingMode
+	// Effort is how hard the model works on a turn. Zero value leaves the
+	// parameter unset; see EffortLevel.
+	Effort EffortLevel
 	// DisableServerCompaction turns off server-side compaction, which is
 	// otherwise on by default. With it off, nothing bounds the prompt: a long
 	// enough conversation eventually exceeds the context window and fails.
@@ -250,6 +293,7 @@ func NewEngine(cfg Config) (*Engine, error) {
 		maxIterations: maxIter,
 		streamText:    cfg.StreamText,
 		thinking:      cfg.Thinking,
+		effort:        cfg.Effort,
 		serverCompact: !cfg.DisableServerCompaction,
 		serverTrigger: cfg.ServerCompactTrigger,
 		toolByName:    make(map[string]Tool, len(cfg.Tools)),
@@ -438,6 +482,9 @@ func (e *Engine) streamTurn(
 	}
 	if think, ok := e.thinking.thinkingParam(); ok {
 		params.Thinking = think
+	}
+	if out, ok := e.effort.outputConfig(); ok {
+		params.OutputConfig = out
 	}
 	if len(e.toolParams) > 0 {
 		params.Tools = e.toolParams

@@ -26,6 +26,12 @@ type SmartGuideConfig struct {
 	// shows it in verbose mode.
 	Thinking string `json:"thinking,omitempty"`
 
+	// Effort is how hard the model works on a turn: "" (the model's own
+	// default), "low", "medium", "high", "xhigh", or "max". See
+	// afk.EffortLevel. Separate axis from Thinking — that one is whether the
+	// model reasons, this one is how much it spends overall.
+	Effort string `json:"effort,omitempty"`
+
 	// ToolsEnabled maps tool names to enabled state
 	ToolsEnabled map[string]bool `json:"tools_enabled"`
 
