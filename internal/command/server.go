@@ -41,9 +41,14 @@ type StartCmdKong struct {
 	PromptRestart        bool   `kong:"flag,name='prompt-restart',help='Prompt to restart if running'"`
 	RecordMode           string `kong:"flag,name='record-mode',help='Record mode'"`
 	RecordDir            string `kong:"flag,name='record-dir',help='Record directory'"`
+	EnableShortcut       bool   `kong:"flag,name='shortcut',help='Also create/refresh a desktop shortcut for next time'"`
 }
 
-func (s *StartCmdKong) Run(appManager *AppManager) error {
+func (s *StartCmdKong) Run(appManager *AppManager, source LaunchSource) error {
+	if s.EnableShortcut {
+		refreshShortcut(source)
+	}
+
 	flags := options.StartFlags{
 		Port:                 s.Port,
 		Host:                 s.Host,
@@ -80,7 +85,11 @@ type RestartCmdKong struct {
 	StartCmdKong
 }
 
-func (r *RestartCmdKong) Run(appManager *AppManager) error {
+func (r *RestartCmdKong) Run(appManager *AppManager, source LaunchSource) error {
+	if r.EnableShortcut {
+		refreshShortcut(source)
+	}
+
 	appConfig := appManager.AppConfig()
 	fileLock := lock.NewFileLock(appConfig.ConfigDir())
 	wasRunning := fileLock.IsLocked()
