@@ -141,17 +141,21 @@ export const TierGuideDialog: React.FC<TierGuideDialogProps> = ({
                 <CloseIcon />
             </IconButton>
             <DialogContent id="tier-guide-dialog-description" dividers sx={{ p: 0 }}>
-                <Box sx={{ display: 'flex', flexDirection: 'row', height: '100%', gap: 2 }}>
-                    {/* Left side: Vertical Stepper */}
+                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, height: '100%' }}>
+                    {/* Left side: step navigation rail */}
                     <Box sx={{
-                        width: { xs: '100%', sm: 220 },
+                        width: { xs: '100%', sm: 240 },
                         py: { xs: 2, sm: 3 },
-                        px: { xs: 2, sm: 1 },
+                        px: { xs: 2, sm: 3 },
                         display: 'flex',
                         flexDirection: { xs: 'row', sm: 'column' },
-                        alignItems: { xs: 'center', sm: 'flex-start' },
+                        alignItems: { xs: 'center', sm: 'stretch' },
                         overflowX: { xs: 'auto', sm: 'visible' },
                         flexShrink: 0,
+                        bgcolor: 'background.default',
+                        borderRight: { xs: 'none', sm: '1px solid' },
+                        borderBottom: { xs: '1px solid', sm: 'none' },
+                        borderColor: { xs: 'divider', sm: 'divider' },
                     }}>
                         <Stepper
                             activeStep={activeStep}
@@ -184,8 +188,37 @@ export const TierGuideDialog: React.FC<TierGuideDialogProps> = ({
                         flexDirection: 'column',
                         minWidth: 0,
                         py: { xs: 2, sm: 3 },
-                        px: { xs: 2, sm: 3 },
+                        px: { xs: 2, sm: 4 },
                     }}>
+                        {/* Explanation Text */}
+                        <Box sx={{ mb: 2.5 }}>
+                            <Typography variant="body1" sx={{ lineHeight: 1.8 }}>
+                                {t(currentStep.content, { defaultValue: currentStep.content })}
+                            </Typography>
+
+                            {/* Annotations */}
+                            {currentStep.annotations && currentStep.annotations.length > 0 && (
+                                <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                                    {currentStep.annotations.map((annotation, idx) => (
+                                        <Paper
+                                            key={idx}
+                                            variant="outlined"
+                                            sx={{
+                                                p: 1.5,
+                                                bgcolor: 'action.hover',
+                                                borderRadius: 1,
+                                                flex: '1 1 45%',
+                                            }}
+                                        >
+                                            <Typography variant="caption" color="primary" sx={{ fontWeight: 600, display: 'block', mb: 0.5 }}>
+                                                {t(annotation.text, { defaultValue: annotation.text })}
+                                            </Typography>
+                                        </Paper>
+                                    ))}
+                                </Box>
+                            )}
+                        </Box>
+
                         {/* Static Graph Diagram */}
                         <Box sx={{
                             bgcolor: 'background.default',
@@ -220,37 +253,8 @@ export const TierGuideDialog: React.FC<TierGuideDialogProps> = ({
                                 fontSize: '0.75rem',
                                 opacity: 0.8,
                             }}>
-                                💡 {t('rule.tier.guide.hoverHint', { defaultValue: 'Action buttons shown - try hovering over nodes!' })}
+                                💡 {t('rule.tier.guide.hoverHint', { defaultValue: 'Hover over a node in the diagram to see its actions' })}
                             </Box>
-                        </Box>
-
-                        {/* Explanation Text */}
-                        <Box sx={{ mt: 2, p: { xs: 2, sm: 3 }, bgcolor: 'background.default', borderRadius: 1 }}>
-                            <Typography variant="body1" sx={{ lineHeight: 1.8 }}>
-                                {t(currentStep.content, { defaultValue: currentStep.content })}
-                            </Typography>
-
-                            {/* Annotations */}
-                            {currentStep.annotations && currentStep.annotations.length > 0 && (
-                                <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                                    {currentStep.annotations.map((annotation, idx) => (
-                                        <Paper
-                                            key={idx}
-                                            variant="outlined"
-                                            sx={{
-                                                p: 1.5,
-                                                bgcolor: 'action.hover',
-                                                borderRadius: 1,
-                                                flex: '1 1 45%',
-                                            }}
-                                        >
-                                            <Typography variant="caption" color="primary" sx={{ fontWeight: 600, display: 'block', mb: 0.5 }}>
-                                                {t(annotation.text, { defaultValue: annotation.text })}
-                                            </Typography>
-                                        </Paper>
-                                    ))}
-                                </Box>
-                            )}
                         </Box>
                     </Box>
                 </Box>
