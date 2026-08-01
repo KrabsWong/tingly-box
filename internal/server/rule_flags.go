@@ -173,7 +173,22 @@ func ResolveRuleFlagsWithScenario(
 	// Messages methods read it and add the context-1m beta per request.
 	applyContext1M(c, flags)
 
+	// Attach the claude_org_id hint the same way: NewClaudeClient reads it per
+	// request and decides whether/what anthropic-organization-id to send.
+	applyClaudeOrgID(c, flags)
+
 	return flags
+}
+
+// applyClaudeOrgID attaches the claude_org_id flag to the request context so
+// NewClaudeClient can resolve it when composing the anthropic-organization-id
+// header. No-op when the flag is empty, so no organization header is sent —
+// organization attribution is opt-in (see typ.RuleFlags.ClaudeOrgID).
+func applyClaudeOrgID(c *gin.Context, flags typ.RuleFlags) {
+	if flags.ClaudeOrgID == "" || c == nil || c.Request == nil {
+		return
+	}
+	c.Request = c.Request.WithContext(typ.WithClaudeOrgID(c.Request.Context(), flags.ClaudeOrgID))
 }
 
 // applyContext1M attaches the 1M-context hint to the request context so the
