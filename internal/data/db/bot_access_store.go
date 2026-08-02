@@ -655,6 +655,37 @@ func (s *BotAccessStore) RemoveGroupActor(ctx context.Context, botUUID, groupID,
 	})
 }
 
+func routeTargetBotUUID(tx *gorm.DB, target access.TargetRef) (string, error) {
+	var botUUID string
+	var err error
+	switch target.Kind {
+	case access.TargetDirectChat:
+		err = tx.Model(&remoteDirectChatRecord{}).Select("bot_uuid").Where("id = ?", target.ID).Scan(&botUUID).Error
+	case access.TargetGroup:
+		err = tx.Model(&remoteGroupRecord{}).Select("bot_uuid").Where("id = ?", target.ID).Scan(&botUUID).Error
+	default:
+		return "", ErrAccessTargetNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if botUUID == "" {
+		return "", ErrAccessTargetNotFound
+	}
+	return botUUID, nil
+}
+
+func grantRouteNotify(tx *gorm.DB, target access.TargetRef, now time.Time) error {
+	if target.Kind == access.TargetDirectChat {
+		if err := putDirectPermission(tx, target.ID, access.CapabilityNotify, access.ActionAccess, access.EffectAllow); err != nil {
+			return err
+		}
+		return putDirectPermission(tx, target.ID, access.CapabilityNotify, access.ActionNotifyReceive, access.EffectAllow)
+	}
+	row := groupCapabilityAccessRecord{GroupID: target.ID, Capability: string(access.CapabilityNotify), Effect: string(access.EffectAllow), UpdatedAt: now}
+	return tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&row).Error
+}
+
 func (s *BotAccessStore) CreateRoute(ctx context.Context, route access.Route, grantNotify bool) (access.Route, error) {
 	if route.ID == "" {
 		route.ID = uuid.NewString()
@@ -663,21 +694,9 @@ func (s *BotAccessStore) CreateRoute(ctx context.Context, route access.Route, gr
 	route.CreatedAt = now
 	route.UpdatedAt = now
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var targetBot string
-		switch route.Target.Kind {
-		case access.TargetDirectChat:
-			if err := tx.Model(&remoteDirectChatRecord{}).Select("bot_uuid").Where("id = ?", route.Target.ID).Scan(&targetBot).Error; err != nil {
-				return err
-			}
-		case access.TargetGroup:
-			if err := tx.Model(&remoteGroupRecord{}).Select("bot_uuid").Where("id = ?", route.Target.ID).Scan(&targetBot).Error; err != nil {
-				return err
-			}
-		default:
-			return ErrAccessTargetNotFound
-		}
-		if targetBot == "" {
-			return ErrAccessTargetNotFound
+		targetBot, err := routeTargetBotUUID(tx, route.Target)
+		if err != nil {
+			return err
 		}
 		if targetBot != route.BotUUID {
 			return ErrCrossBotTarget
@@ -694,14 +713,7 @@ func (s *BotAccessStore) CreateRoute(ctx context.Context, route access.Route, gr
 		if !grantNotify {
 			return nil
 		}
-		if route.Target.Kind == access.TargetDirectChat {
-			if err := putDirectPermission(tx, route.Target.ID, access.CapabilityNotify, access.ActionAccess, access.EffectAllow); err != nil {
-				return err
-			}
-			return putDirectPermission(tx, route.Target.ID, access.CapabilityNotify, access.ActionNotifyReceive, access.EffectAllow)
-		}
-		r := groupCapabilityAccessRecord{GroupID: route.Target.ID, Capability: string(access.CapabilityNotify), Effect: string(access.EffectAllow), UpdatedAt: now}
-		return tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&r).Error
+		return grantRouteNotify(tx, route.Target, now)
 	})
 	return route, err
 }
@@ -721,21 +733,9 @@ func (s *BotAccessStore) UpdateRoute(ctx context.Context, route access.Route, gr
 			return err
 		}
 
-		var targetBot string
-		switch route.Target.Kind {
-		case access.TargetDirectChat:
-			if err := tx.Model(&remoteDirectChatRecord{}).Select("bot_uuid").Where("id = ?", route.Target.ID).Scan(&targetBot).Error; err != nil {
-				return err
-			}
-		case access.TargetGroup:
-			if err := tx.Model(&remoteGroupRecord{}).Select("bot_uuid").Where("id = ?", route.Target.ID).Scan(&targetBot).Error; err != nil {
-				return err
-			}
-		default:
-			return ErrAccessTargetNotFound
-		}
-		if targetBot == "" {
-			return ErrAccessTargetNotFound
+		targetBot, err := routeTargetBotUUID(tx, route.Target)
+		if err != nil {
+			return err
 		}
 		if targetBot != route.BotUUID {
 			return ErrCrossBotTarget
@@ -759,18 +759,8 @@ func (s *BotAccessStore) UpdateRoute(ctx context.Context, route access.Route, gr
 			return err
 		}
 		if grantNotify {
-			if route.Target.Kind == access.TargetDirectChat {
-				if err := putDirectPermission(tx, route.Target.ID, access.CapabilityNotify, access.ActionAccess, access.EffectAllow); err != nil {
-					return err
-				}
-				if err := putDirectPermission(tx, route.Target.ID, access.CapabilityNotify, access.ActionNotifyReceive, access.EffectAllow); err != nil {
-					return err
-				}
-			} else {
-				r := groupCapabilityAccessRecord{GroupID: route.Target.ID, Capability: string(access.CapabilityNotify), Effect: string(access.EffectAllow), UpdatedAt: now}
-				if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&r).Error; err != nil {
-					return err
-				}
+			if err := grantRouteNotify(tx, route.Target, now); err != nil {
+				return err
 			}
 		}
 		updated = routeFromRecord(current)

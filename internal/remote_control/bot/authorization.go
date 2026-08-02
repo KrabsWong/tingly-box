@@ -21,10 +21,11 @@ type AccessStore interface {
 }
 
 func isPairingBootstrap(msg imbot.Message) bool {
-	return msg.IsDirectMessage() && msg.IsTextContent() && func() bool {
-		t := strings.TrimSpace(msg.GetText())
-		return t == "/bind" || strings.HasPrefix(t, "/bind ") || strings.HasPrefix(t, "/bind\t")
-	}()
+	if !msg.IsDirectMessage() || !msg.IsTextContent() {
+		return false
+	}
+	t := strings.TrimSpace(msg.GetText())
+	return t == "/bind" || strings.HasPrefix(t, "/bind ") || strings.HasPrefix(t, "/bind\t")
 }
 
 func inboundAction(msg imbot.Message, pendingCapability access.CapabilityName, pendingAction access.ActionName) (access.CapabilityName, access.ActionName) {

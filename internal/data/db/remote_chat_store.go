@@ -324,22 +324,11 @@ func (s *RemoteChatStore) DeleteChat(chatID string) error {
 	return nil
 }
 
-// setFlagViaUpdate is the shared "load a chat in a transaction, apply a flag
-// mutation, write it back" body every no-op-on-missing-chat flag setter uses.
-// It is the UpdateChat-backed counterpart of mutate(): mutate auto-creates a
-// missing chat, this does not — that is the deliberate contract that
-// ClearPaired/RemoveFromWhitelist/SetChatDisabled share and SetPaired/
-// AddToWhitelist/BindProject do not. Centralizing it here stops each new flag
-// setter from re-copying the transaction/timestamp-reset details.
-func (s *RemoteChatStore) setFlagViaUpdate(chatID string, apply func(*Chat)) error {
-	return s.UpdateChat(chatID, apply)
-}
-
 // SetChatDisabled toggles the inbound blocklist flag. A missing chat is a
 // no-op (there is nothing to block; the flag would be erased by the next
 // auto-create anyway).
 func (s *RemoteChatStore) SetChatDisabled(chatID string, disabled bool) error {
-	return s.setFlagViaUpdate(chatID, func(chat *Chat) {
+	return s.UpdateChat(chatID, func(chat *Chat) {
 		chat.Disabled = disabled
 		if disabled {
 			chat.DisabledAt = time.Now().UTC()
@@ -491,7 +480,7 @@ func (s *RemoteChatStore) AddToWhitelist(chatID, platform, addedBy string) error
 
 // RemoveFromWhitelist clears a chat's whitelist flag.
 func (s *RemoteChatStore) RemoveFromWhitelist(chatID string) error {
-	return s.setFlagViaUpdate(chatID, func(chat *Chat) {
+	return s.UpdateChat(chatID, func(chat *Chat) {
 		chat.IsWhitelisted = false
 	})
 }
@@ -572,7 +561,7 @@ func (s *RemoteChatStore) SetPaired(chatID, platform, botUUID, senderID string) 
 // ClearPaired removes any pairing recorded on the chat, preserving the rest of
 // its state.
 func (s *RemoteChatStore) ClearPaired(chatID string) error {
-	return s.setFlagViaUpdate(chatID, func(chat *Chat) {
+	return s.UpdateChat(chatID, func(chat *Chat) {
 		chat.IsPaired = false
 		chat.PairedBotUUID = ""
 		chat.PairedSenderID = ""
