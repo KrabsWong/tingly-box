@@ -102,6 +102,20 @@ type OKResponse struct {
 	OK bool `json:"ok"`
 }
 
+func routeFromRequest(botUUID, routeID string, req RouteWriteRequest) access.Route {
+	events, _ := json.Marshal(req.Events)
+	return access.Route{
+		ID:          routeID,
+		BotUUID:     botUUID,
+		Name:        req.Name,
+		Source:      req.Source,
+		EventFilter: events,
+		Target:      access.TargetRef{Kind: req.Target.Kind, ID: req.Target.ID},
+		Enabled:     req.Enabled,
+		Options:     req.Options,
+	}
+}
+
 func (h *Handler) requireAccess(c *gin.Context) bool {
 	if h.accessStore == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "bot access store not available"})
@@ -471,8 +485,7 @@ func (h *Handler) CreateRoute(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name, source and target are required"})
 		return
 	}
-	events, _ := json.Marshal(req.Events)
-	route, err := h.accessStore.CreateRoute(c.Request.Context(), access.Route{BotUUID: c.Param("bot"), Name: req.Name, Source: req.Source, EventFilter: events, Target: access.TargetRef{Kind: req.Target.Kind, ID: req.Target.ID}, Enabled: req.Enabled, Options: req.Options}, req.GrantNotify)
+	route, err := h.accessStore.CreateRoute(c.Request.Context(), routeFromRequest(c.Param("bot"), "", req), req.GrantNotify)
 	if err != nil {
 		accessError(c, err)
 		return
@@ -488,8 +501,7 @@ func (h *Handler) UpdateRoute(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name, source and target are required"})
 		return
 	}
-	events, _ := json.Marshal(req.Events)
-	route, err := h.accessStore.UpdateRoute(c.Request.Context(), access.Route{ID: c.Param("route"), BotUUID: c.Param("bot"), Name: req.Name, Source: req.Source, EventFilter: events, Target: access.TargetRef{Kind: req.Target.Kind, ID: req.Target.ID}, Enabled: req.Enabled, Options: req.Options}, req.GrantNotify)
+	route, err := h.accessStore.UpdateRoute(c.Request.Context(), routeFromRequest(c.Param("bot"), c.Param("route"), req), req.GrantNotify)
 	if err != nil {
 		accessError(c, err)
 		return

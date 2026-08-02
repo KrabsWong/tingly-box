@@ -41,35 +41,59 @@ func NewDefaultRuntime(channels *channel2.Registry, bindings *binding.Resolver, 
 // resolver. ok=false means no binding (the source falls back); err is
 // non-nil only on store / configuration faults.
 func (r *DefaultRuntime) Resolve(_ context.Context, ev Event) (channel2.Channel, channel2.Target, bool, error) {
-	if r != nil && r.routes != nil {
-		resolved, err := r.routes.ResolveRoute(context.Background(), ev.Scenario, eventName(ev))
-		if err != nil {
-			return nil, channel2.Target{}, false, err
-		}
-		if resolved == nil {
-			return nil, channel2.Target{}, false, nil
-		}
-		if r.authorizer == nil {
-			return nil, channel2.Target{}, false, nil
-		}
-		decision := r.authorizer.Evaluate(context.Background(), access.AuthorizationRequest{BotUUID: resolved.Route.BotUUID, Target: resolved.Route.Target, Capability: access.CapabilityNotify, Action: access.ActionNotifyReceive, RouteID: resolved.Route.ID})
-		if !decision.Allowed {
-			r.Audit("bot.authorization.decision", map[string]any{"bot_uuid": resolved.Route.BotUUID, "capability": access.CapabilityNotify, "action": access.ActionNotifyReceive, "target_kind": resolved.Route.Target.Kind, "target_id": resolved.Route.Target.ID, "allowed": false, "failed_gate": decision.FailedGate, "reason": decision.Reason, "route_id": resolved.Route.ID})
-			return nil, channel2.Target{}, false, nil
-		}
-		ch, ok := r.channels.Get(resolved.Route.BotUUID)
-		if !ok || ch == nil {
-			return nil, channel2.Target{}, false, nil
-		}
-		if ev.Meta == nil {
-			ev.Meta = map[string]any{}
-		}
-		var options map[string]any
-		_ = json.Unmarshal(resolved.Route.Options, &options)
-		ev.Meta["__binding_options"] = options
-		return ch, channel2.Target{ChatID: resolved.ExternalTargetID}, true, nil
+	if r == nil {
+		return nil, channel2.Target{}, false, nil
 	}
-	if r == nil || r.bindings == nil {
+	if r.routes != nil {
+		return r.resolveRoute(ev)
+	}
+	return r.resolveBinding(ev)
+}
+
+func (r *DefaultRuntime) resolveRoute(ev Event) (channel2.Channel, channel2.Target, bool, error) {
+	resolved, err := r.routes.ResolveRoute(context.Background(), ev.Scenario, eventName(ev))
+	if err != nil {
+		return nil, channel2.Target{}, false, err
+	}
+	if resolved == nil || r.authorizer == nil {
+		return nil, channel2.Target{}, false, nil
+	}
+	decision := r.authorizer.Evaluate(context.Background(), access.AuthorizationRequest{
+		BotUUID:    resolved.Route.BotUUID,
+		Target:     resolved.Route.Target,
+		Capability: access.CapabilityNotify,
+		Action:     access.ActionNotifyReceive,
+		RouteID:    resolved.Route.ID,
+	})
+	if !decision.Allowed {
+		r.Audit("bot.authorization.decision", map[string]any{
+			"bot_uuid":    resolved.Route.BotUUID,
+			"capability":  access.CapabilityNotify,
+			"action":      access.ActionNotifyReceive,
+			"target_kind": resolved.Route.Target.Kind,
+			"target_id":   resolved.Route.Target.ID,
+			"allowed":     false,
+			"failed_gate": decision.FailedGate,
+			"reason":      decision.Reason,
+			"route_id":    resolved.Route.ID,
+		})
+		return nil, channel2.Target{}, false, nil
+	}
+	ch, ok := r.channels.Get(resolved.Route.BotUUID)
+	if !ok || ch == nil {
+		return nil, channel2.Target{}, false, nil
+	}
+	if ev.Meta == nil {
+		ev.Meta = map[string]any{}
+	}
+	var options map[string]any
+	_ = json.Unmarshal(resolved.Route.Options, &options)
+	ev.Meta["__binding_options"] = options
+	return ch, channel2.Target{ChatID: resolved.ExternalTargetID}, true, nil
+}
+
+func (r *DefaultRuntime) resolveBinding(ev Event) (channel2.Channel, channel2.Target, bool, error) {
+	if r.bindings == nil {
 		return nil, channel2.Target{}, false, nil
 	}
 	event := eventName(ev)

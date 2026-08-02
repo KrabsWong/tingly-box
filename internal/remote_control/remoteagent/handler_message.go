@@ -91,15 +91,15 @@ func (h *BotHandler) HandleMessage(msg imbot.Message, platform imbot.Platform, b
 
 	text := hCtx.Text()
 	logrus.Debugf("Text content: text_len=%d, text=%q", len(text), text)
-	if hCtx.Text() == "" {
+	if text == "" {
 		logrus.Warn("Text content is empty, returning")
 		return
 	}
 
 	// Check for stop commands FIRST (highest priority)
 	// Supports: /stop, stop, /clear (stop+clear)
-	if isStopCommand(hCtx.Text()) {
-		h.handleStopCommand(hCtx, hCtx.Text() == "/clear")
+	if isStopCommand(text) {
+		h.handleStopCommand(hCtx, text == "/clear")
 		return
 	}
 
@@ -110,8 +110,8 @@ func (h *BotHandler) HandleMessage(msg imbot.Message, platform imbot.Platform, b
 	// look like slash commands but they're really handoff sugar. Without
 	// this check they'd fall to handleSlashCommands → "Unknown command"
 	// since the registry doesn't (and shouldn't) own them.
-	if _, isHandoff, _ := smart_guide.DetectHandoffCommand(hCtx.Text()); isHandoff {
-		if routeErr := h.routeToAgent(hCtx, hCtx.Text()); routeErr != nil {
+	if _, isHandoff, _ := smart_guide.DetectHandoffCommand(text); isHandoff {
+		if routeErr := h.routeToAgent(hCtx, text); routeErr != nil {
 			logrus.WithError(routeErr).Error("Failed to route handoff command")
 			h.SendText(hCtx, executionErrorMessage(routeErr))
 		}
@@ -119,7 +119,7 @@ func (h *BotHandler) HandleMessage(msg imbot.Message, platform imbot.Platform, b
 	}
 
 	// Handle commands
-	if strings.HasPrefix(hCtx.Text(), "/") {
+	if strings.HasPrefix(text, "/") {
 		h.handleSlashCommands(hCtx)
 		return
 	}
@@ -138,7 +138,7 @@ func (h *BotHandler) HandleMessage(msg imbot.Message, platform imbot.Platform, b
 	// NEW: Route all messages through agent router
 	// The router now defaults to @tb (Smart Guide) for new users
 	// Smart Guide can help with navigation, project setup, and handoff to @cc
-	if routeErr := h.routeToAgent(hCtx, hCtx.Text()); routeErr != nil {
+	if routeErr := h.routeToAgent(hCtx, text); routeErr != nil {
 		logrus.WithError(routeErr).Error("Failed to route to agent")
 		h.SendText(hCtx, executionErrorMessage(routeErr))
 	}
@@ -187,7 +187,8 @@ func (h *BotHandler) handlePairingGate(hCtx HandlerContext) bool {
 		return false
 	}
 	if isBindCommand(hCtx.Text()) {
-		return false // fall through; the /bind handler verifies the code
+		// Fall through so the /bind handler can verify the code.
+		return false
 	}
 	h.auditWarn("imbot.pair.unpaired_message", hCtx.Message.Sender.ID,
 		"rejected unpaired direct message", map[string]interface{}{
