@@ -65,7 +65,7 @@ import QQPage from './pages/bots/QQPage';
 import DiscordPage from './pages/bots/DiscordPage';
 import SlackPage from './pages/bots/SlackPage';
 import BotOverviewPage from './pages/bots/BotOverviewPage';
-import RemoteAgentPage from './pages/remote-agent/RemoteAgentPage';
+import RemoteAgentPage, { RemoteAgentEntryRedirect } from './pages/remote-agent/RemoteAgentPage';
 import NotifyPage from './pages/notify/NotifyPage';
 import MCPLocalMode from './pages/mcp/MCPLocalMode';
 import MCPRegisteredServers from './pages/mcp/MCPRegisteredServers';
@@ -267,10 +267,10 @@ function AppContent() {
                         platform selection is an in-page picker (RemoteAgentPage) instead
                         of a route per platform in the sidebar. The routes themselves are
                         unchanged, so deep links and the bot table purpose chip still work. */}
-                    <Route path="/remote-agent" element={<Navigate to="/remote-agent/weixin" replace />} />
+                    <Route path="/remote-agent" element={<RemoteAgentEntryRedirect />} />
                     <Route path="/remote-agent/:platform" element={<RemoteAgentPage />} />
                     {/* Back-compat: old /remote-control/* (the pre-split combined pages) → /remote-agent/* */}
-                    <Route path="/remote-control" element={<Navigate to="/remote-agent/weixin" replace />} />
+                    <Route path="/remote-control" element={<Navigate to="/remote-agent" replace />} />
                     <Route path="/remote-control/*" element={<LegacyBotSectionRedirect />} />
                     {/* Guardrails */}
                     <Route path="/guardrails" element={<GuardrailsPage />} />
