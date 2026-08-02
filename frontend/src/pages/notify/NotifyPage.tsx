@@ -7,7 +7,7 @@ import BotNotifyGroup from '@/components/notify/BotNotifyGroup';
 import { PlatformPicker } from '@/components/bot';
 import { ListAlt } from '@/components/icons';
 import { BOT_PLATFORM_IDS, PLATFORM_BRAND_ICONS, platformDisplayName } from '@/constants/platformGuides';
-import { api } from '@/services/api';
+import { api, enrichBotsWithCapabilities } from '@/services/api';
 import type { BotSettings } from '@/types/bot';
 import { capabilityEnabled, countBotsByPlatform } from '@/types/bot';
 import { notify } from '@/utils/notify';
@@ -40,15 +40,7 @@ const NotifyPage = () => {
             setLoading(true);
             const data = await api.getImBotSettingsList();
             if (data?.success && Array.isArray(data.settings)) {
-                const enriched = await Promise.all(data.settings.map(async (bot: BotSettings) => {
-                    try {
-                        const result = await api.listBotCapabilities(bot.uuid!);
-                        return {...bot, capabilities: result.capabilities || []};
-                    } catch {
-                        return {...bot, capabilities: []};
-                    }
-                }));
-                setBots(enriched);
+                setBots(await enrichBotsWithCapabilities(data.settings));
             }
         } catch (err) {
             console.error('Failed to load bot settings:', err);

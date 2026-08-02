@@ -4,7 +4,7 @@ import EmptyState from '@/components/EmptyState';
 import GuideAction from '@/components/GuideAction';
 import { PageLayout } from '@/components/PageLayout';
 import UnifiedCard from '@/components/UnifiedCard';
-import { api } from '@/services/api';
+import { api, enrichBotsWithCapabilities } from '@/services/api';
 import { usePlatformGuide } from '@/constants/platformGuides';
 import { useProfileContext } from '@/contexts/ProfileContext';
 import type { BotSettings } from '@/types/bot';
@@ -77,8 +77,7 @@ const PlatformRemoteAgentPage = ({ platformId, platformName, platformPicker }: P
         try {
             const data = await api.getImBotSettingsList();
             if (data?.success && Array.isArray(data.settings)) {
-				const enriched=await Promise.all(data.settings.map(async(bot:BotSettings)=>{try{const result=await api.listBotCapabilities(bot.uuid!);return {...bot,capabilities:result.capabilities||[]}}catch{return {...bot,capabilities:[]}}}));
-				setBots(enriched);
+                setBots(await enrichBotsWithCapabilities(data.settings));
             } else if (data?.success === false) {
                 showNotification(data.error || t('remoteControl.notify.loadFailed', { defaultValue: 'Failed to load bot settings' }), 'error');
             }
@@ -109,8 +108,8 @@ const PlatformRemoteAgentPage = ({ platformId, platformName, platformPicker }: P
         try {
             // Capability lifecycle is reconciled server-side: enabling Remote
             // starts the Bot; disabling the last capability turns it off.
-			const result = await api.setBotCapability(bot.uuid, 'remote_control', enabled);
-			if (result?.capability) {
+            const result = await api.setBotCapability(bot.uuid, 'remote_control', enabled);
+            if (result?.capability) {
                 showNotification(
                     enabled
                         ? t('remoteControl.notify.remoteAgentOn', { defaultValue: 'Remote Control enabled' })
@@ -122,7 +121,7 @@ const PlatformRemoteAgentPage = ({ platformId, platformName, platformPicker }: P
                 showNotification(result?.error || t('remoteControl.notify.toggleFailedGeneric', { defaultValue: 'Failed to toggle bot' }), 'error');
             }
         } catch (err) {
-			console.error('Failed to toggle Remote Control capability:', err);
+            console.error('Failed to toggle Remote Control capability:', err);
             showNotification(
                 err instanceof Error && err.message
                     ? err.message

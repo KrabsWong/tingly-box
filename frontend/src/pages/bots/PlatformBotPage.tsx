@@ -3,7 +3,7 @@ import EmptyState from '@/components/EmptyState';
 import { PageLayout } from '@/components/PageLayout';
 import CollapsibleGuide from '@/components/remote-control/CollapsibleGuide';
 import UnifiedCard from '@/components/UnifiedCard';
-import { api } from '@/services/api';
+import { api, enrichBotsWithCapabilities } from '@/services/api';
 import type { BotSettings } from '@/types/bot';
 import { useBotToggle } from '@/hooks/useBotToggle';
 import { Add } from '@/components/icons';
@@ -65,8 +65,7 @@ const PlatformBotPage = ({ platformId, platformName, platformGuide }: PlatformBo
             setBotLoading(true);
             const data = await api.getImBotSettingsList();
             if (data?.success && Array.isArray(data.settings)) {
-				const enriched=await Promise.all(data.settings.map(async(bot:BotSettings)=>{try{const result=await api.listBotCapabilities(bot.uuid!);return {...bot,capabilities:result.capabilities||[]}}catch{return {...bot,capabilities:[]}}}));
-				setBots(enriched);
+                setBots(await enrichBotsWithCapabilities(data.settings));
             } else if (data?.success === false) {
                 showNotification(data.error || t('remoteControl.notify.loadFailed', { defaultValue: 'Failed to load bot settings' }), 'error');
             }

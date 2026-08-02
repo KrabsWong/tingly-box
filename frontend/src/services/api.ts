@@ -2,7 +2,7 @@
 
 import TinglyService from "@/bindings";
 import type {components} from '@/client';
-import type {BotChat} from '@/types/bot';
+import type {BotChat, BotSettings} from '@/types/bot';
 import {getApiBaseUrl} from '../utils/protocol';
 import {
     controlApi,
@@ -85,6 +85,23 @@ async function botAccessAPI(path: string, options: RequestInit = {}): Promise<an
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `request failed (${response.status})`);
     return data;
+}
+
+const listBotCapabilities = (botUUID: string) =>
+    botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/capabilities`);
+
+// Capability records are exposed separately from the generated bot settings
+// model. Keep the join in one place so every bot surface gets the same
+// per-bot failure fallback while SDK codegen catches up.
+export async function enrichBotsWithCapabilities(bots: BotSettings[]): Promise<BotSettings[]> {
+    return Promise.all(bots.map(async (bot) => {
+        try {
+            const result = await listBotCapabilities(bot.uuid!);
+            return {...bot, capabilities: result.capabilities || []};
+        } catch {
+            return {...bot, capabilities: []};
+        }
+    }));
 }
 
 export const api = {
@@ -1531,8 +1548,7 @@ export const api = {
         }
     },
 
-    listBotCapabilities: (botUUID: string) =>
-        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/capabilities`),
+    listBotCapabilities,
     setBotCapability: (botUUID: string, capability: 'notify' | 'remote_control', enabled: boolean) =>
         botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/capabilities/${capability}`, {
             method: 'PUT', body: JSON.stringify({enabled, config: {}}),

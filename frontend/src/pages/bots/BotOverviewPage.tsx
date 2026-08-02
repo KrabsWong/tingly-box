@@ -4,7 +4,7 @@ import { PageLayout } from '@/components/PageLayout';
 import UnifiedCard from '@/components/UnifiedCard';
 import CollapsibleGuide from '@/components/remote-control/CollapsibleGuide';
 import { BOT_PLATFORM_IDS, PLATFORM_BRAND_ICONS, platformDisplayName, usePlatformGuide } from '@/constants/platformGuides';
-import { api } from '@/services/api';
+import { api, enrichBotsWithCapabilities } from '@/services/api';
 import { countBotsByPlatform } from '@/types/bot';
 import type { BotSettings } from '@/types/bot';
 import { useBotToggle } from '@/hooks/useBotToggle';
@@ -34,7 +34,7 @@ const BotOverviewPage = () => {
     const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
     const [dialogEditUuid, setDialogEditUuid] = useState<string | null>(null);
     const [dialogPlatformId, setDialogPlatformId] = useState('telegram');
-	const [accessBot,setAccessBot]=useState<BotSettings|null>(null);
+    const [accessBot, setAccessBot] = useState<BotSettings | null>(null);
 
     const [botLoading, setBotLoading] = useState(true);
     const [restartingBotUuid, setRestartingBotUuid] = useState<string | null>(null);
@@ -54,10 +54,7 @@ const BotOverviewPage = () => {
             setBotLoading(true);
             const data = await api.getImBotSettingsList();
             if (data?.success && Array.isArray(data.settings)) {
-				const enriched=await Promise.all(data.settings.map(async(bot:BotSettings)=>{
-					try{const result=await api.listBotCapabilities(bot.uuid!);return {...bot,capabilities:result.capabilities||[]}}catch{return {...bot,capabilities:[]}}
-				}));
-				setBots(enriched);
+                setBots(await enrichBotsWithCapabilities(data.settings));
             } else if (data?.success === false) {
                 showNotification(data.error || t('remoteControl.notify.loadFailed', { defaultValue: 'Failed to load bot settings' }), 'error');
             }
@@ -222,7 +219,7 @@ const BotOverviewPage = () => {
                         onRestart={(uuid) => handleBotRestart(uuid)}
                         isToggling={isToggling}
                         isRestarting={(uuid) => restartingBotUuid === uuid}
-						onManageAccess={(bot)=>setAccessBot(bot)}
+                        onManageAccess={setAccessBot}
                     />
                 )}
             </UnifiedCard>
@@ -247,7 +244,12 @@ const BotOverviewPage = () => {
                 onSaved={loadBotSettings}
                 notify={showNotification}
             />
-			<BotAccessDialog open={Boolean(accessBot)} bot={accessBot} onClose={()=>setAccessBot(null)} onChanged={loadBotSettings}/>
+            <BotAccessDialog
+                open={Boolean(accessBot)}
+                bot={accessBot}
+                onClose={() => setAccessBot(null)}
+                onChanged={loadBotSettings}
+            />
             <Snackbar
                 open={snackbar.open}
                 autoHideDuration={snackbar.severity === 'error' ? null : 4000}

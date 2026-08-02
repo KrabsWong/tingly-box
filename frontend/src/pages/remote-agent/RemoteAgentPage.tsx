@@ -3,9 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { useEffect, useMemo, useState } from 'react';
 import { PlatformPicker } from '@/components/bot';
 import { BOT_PLATFORM_IDS, PLATFORM_BRAND_ICONS, platformDisplayName, usePlatformGuide } from '@/constants/platformGuides';
-import { api } from '@/services/api';
+import { api, enrichBotsWithCapabilities } from '@/services/api';
 import { capabilityEnabled, countBotsByPlatform } from '@/types/bot';
-import type {BotSettings} from '@/types/bot';
 import PlatformRemoteAgentPage from './PlatformRemoteAgentPage';
 import {
     getRemoteAgentLandingPlatform,
@@ -67,14 +66,7 @@ const RemoteAgentPage = () => {
         let cancelled = false;
         api.getImBotSettingsList().then(async (data) => {
             if (cancelled || !data?.success || !Array.isArray(data.settings)) return;
-            const bots = await Promise.all(data.settings.map(async (bot: BotSettings) => {
-                try {
-                    const result = await api.listBotCapabilities(bot.uuid!);
-                    return {...bot, capabilities: result.capabilities || []};
-                } catch {
-                    return {...bot, capabilities: []};
-                }
-            }));
+            const bots = await enrichBotsWithCapabilities(data.settings);
             if (cancelled) return;
             setCounts(countBotsByPlatform(bots, (bot) => Boolean(bot.enabled) && capabilityEnabled(bot, 'remote_control')));
         }).catch(() => {});
@@ -96,7 +88,7 @@ const RemoteAgentPage = () => {
     const platformPicker = (
         <PlatformPicker
                 items={pickerItems}
-                value={BOT_PLATFORM_IDS.includes(platform as typeof BOT_PLATFORM_IDS[number]) ? platform : ''}
+                value={platform}
                 onChange={(next) => {
                     rememberPlatform(next);
                     navigate(`/remote-agent/${next}`);
