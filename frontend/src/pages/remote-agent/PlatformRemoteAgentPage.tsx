@@ -13,11 +13,13 @@ import type { Provider } from '@/types/provider';
 import { Add } from '@/components/icons';
 import { Alert, Box, Button, CircularProgress, Snackbar } from '@mui/material';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface PlatformRemoteAgentPageProps {
     platformId: string;
     platformName: string;
+    platformPicker?: ReactNode;
 }
 
 // PlatformRemoteAgentPage is the PURPOSE page, deliberately mirroring the
@@ -26,7 +28,7 @@ interface PlatformRemoteAgentPageProps {
 // same bots' Remote Agent configuration — mount switch, SmartGuide model,
 // and its agent routing. Access is managed from the graph; connection and
 // advanced command policy remain in the shared Bot edit dialog.
-const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAgentPageProps) => {
+const PlatformRemoteAgentPage = ({ platformId, platformName, platformPicker }: PlatformRemoteAgentPageProps) => {
     const { t } = useTranslation();
     const guideConfig = usePlatformGuide(platformId);
 
@@ -216,33 +218,23 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
     }, [loadBots, showNotification, t]);
 
     return (
-        <PageLayout loading={false}>
-            {/* Same platform setup guide as the Bots page — mirrored sections
-                share the education. Gated on !loading so defaultExpanded locks
-                in against the real bot count. */}
-            {!loading && guideConfig?.guide && (
-                <CollapsibleGuide
-                    platformName={platformName}
-                    platformGuide={guideConfig.guide}
-                    defaultExpanded={filteredBots.length === 0}
-                />
-            )}
+        <PageLayout
+            loading={false}
+            title={t('remoteAgent.pageTitle', {defaultValue: 'Remote Control'})}
+            subtitle={t('remoteAgent.pageSubtitle', {defaultValue: 'Choose who can control each bot and where chat commands route.'})}
+            rightAction={
+                <Button variant="contained" startIcon={<Add/>} onClick={openAddDialog} size="small">
+                    {t('remoteControl.bots.addBot', {defaultValue: 'Connect a bot'})}
+                </Button>
+            }
+        >
+            {platformPicker}
             <UnifiedCard
-                title={t('remoteAgent.title', { defaultValue: '{{platform}} Remote Control', platform: platformName })}
-                titleHeadingLevel={1}
-                subtitle={t('remoteAgent.subtitle', { defaultValue: 'Mount {{platform}} bots to drive Claude Code / SmartGuide from chat, and configure how the agent behaves. Bot connections are managed on the Bots page.', platform: platformName })}
+                title={t('remoteAgent.routesTitle', { defaultValue: '{{platform}} routes', platform: platformName })}
+                titleHeadingLevel={2}
+                subtitle={t('remoteAgent.routesSubtitle', { defaultValue: 'Access → Bot → Agent. Click a node to change that part of the route.' })}
                 size="full"
                 sx={{ mb: 2 }}
-                rightAction={
-                    <Button
-                        variant="contained"
-                        startIcon={<Add />}
-                        onClick={openAddDialog}
-                        size="small"
-                    >
-                        {t('remoteControl.bots.addBot', { defaultValue: 'Add Bot' })}
-                    </Button>
-                }
             >
                 {loading ? (
                     <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -279,6 +271,13 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
                     </Box>
                 )}
             </UnifiedCard>
+            {!loading && guideConfig?.guide && (
+                <CollapsibleGuide
+                    platformName={platformName}
+                    platformGuide={guideConfig.guide}
+                    defaultExpanded={filteredBots.length === 0}
+                />
+            )}
             {/* Shared bot-resource dialog: add/edit a bot without leaving this page */}
             <BotConfigDialog
                 open={dialogOpen}

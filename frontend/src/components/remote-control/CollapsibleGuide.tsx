@@ -1,6 +1,5 @@
 import { KeyboardArrowDown, KeyboardArrowUp } from '@/components/icons';
-import { Alert, Box, Button, Stack, Typography } from '@mui/material';
-import UnifiedCard from '@/components/UnifiedCard';
+import { Box, Button, Card, Collapse, Divider, Stack, Typography } from '@mui/material';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -21,48 +20,18 @@ const CollapsibleGuide: React.FC<CollapsibleGuideProps> = ({ platformName, platf
     };
 
     return (
-        <UnifiedCard
-            title={t('remoteControl.guide.title', { defaultValue: '{{platform}} Setup Guide', platform: platformName })}
-            size="full"
-            sx={{ mb: 2 }}
-        >
-            {/* Guide content with preview mode */}
-            <Box
-                sx={{
-                    maxHeight: expanded ? 'none' : '120px',
-                    overflow: 'hidden',
-                    position: 'relative',
-                    transition: 'max-height 0.3s ease-in-out',
-                }}
-            >
-                <Stack spacing={2}>
-                    {platformGuide}
-                </Stack>
-
-                {/* Fade overlay when collapsed */}
-                {!expanded && (
-                    <Box
-                        sx={{
-                            position: 'absolute',
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            height: '30px',
-                            background: 'linear-gradient(to bottom, transparent, var(--mui-palette-background-paper))',
-                            pointerEvents: 'none',
-                        }}
-                    />
-                )}
-            </Box>
-
-            {/* Expand/Collapse Button */}
-            <Box
-                sx={{
-                    display: 'flex',
-                    justifyContent: 'center',
-                    mt: 2,
-                }}
-            >
+        <Card variant="outlined" sx={{mb: 2, borderRadius: 2, boxShadow: 'none'}}>
+            <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, px: 2, py: 1.25}}>
+                <Box sx={{minWidth: 0}}>
+                    <Typography variant="body2" sx={{fontWeight: 600}}>
+                        {t('remoteControl.guide.title', { defaultValue: '{{platform}} Setup Guide', platform: platformName })}
+                    </Typography>
+                    {!expanded && (
+                        <Typography variant="caption" color="text.secondary">
+                            {t('remoteControl.guide.collapsedHint', {defaultValue: 'Connection steps, credentials, and examples'})}
+                        </Typography>
+                    )}
+                </Box>
                 <Button
                     onClick={handleToggle}
                     size="small"
@@ -79,7 +48,13 @@ const CollapsibleGuide: React.FC<CollapsibleGuideProps> = ({ platformName, platf
                         : t('remoteControl.guide.showMore', { defaultValue: 'Show More' })}
                 </Button>
             </Box>
-        </UnifiedCard>
+            <Collapse in={expanded} unmountOnExit>
+                <Divider/>
+                <Box sx={{p: 2}}>
+                    <Stack spacing={2}>{platformGuide}</Stack>
+                </Box>
+            </Collapse>
+        </Card>
     );
 };
 

@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { PlatformPicker } from '@/components/bot';
 import { BOT_PLATFORM_IDS, PLATFORM_BRAND_ICONS, platformDisplayName, usePlatformGuide } from '@/constants/platformGuides';
 import { api } from '@/services/api';
-import { countBotsByPlatform } from '@/types/bot';
+import { capabilityEnabled, countBotsByPlatform } from '@/types/bot';
+import type {BotSettings} from '@/types/bot';
 import PlatformRemoteAgentPage from './PlatformRemoteAgentPage';
 
 // RemoteAgentPage is the nav-facing entry for the Remote Control purpose:
@@ -25,9 +26,18 @@ const RemoteAgentPage = () => {
     const [counts, setCounts] = useState<Record<string, { active: number; total: number }>>({});
     useEffect(() => {
         let cancelled = false;
-        api.getImBotSettingsList().then((data) => {
+        api.getImBotSettingsList().then(async (data) => {
             if (cancelled || !data?.success || !Array.isArray(data.settings)) return;
-            setCounts(countBotsByPlatform(data.settings));
+            const bots = await Promise.all(data.settings.map(async (bot: BotSettings) => {
+                try {
+                    const result = await api.listBotCapabilities(bot.uuid!);
+                    return {...bot, capabilities: result.capabilities || []};
+                } catch {
+                    return {...bot, capabilities: []};
+                }
+            }));
+            if (cancelled) return;
+            setCounts(countBotsByPlatform(bots, (bot) => Boolean(bot.enabled) && capabilityEnabled(bot, 'remote_control')));
         }).catch(() => {});
         return () => { cancelled = true; };
     }, [platform]);
@@ -38,20 +48,26 @@ const RemoteAgentPage = () => {
         return {
             id,
             label: platformDisplayName(id, t),
-            icon: (active: boolean) => <BrandIcon size={20} grayscale={!active} />,
+            icon: <BrandIcon size={20} grayscale/>,
+            activeIcon: <BrandIcon size={20} grayscale={false}/>,
             subtitle: c && c.total > 0 ? t('bots.activeCount', { defaultValue: 'active {{active}} / {{total}}', active: c.active, total: c.total }) : undefined,
         };
     }), [t, counts]);
 
-    return (
-        <>
-            <PlatformPicker
+    const platformPicker = (
+        <PlatformPicker
                 items={pickerItems}
                 value={BOT_PLATFORM_IDS.includes(platform as typeof BOT_PLATFORM_IDS[number]) ? platform : ''}
                 onChange={(next) => navigate(`/remote-agent/${next}`)}
-            />
-            <PlatformRemoteAgentPage platformId={platform} platformName={platformName} />
-        </>
+        />
+    );
+
+    return (
+        <PlatformRemoteAgentPage
+            platformId={platform}
+            platformName={platformName}
+            platformPicker={platformPicker}
+        />
     );
 };
 

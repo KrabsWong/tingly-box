@@ -41,6 +41,21 @@ export interface BotGroup { id:string; bot_uuid:string; platform:string; externa
 export interface BotGroupDetail { group:BotGroup; capabilities:Partial<Record<CapabilityName,AccessEffect>>; actors:GroupActor[]; }
 export interface AuthorizationDecision { allowed:boolean; reason:string; failed_gate?:string; facts:Record<string,unknown>; }
 
+// One concrete destination on the IM Notify work surface. Direct Chats and
+// Groups are peer resources; the UI must not force users through a chat-kind
+// mode picker before they can inspect or test them.
+export interface NotifyTarget {
+    id: string;
+    kind: 'direct_chat' | 'group';
+    external_id: string;
+    name?: string;
+    platform?: string;
+    is_paired?: boolean;
+    blocked: boolean;
+    can_notify: boolean;
+    can_reply: boolean;
+}
+
 export function capabilityEnabled(bot: BotSettings, name: CapabilityName): boolean {
     return bot.capabilities?.find((capability) => capability.capability === name)?.enabled === true;
 }
@@ -221,13 +236,16 @@ export function isNotifyMounted(scenarios?: string): boolean {
 // once, from a list it already has loaded) and the Remote Control page's
 // picker (fetched separately, since that page doesn't otherwise need the
 // full bot list).
-export function countBotsByPlatform(bots: BotSettings[]): Record<string, { active: number; total: number }> {
+export function countBotsByPlatform(
+    bots: BotSettings[],
+    isActive: (bot: BotSettings) => boolean = (bot) => Boolean(bot.enabled),
+): Record<string, { active: number; total: number }> {
     const counts: Record<string, { active: number; total: number }> = {};
     for (const bot of bots) {
         if (!bot.platform) continue;
         const slot = counts[bot.platform] ?? (counts[bot.platform] = { active: 0, total: 0 });
         slot.total++;
-        if (bot.enabled) slot.active++;
+        if (isActive(bot)) slot.active++;
     }
     return counts;
 }

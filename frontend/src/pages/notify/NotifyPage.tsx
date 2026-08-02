@@ -9,7 +9,8 @@ import { ListAlt } from '@/components/icons';
 import { BOT_PLATFORM_IDS, PLATFORM_BRAND_ICONS, platformDisplayName } from '@/constants/platformGuides';
 import { api } from '@/services/api';
 import type { BotSettings } from '@/types/bot';
-import { countBotsByPlatform } from '@/types/bot';
+import { capabilityEnabled, countBotsByPlatform } from '@/types/bot';
+import { notify } from '@/utils/notify';
 import { Stack } from '@mui/material';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -51,10 +52,11 @@ const NotifyPage = () => {
             }
         } catch (err) {
             console.error('Failed to load bot settings:', err);
+            notify.error(err instanceof Error ? err.message : t('notify.loadFailed', {defaultValue: 'Failed to load Notify targets'}));
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [t]);
 
     useEffect(() => {
         loadBots();
@@ -68,6 +70,8 @@ const NotifyPage = () => {
         try {
             await api.setBotCapability(uuid, 'notify', enabled);
             await loadBots();
+        } catch (toggleError) {
+            notify.error(toggleError instanceof Error ? toggleError.message : t('notify.toggleFailed', {defaultValue: 'Failed to update Notify'}));
         } finally {
             setToggling(null);
         }
@@ -77,7 +81,8 @@ const NotifyPage = () => {
     // uses (shared PlatformPicker component + ?platform= URL param), so Remote
     // surfaces navigate identically. Only platforms that actually have bots
     // get a tile here: this page drives existing bots, it doesn't create them.
-    const platformCounts = useMemo(() => countBotsByPlatform(bots), [bots]);
+    const isNotifyActive = useCallback((bot: BotSettings) => Boolean(bot.enabled) && capabilityEnabled(bot, 'notify'), []);
+    const platformCounts = useMemo(() => countBotsByPlatform(bots, isNotifyActive), [bots, isNotifyActive]);
 
     const pickerItems = useMemo(() => {
         // Defined inside the memo so its only dep (t) is covered by the array.
@@ -87,8 +92,9 @@ const NotifyPage = () => {
             {
                 id: 'all',
                 label: t('bots.overview.allPlatforms', { defaultValue: 'All' }),
-                icon: (active: boolean) => <ListAlt sx={{ fontSize: 20, color: active ? 'primary.main' : 'text.disabled' }} />,
-                subtitle: countLabel(bots.filter(b => b.enabled).length, bots.length),
+                icon: <ListAlt sx={{fontSize: 20, color: 'text.disabled'}}/>,
+                activeIcon: <ListAlt sx={{fontSize: 20, color: 'primary.main'}}/>,
+                subtitle: countLabel(bots.filter(isNotifyActive).length, bots.length),
             },
             ...BOT_PLATFORM_IDS.filter((id) => platformCounts[id]).map((id) => {
                 const BrandIcon = PLATFORM_BRAND_ICONS[id];
@@ -96,12 +102,13 @@ const NotifyPage = () => {
                 return {
                     id,
                     label: platformDisplayName(id, t),
-                    icon: (active: boolean) => <BrandIcon size={20} grayscale={!active} />,
+                    icon: <BrandIcon size={20} grayscale/>,
+                    activeIcon: <BrandIcon size={20} grayscale={false}/>,
                     subtitle: c ? countLabel(c.active, c.total) : undefined,
                 };
             }),
         ];
-    }, [t, bots, platformCounts]);
+    }, [t, bots, platformCounts, isNotifyActive]);
 
     const selectPlatform = useCallback((id: string) => {
         // Functional update keeps this callback stable across URL changes
@@ -120,24 +127,22 @@ const NotifyPage = () => {
     );
 
     return (
-        <PageLayout loading={loading}>
+        <PageLayout
+            loading={loading}
+            title={t('notify.title', {defaultValue: 'IM Notify'})}
+            subtitle={t('notify.subtitle', {defaultValue: 'Authorize a target, send through the production path, and see whether delivery worked.'})}
+        >
             {/* Platform picker first, guide second — same ordering as the Bots
                 overview (pick the context, then read about it). Unlike Bots,
                 the guide here is platform-agnostic API education, so it stays
                 visible in the All view too (collapsed by default). */}
             <PlatformPicker items={pickerItems} value={selectedPlatform} onChange={selectPlatform} />
-            <CollapsibleGuide
-                platformName={t('notify.title', { defaultValue: 'IM Notify' })}
-                platformGuide={<NotifyGuide />}
-            />
             <UnifiedCard
-                title={t('notify.title', { defaultValue: 'IM Notify' })}
-                subtitle={t('notify.subtitle', {
-                    defaultValue: 'Send one-way notifications to any chat your bots can reach.',
-                })}
+                title={t('notify.targetsTitle', { defaultValue: 'Delivery targets' })}
+                subtitle={t('notify.targetsSubtitle', {defaultValue: 'Direct Chats and Groups observed by your connected bots.'})}
                 size="full"
                 sx={{ mb: 2 }}
-                titleHeadingLevel={1}
+                titleHeadingLevel={2}
             >
                 {filteredBots.length === 0 ? (
                     bots.length === 0 ? (
@@ -167,6 +172,10 @@ const NotifyPage = () => {
                     </Stack>
                 )}
             </UnifiedCard>
+            <CollapsibleGuide
+                platformName={t('notify.title', { defaultValue: 'IM Notify' })}
+                platformGuide={<NotifyGuide />}
+            />
         </PageLayout>
     );
 };
