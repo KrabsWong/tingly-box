@@ -93,8 +93,7 @@ type ChatSummary struct {
 // both layers.
 type BotChatManager interface {
 	// ListChats returns the chats a bot can reach, scoped to that bot's
-	// platform (and to its chat-id lock when one is set); includeDisabled
-	// adds blocklisted chats.
+	// platform; includeDisabled adds blocklisted chats.
 	ListChats(botUUID string, includeDisabled bool) ([]ChatSummary, error)
 	// DeleteChat hard-deletes a chat record reachable by the bot.
 	DeleteChat(botUUID, chatID string) error
@@ -111,11 +110,6 @@ type BotChatManager interface {
 // chat is not in the bot's reachable set (unknown, wrong platform, or paired
 // to a different bot). Mapped to HTTP 404.
 var ErrChatNotFound = errors.New("chat not found")
-
-// ErrChatLocked is returned by BotChatManager.Delete/SetDisabled when the chat
-// is the bot's chat-id lock — its only reachable chat; deleting it is almost
-// certainly a mistake. Mapped to HTTP 409.
-var ErrChatLocked = errors.New("chat is the bot's chat-id lock")
 
 // NewBotAPIHandler builds the handler. channels and results are the same
 // registries the Claude Code scenario path uses. chats may be nil — the chat
@@ -414,7 +408,6 @@ func (h *BotAPIHandler) ListChats(c *gin.Context) {
 //
 //	200  deleted
 //	404  chat not in this bot's reachable set
-//	409  chat_id is the bot's chat-id lock (its only reachable chat)
 //	503  chat management unavailable (no deleter wired)
 func (h *BotAPIHandler) DeleteChat(c *gin.Context) {
 	botUUID := c.Param("bot")
@@ -428,10 +421,6 @@ func (h *BotAPIHandler) DeleteChat(c *gin.Context) {
 	if err := h.chats.DeleteChat(botUUID, chatID); err != nil {
 		if errors.Is(err, ErrChatNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "chat not found"})
-			return
-		}
-		if errors.Is(err, ErrChatLocked) {
-			c.JSON(http.StatusConflict, gin.H{"error": "chat is this bot's chat-id lock; unlock the bot first"})
 			return
 		}
 		logrus.WithError(err).WithFields(logrus.Fields{"bot": botUUID, "chat_id": chatID}).Warn("bot chat delete failed")

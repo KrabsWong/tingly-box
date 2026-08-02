@@ -613,20 +613,6 @@ func (h *Handler) ChatStore() (bot.ChatStoreInterface, error) {
 	return h.botMgr.ChatStore()
 }
 
-// ChatIDLock returns the chat-id lock configured for a bot (empty when none).
-// Used by the GET /bots/:bot/chats lister to scope the shared chat store to
-// the single chat a locked bot can reach.
-func (h *Handler) ChatIDLock(botUUID string) string {
-	if h.store == nil || botUUID == "" {
-		return ""
-	}
-	settings, err := h.store.GetSettingsByUUID(botUUID)
-	if err != nil {
-		return ""
-	}
-	return settings.ChatIDLock
-}
-
 // StartAllEnabled starts all enabled bots (delegates to BotManager)
 func (h *Handler) StartAllEnabled(ctx context.Context) error {
 	if h.botMgr == nil {

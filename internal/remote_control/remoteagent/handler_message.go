@@ -60,8 +60,8 @@ func (h *BotHandler) HandleMessage(msg imbot.Message, platform imbot.Platform, b
 		Message:   msg,
 	}
 
-	// Access gates: chat-id lock, then the message-shape-specific gate
-	// (pairing for a DM, whitelist for a group). handleInboundGate returns
+	// Access gates: pairing for a DM or the legacy whitelist for a group.
+	// handleInboundGate returns
 	// true when the message is rejected — a rejection reply was already sent
 	// (or, for the disabled case above, silently dropped).
 	if h.handleInboundGate(hCtx) {
@@ -144,10 +144,12 @@ func (h *BotHandler) HandleMessage(msg imbot.Message, platform imbot.Platform, b
 	}
 }
 
-// handleInboundGate runs the ordered access checks a non-callback message
-// must pass before reaching a handler: chat-id lock (DM only, unconditional),
-// then the message-shape-specific gate — pairing for a direct message,
-// whitelist for a group. Returns true when the message is rejected (a
+// handleInboundGate runs the message-shape-specific compatibility gate before
+// a non-callback message reaches the handler: pairing for a direct message or
+// the legacy whitelist for a group. Target capability access is enforced by
+// the host authorization gate; ChatIDLock is deliberately not consulted here
+// because explicit DirectChat/Group access is the sole authorization source.
+// Returns true when the message is rejected (a
 // rejection reply was already sent).
 //
 // DM and group are two explicit branches rather than one flat gate list
@@ -161,10 +163,6 @@ func (h *BotHandler) handleInboundGate(hCtx HandlerContext) bool {
 	switch {
 	case msg.IsDirectMessage():
 		logrus.Infof("Chat ID: %s", hCtx.ChatID)
-		// Chat-id lock: a locked bot accepts traffic from one chat only.
-		if h.botSetting.ChatIDLock != "" && hCtx.ChatID != h.botSetting.ChatIDLock {
-			return true
-		}
 		return h.handlePairingGate(hCtx)
 	case msg.IsGroupMessage():
 		logrus.Infof("Group chat ID: %s", hCtx.ChatID)

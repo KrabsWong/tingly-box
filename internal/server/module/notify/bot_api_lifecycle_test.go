@@ -15,10 +15,10 @@ import (
 // optional, defaulting to a no-op/false, so a test wires only the method it
 // exercises. Field names mirror the interface methods they implement.
 type fakeBotChatManager struct {
-	listChats    func(botUUID string, includeDisabled bool) ([]ChatSummary, error)
-	deleteChat   func(botUUID, chatID string) error
-	setDisabled  func(botUUID, chatID string, disabled bool) error
-	isDisabled   func(chatID string) bool
+	listChats   func(botUUID string, includeDisabled bool) ([]ChatSummary, error)
+	deleteChat  func(botUUID, chatID string) error
+	setDisabled func(botUUID, chatID string, disabled bool) error
+	isDisabled  func(chatID string) bool
 }
 
 func (f *fakeBotChatManager) ListChats(botUUID string, includeDisabled bool) ([]ChatSummary, error) {
@@ -94,17 +94,6 @@ func TestDeleteChat_NotFound_404(t *testing.T) {
 	w := doJSON(t, r, http.MethodDelete, "/api/v1/bots/bot-1/chats/nope", nil)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestDeleteChat_Locked_409(t *testing.T) {
-	r := newLifecycleRouter(t, newFakeChannel("bot-1"), &fakeBotChatManager{
-		deleteChat: func(string, string) error { return ErrChatLocked },
-	})
-
-	w := doJSON(t, r, http.MethodDelete, "/api/v1/bots/bot-1/chats/locked", nil)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected 409 for chat-id lock, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

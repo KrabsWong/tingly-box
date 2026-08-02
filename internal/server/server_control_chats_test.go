@@ -29,14 +29,12 @@ func (c *chatTestChannel) Prompt(context.Context, channel.Target, interaction.In
 	return interaction.Reply{}, nil
 }
 
-// chatTestProvider backs botChatProvider with a real store and a static lock map.
+// chatTestProvider backs botChatProvider with a real store.
 type chatTestProvider struct {
 	store bot.ChatStoreInterface
-	locks map[string]string
 }
 
 func (p *chatTestProvider) ChatStore() (bot.ChatStoreInterface, error) { return p.store, nil }
-func (p *chatTestProvider) ChatIDLock(botUUID string) string           { return p.locks[botUUID] }
 
 func newChatWiring(t *testing.T) (*channel.Registry, *chatTestProvider, *db.RemoteChatStore) {
 	t.Helper()
@@ -51,7 +49,7 @@ func newChatWiring(t *testing.T) (*channel.Registry, *chatTestProvider, *db.Remo
 	reg.Register(&chatTestChannel{id: "bot-1", platform: "telegram"})
 	reg.Register(&chatTestChannel{id: "bot-2", platform: "telegram"})
 
-	return reg, &chatTestProvider{store: store, locks: map[string]string{}}, store
+	return reg, &chatTestProvider{store: store}, store
 }
 
 // TestChatLister_ExcludesPairedElsewhere is the attribution tightening: a chat
@@ -122,11 +120,10 @@ func TestChatLister_DisabledHiddenUnlessAsked(t *testing.T) {
 	}
 }
 
-// TestChatDeleter_RefusesLockAndForeign covers the two guard rails on delete:
-// the bot's chat-id lock is 409, a chat paired to another bot is 404.
-func TestChatDeleter_RefusesLockAndForeign(t *testing.T) {
+// TestChatDeleter_AllowsReachableAndRefusesForeign verifies that no special
+// ChatIDLock survives while bot ownership still prevents cross-bot deletion.
+func TestChatDeleter_AllowsReachableAndRefusesForeign(t *testing.T) {
 	reg, provider, store := newChatWiring(t)
-	provider.locks["bot-1"] = "locked-chat"
 
 	if _, err := store.GetOrCreateChat("locked-chat", "telegram"); err != nil {
 		t.Fatalf("create: %v", err)
@@ -140,8 +137,8 @@ func TestChatDeleter_RefusesLockAndForeign(t *testing.T) {
 
 	mgr := newBotChatManager(reg, provider)
 
-	if err := mgr.DeleteChat("bot-1", "locked-chat"); !errors.Is(err, notifymodule.ErrChatLocked) {
-		t.Errorf("deleting the lock: err = %v, want ErrChatLocked", err)
+	if err := mgr.DeleteChat("bot-1", "locked-chat"); err != nil {
+		t.Errorf("deleting a formerly locked chat: %v", err)
 	}
 	if err := mgr.DeleteChat("bot-1", "theirs"); !errors.Is(err, notifymodule.ErrChatNotFound) {
 		t.Errorf("deleting a foreign chat: err = %v, want ErrChatNotFound", err)
@@ -156,38 +153,9 @@ func TestChatDeleter_RefusesLockAndForeign(t *testing.T) {
 	if chat, _ := store.GetChat("mine"); chat != nil {
 		t.Errorf("chat survived delete: %+v", chat)
 	}
-	// The guarded chats are untouched.
+	// The foreign chat is untouched.
 	if chat, _ := store.GetChat("theirs"); chat == nil {
 		t.Error("foreign chat was deleted")
-	}
-}
-
-// TestChatDisabler_RefusesLockingItself mirrors the deleter's lock guard: a
-// locked bot's only reachable chat cannot be disabled, since that chat is the
-// only place the bot could ever receive a re-enable request from — a locked
-// bot has no other reachable chat to send the opposite command from, and
-// HandleMessage's disabled gate drops every inbound message from it
-// unconditionally, so there would be no way back in. Re-enabling the lock
-// chat (disabled=false) is still allowed.
-func TestChatDisabler_RefusesLockingItself(t *testing.T) {
-	reg, provider, store := newChatWiring(t)
-	provider.locks["bot-1"] = "locked-chat"
-
-	if _, err := store.GetOrCreateChat("locked-chat", "telegram"); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-
-	mgr := newBotChatManager(reg, provider)
-	if err := mgr.SetChatDisabled("bot-1", "locked-chat", true); !errors.Is(err, notifymodule.ErrChatLocked) {
-		t.Errorf("disabling the lock chat: err = %v, want ErrChatLocked", err)
-	}
-	if store.IsChatDisabled("locked-chat") {
-		t.Error("lock chat was disabled despite the guard")
-	}
-
-	// Re-enabling (disabled=false) is not blocked — only turning the block on is.
-	if err := mgr.SetChatDisabled("bot-1", "locked-chat", false); err != nil {
-		t.Errorf("re-enabling the lock chat: err = %v, want nil", err)
 	}
 }
 

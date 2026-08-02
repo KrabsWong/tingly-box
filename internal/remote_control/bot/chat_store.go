@@ -13,7 +13,7 @@ type BotSetting struct {
 	AuthType      string            `json:"auth_type"`                // Auth type: token, oauth, qr
 	Auth          map[string]string `json:"auth"`                     // Dynamic auth fields based on platform
 	ProxyURL      string            `json:"proxy_url,omitempty"`      // Optional proxy URL
-	ChatIDLock    string            `json:"chat_id_lock,omitempty"`   // Optional chat ID lock (restriction, not a live chat id)
+	ChatIDLock    string            `json:"chat_id_lock,omitempty"`   // Deprecated: retained for settings compatibility; access policy supersedes it.
 	BashAllowlist []string          `json:"bash_allowlist,omitempty"` // Optional bash command allowlist
 	DefaultCwd    string            `json:"default_cwd,omitempty"`    // Default working directory if no project bound
 	Enabled       bool              `json:"enabled"`                  // Whether this bot is enabled

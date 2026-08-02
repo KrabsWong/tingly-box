@@ -548,8 +548,8 @@ func runRemoteList(appManager *AppManager) error {
 
 	fmt.Println("Bot Settings:")
 	fmt.Println()
-	fmt.Printf("%-6s %-36s %-12s %-15s %-8s %s\n", "ID", "UUID", "Platform", "Name", "Enabled", "ChatID Lock")
-	fmt.Println(strings.Repeat("-", 95))
+	fmt.Printf("%-6s %-36s %-12s %-15s %-8s\n", "ID", "UUID", "Platform", "Name", "Enabled")
+	fmt.Println(strings.Repeat("-", 82))
 	for i, s := range settings {
 		enabled := "No"
 		if s.Enabled {
@@ -559,11 +559,7 @@ func runRemoteList(appManager *AppManager) error {
 		if name == "" {
 			name = "-"
 		}
-		chatLock := s.ChatIDLock
-		if chatLock == "" {
-			chatLock = "-"
-		}
-		fmt.Printf("%-6d %-36s %-12s %-15s %-8s %s\n", i+1, s.UUID, s.Platform, name, enabled, chatLock)
+		fmt.Printf("%-6d %-36s %-12s %-15s %-8s\n", i+1, s.UUID, s.Platform, name, enabled)
 	}
 	fmt.Println()
 	fmt.Printf("Total: %d bot(s)\n", len(settings))

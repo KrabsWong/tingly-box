@@ -23,8 +23,8 @@ func formatChatTime(t time.Time) string {
 // per-operation closure. The store is global across bots (keyed by chat_id
 // with no platform dimension), so a chat is attributed to a bot when its
 // Platform matches the bot's channel platform and it is not paired to a
-// different bot. A chat-id lock further collapses a bot's reachable set to
-// one chat id.
+// different bot. Explicit DirectChat/Group access is evaluated separately;
+// the retired ChatIDLock does not narrow this resource list.
 type botChatManager struct {
 	reg      *channel.Registry
 	provider botChatProvider
@@ -39,18 +39,6 @@ func newBotChatManager(reg *channel.Registry, provider botChatProvider) notifymo
 		return nil
 	}
 	return &botChatManager{reg: reg, provider: provider}
-}
-
-// lockedOut reports whether chatID is this bot's configured chat-id lock —
-// its only reachable chat. The DELETE and disable-on endpoints refuse to act
-// on it: a locked bot has no other reachable chat, so stranding the only one
-// (by deleting it, or by disabling it and thus dropping all its inbound
-// traffic) leaves no in-chat recovery path.
-func (m *botChatManager) lockedOut(botUUID, chatID string) bool {
-	if lock := m.provider.ChatIDLock(botUUID); lock != "" && chatID == lock {
-		return true
-	}
-	return false
 }
 
 // resolveReachableChat centralizes the "does this chat belong to this bot"
@@ -81,8 +69,8 @@ func (m *botChatManager) resolveReachableChat(botUUID, chatID string) (bot.ChatS
 }
 
 // ListChats backs GET /bots/:bot/chats. It scopes the shared store to this
-// bot's platform, then drops chats outside its chat-id lock and chats paired
-// to another bot. This is what makes the chat_id required by /notify and
+// bot's platform, then drops chats paired to another bot. This is what makes
+// the chat_id required by /notify and
 // /interact discoverable — see ux-principles #5 (show the concrete value) and
 // #11 (hand over the artifact for the next action).
 func (m *botChatManager) ListChats(botUUID string, includeDisabled bool) ([]notifymodule.ChatSummary, error) {
@@ -94,9 +82,6 @@ func (m *botChatManager) ListChats(botUUID string, includeDisabled bool) ([]noti
 		return nil, nil
 	}
 	platform := ch.Platform()
-
-	// A chat-id lock collapses the reachable set to one chat id.
-	lock := m.provider.ChatIDLock(botUUID)
 
 	// Shared store, owned by the StoreManager — not ours to close.
 	store, err := m.provider.ChatStore()
@@ -114,10 +99,6 @@ func (m *botChatManager) ListChats(botUUID string, includeDisabled bool) ([]noti
 
 	out := make([]notifymodule.ChatSummary, 0, len(all))
 	for _, c := range all {
-		if lock != "" && c.ChatID != lock {
-			// A chat-id lock collapses the reachable set to one chat id.
-			continue
-		}
 		if c.IsPaired && c.PairedBotUUID != "" && c.PairedBotUUID != botUUID {
 			// Paired to another bot — it belongs to that bot's list, not
 			// this one. Unpaired same-platform chats stay visible to every
@@ -136,16 +117,12 @@ func (m *botChatManager) ListChats(botUUID string, includeDisabled bool) ([]noti
 			UpdatedAt:     formatChatTime(c.UpdatedAt),
 		})
 	}
-	logrus.Debugf("bot chats list: bot=%s platform=%s lock=%q count=%d", botUUID, platform, lock, len(out))
+	logrus.Debugf("bot chats list: bot=%s platform=%s count=%d", botUUID, platform, len(out))
 	return out, nil
 }
 
-// DeleteChat backs DELETE /bots/:bot/chats/:chat_id. Refuses to delete the
-// bot's chat-id lock — a locked bot's only reachable chat.
+// DeleteChat backs DELETE /bots/:bot/chats/:chat_id.
 func (m *botChatManager) DeleteChat(botUUID, chatID string) error {
-	if m.lockedOut(botUUID, chatID) {
-		return notifymodule.ErrChatLocked
-	}
 	store, err := m.resolveReachableChat(botUUID, chatID)
 	if err != nil {
 		return err
@@ -153,14 +130,8 @@ func (m *botChatManager) DeleteChat(botUUID, chatID string) error {
 	return store.DeleteChat(chatID)
 }
 
-// SetChatDisabled backs PUT /bots/:bot/chats/:chat_id/disabled. Refuses to
-// turn the block on for the bot's chat-id lock — disabling the only reachable
-// chat strands the bot — but always allows turning it back off (the recovery
-// path).
+// SetChatDisabled backs PUT /bots/:bot/chats/:chat_id/disabled.
 func (m *botChatManager) SetChatDisabled(botUUID, chatID string, disabled bool) error {
-	if disabled && m.lockedOut(botUUID, chatID) {
-		return notifymodule.ErrChatLocked
-	}
 	store, err := m.resolveReachableChat(botUUID, chatID)
 	if err != nil {
 		return err
@@ -180,9 +151,8 @@ func (m *botChatManager) IsChatDisabled(chatID string) bool {
 }
 
 // botChatProvider is the narrow surface botChatManager needs from the imbot
-// handler: reach the shared chat store and look up a bot's chat-id lock. An
-// interface so the helper is testable without the full imbot.Handler.
+// handler to reach the shared chat store. An interface keeps the helper
+// testable without the full imbot.Handler.
 type botChatProvider interface {
 	ChatStore() (bot.ChatStoreInterface, error)
-	ChatIDLock(botUUID string) string
 }

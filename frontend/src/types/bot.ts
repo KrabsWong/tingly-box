@@ -19,14 +19,9 @@ import type {
 
 // BotSettings is an alias for Settings from codegen.
 //
-// chat_id_lock bridge: the backend ChatIDLock field was renamed from JSON
-// tag "chat_id" to "chat_id_lock" (it is an operator restriction, NOT a live
-// chat id — the collision with Chat.ChatID was the source of real confusion;
-// see ux-principles #3). Until `task codegen` regenerates Settings with the
-// new tag, we overlay chat_id_lock here so frontend code can use the correct
-// name today. Once codegen runs, Settings gains chat_id_lock natively and
-// this overlay becomes a harmless no-op (and the legacy chat_id can be
-// dropped from the codegen type).
+// chat_id_lock is retained only for compatibility with existing generated
+// Settings and persisted rows. Explicit DirectChat/Group access supersedes it;
+// new UI and runtime authorization must not use this field.
 export type BotSettings = Omit<Settings, 'chat_id'> & {
     chat_id_lock?: string;
     // Retained as an alias while codegen still emits it; new code should use
