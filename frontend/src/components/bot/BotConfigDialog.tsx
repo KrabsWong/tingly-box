@@ -1,8 +1,9 @@
 import BotAuthForm from './BotAuthForm';
 import BotPlatformSelector from './BotPlatformSelector';
+import { ExpandMore } from '@/components/icons';
 import { api } from '@/services/api';
 import type { BotPlatformConfig, BotSettings } from '@/types/bot';
-import { Box, Button, Modal, Stack, TextField, Typography } from '@mui/material';
+import { Accordion, AccordionDetails, AccordionSummary, Box, Button, Modal, Stack, TextField, Typography } from '@mui/material';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -61,6 +62,7 @@ const BotConfigDialog: React.FC<BotConfigDialogProps> = ({
     const [platformDraft, setPlatformDraft] = useState(platformId);
     const [authDraft, setAuthDraft] = useState<Record<string, string>>({});
     const [proxyDraft, setProxyDraft] = useState('');
+    const [bashAllowlistDraft, setBashAllowlistDraft] = useState('');
     const [saving, setSaving] = useState(false);
 
     // Load platform configs once (first open).
@@ -94,6 +96,7 @@ const BotConfigDialog: React.FC<BotConfigDialogProps> = ({
                 setPlatformDraft(bot.platform || platformId);
                 setAuthDraft(bot.auth ? { ...bot.auth } : {});
                 setProxyDraft(bot.proxy_url || '');
+                setBashAllowlistDraft((bot.bash_allowlist || []).join('\n'));
                 setCurrentPlatformConfig(botPlatforms.find(p => p.platform === bot.platform) ?? null);
             }
             return;
@@ -105,6 +108,7 @@ const BotConfigDialog: React.FC<BotConfigDialogProps> = ({
         setPlatformDraft(platformId);
         setAuthDraft({});
         setProxyDraft('');
+        setBashAllowlistDraft('');
         const config = botPlatforms.find(p => p.platform === platformId) ?? null;
         setCurrentPlatformConfig(config);
         // For QR auth: reuse an existing orphan bot (one that was created by a
@@ -155,6 +159,12 @@ const BotConfigDialog: React.FC<BotConfigDialogProps> = ({
                 auth_type: platformConfig.auth_type,
                 auth: authDraft,
                 proxy_url: proxyDraft.trim(),
+                ...(dialogMode === 'edit' ? {
+                    bash_allowlist: bashAllowlistDraft
+                        .split(/[\n,]+/)
+                        .map(command => command.trim())
+                        .filter(Boolean),
+                } : {}),
                 enabled: true, // Enable the bot after saving
             };
 
@@ -181,7 +191,7 @@ const BotConfigDialog: React.FC<BotConfigDialogProps> = ({
         } finally {
             setSaving(false);
         }
-    }, [botPlatforms, platformDraft, targetUuid, authDraft, nameDraft, proxyDraft, dialogMode, onSaved, onClose, notify, t]);
+    }, [botPlatforms, platformDraft, targetUuid, authDraft, nameDraft, proxyDraft, bashAllowlistDraft, dialogMode, onSaved, onClose, notify, t]);
 
     return (
         <Modal open={open} onClose={onClose}>
@@ -282,6 +292,35 @@ const BotConfigDialog: React.FC<BotConfigDialogProps> = ({
                             helperText={t('remoteControl.dialog.proxyUrlHelper', { defaultValue: 'Optional HTTP/HTTPS proxy for bot API requests.' })}
                             disabled={saving}
                         />
+
+                        {dialogMode === 'edit' && (
+                            <Accordion disableGutters elevation={0} sx={{border: 1, borderColor: 'divider', '&:before': {display: 'none'}}}>
+                                <AccordionSummary expandIcon={<ExpandMore fontSize="small"/>}>
+                                    <Box>
+                                        <Typography variant="body2" sx={{fontWeight: 600}}>
+                                            {t('remoteControl.dialog.advancedAgentPolicy', {defaultValue: 'Advanced agent policy'})}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                            {t('remoteControl.dialog.advancedAgentPolicyHelper', {defaultValue: 'Limits what an authorized controller may execute; it does not grant access.'})}
+                                        </Typography>
+                                    </Box>
+                                </AccordionSummary>
+                                <AccordionDetails>
+                                    <TextField
+                                        label={t('remoteControl.dialog.bashAllowlist', { defaultValue: 'Bash Allowlist' })}
+                                        placeholder={'cd\nls\npwd'}
+                                        value={bashAllowlistDraft}
+                                        onChange={(event) => setBashAllowlistDraft(event.target.value)}
+                                        fullWidth
+                                        multiline
+                                        minRows={3}
+                                        size="small"
+                                        helperText={t('remoteControl.dialog.bashAllowlistHelper', { defaultValue: 'Allowlisted /bash subcommands. Default: cd, ls, pwd.' })}
+                                        disabled={saving}
+                                    />
+                                </AccordionDetails>
+                            </Accordion>
+                        )}
                     </Stack>
 
                     <Stack direction="row" spacing={2} sx={{ justifyContent: 'flex-end' }}>

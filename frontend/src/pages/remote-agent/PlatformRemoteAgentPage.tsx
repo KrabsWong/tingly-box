@@ -24,7 +24,8 @@ interface PlatformRemoteAgentPageProps {
 // Bots section's per-platform structure: same pagination, different content.
 // A Bots page manages this platform's bot connections; this page manages the
 // same bots' Remote Agent configuration — mount switch, SmartGuide model,
-// and agent behavior (chat lock, bash allowlist).
+// and its agent routing. Access is managed from the graph; connection and
+// advanced command policy remain in the shared Bot edit dialog.
 const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAgentPageProps) => {
     const { t } = useTranslation();
     const guideConfig = usePlatformGuide(platformId);
@@ -100,15 +101,18 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
     }, [loadBots, loadProviders]);
 
     // Toggle the explicit Remote Control capability.
-    const handleMountToggle = useCallback(async (uuid: string, mounted: boolean) => {
-        setTogglingBotUuid(uuid);
+    const handleMountToggle = useCallback(async (bot: BotSettings, enabled: boolean) => {
+        if (!bot.uuid) return;
+        setTogglingBotUuid(bot.uuid);
         try {
-			const result = await api.setBotCapability(uuid, 'remote_control', mounted);
+            // Capability lifecycle is reconciled server-side: enabling Remote
+            // starts the Bot; disabling the last capability turns it off.
+			const result = await api.setBotCapability(bot.uuid, 'remote_control', enabled);
 			if (result?.capability) {
                 showNotification(
-                    mounted
-                        ? t('remoteControl.notify.remoteAgentOn', { defaultValue: 'Remote Control mounted' })
-                        : t('remoteControl.notify.remoteAgentOff', { defaultValue: 'Remote Control unmounted' }),
+                    enabled
+                        ? t('remoteControl.notify.remoteAgentOn', { defaultValue: 'Remote Control enabled' })
+                        : t('remoteControl.notify.remoteAgentOff', { defaultValue: 'Remote Control disabled' }),
                     'success'
                 );
                 await loadBots();
@@ -117,7 +121,12 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
             }
         } catch (err) {
 			console.error('Failed to toggle Remote Control capability:', err);
-            showNotification(t('remoteControl.notify.toggleFailedGeneric', { defaultValue: 'Failed to toggle bot' }), 'error');
+            showNotification(
+                err instanceof Error && err.message
+                    ? err.message
+                    : t('remoteControl.notify.toggleFailedGeneric', { defaultValue: 'Failed to toggle Remote Control' }),
+                'error',
+            );
         } finally {
             setTogglingBotUuid(null);
         }
@@ -152,16 +161,6 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
             }
         } catch (err) {
             showNotification(t('remoteControl.notify.deleteFailedGeneric', { defaultValue: 'Failed to delete bot' }), 'error');
-        }
-    }, [loadBots, showNotification, t]);
-
-    const handleAgentSettingsSave = useCallback(async (uuid: string, settings: { chat_id_lock: string; bash_allowlist: string[] }) => {
-        const result = await api.updateImBotSetting(uuid, settings);
-        if (result?.success) {
-            showNotification(t('remoteAgent.notify.agentSettingsSaved', { defaultValue: 'Agent settings saved' }), 'success');
-            await loadBots();
-        } else {
-            showNotification(result?.error || t('remoteControl.notify.saveFailed', { defaultValue: 'Failed to save bot settings' }), 'error');
         }
     }, [loadBots, showNotification, t]);
 
@@ -265,16 +264,16 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
                                 key={bot.uuid}
                                 bot={bot}
                                 providers={providers}
-                                onMountToggle={(mounted) => handleMountToggle(bot.uuid!, mounted)}
+                                onMountToggle={(enabled) => handleMountToggle(bot, enabled)}
                                 onModelClick={() => handleModelClick(bot)}
                                 ccProfiles={ccProfiles}
                                 onCCProfileClick={() => setProfileDialogBot(bot)}
-                                onAgentSettingsSave={(settings) => handleAgentSettingsSave(bot.uuid!, settings)}
                                 onEdit={() => openEditDialog(bot.uuid!)}
                                 onRestart={() => handleBotRestart(bot.uuid!)}
                                 onDelete={() => handleDeleteBot(bot.uuid!)}
                                 isToggling={togglingBotUuid === bot.uuid}
                                 isRestarting={restartingBotUuid === bot.uuid}
+                                onAccessChanged={() => void loadBots()}
                             />
                         ))}
                     </Box>

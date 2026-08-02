@@ -6,6 +6,7 @@ import {
     DialogTitle, Divider, FormControlLabel, Stack, Switch, TextField, Typography,
 } from '@mui/material';
 import {useCallback, useEffect, useState} from 'react';
+import PairingCodePanel from './PairingCodePanel';
 
 interface Props { open:boolean; bot:BotSettings|null; onClose:()=>void; onChanged:()=>void; }
 
@@ -51,7 +52,11 @@ const BotAccessDialog = ({open, bot, onClose, onChanged}:Props) => {
         <DialogTitle sx={{display:'flex',alignItems:'center',gap:1}}><Security color="primary"/> {bot?.name||bot?.platform} access</DialogTitle>
         <DialogContent dividers>
             <Stack spacing={3}>
-                <Box><Typography variant="body2" color="text.secondary">Bot UUID</Typography><Typography component="code" sx={{fontFamily:'monospace',wordBreak:'break-all'}}>{bot?.uuid}</Typography></Box>
+                <Box>
+                    <Typography variant="body2" color="text.secondary">Bot UUID</Typography>
+                    <Typography component="code" sx={{fontFamily:'monospace',wordBreak:'break-all'}}>{bot?.uuid}</Typography>
+                    {bot && <PairingCodePanel bot={bot}/>}
+                </Box>
                 {error&&<Alert severity="error">{error}</Alert>}
                 {loading?<Box sx={{display:'flex',justifyContent:'center',py:6}}><CircularProgress/></Box>:<>
                     <Box>

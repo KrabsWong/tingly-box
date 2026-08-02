@@ -24,3 +24,4 @@ export { default as ApiEntryNode } from './ApiEntryNode';
 export { default as ChatNode } from './ChatNode';
 export { default as ImBotNode } from './ImBotNode';
 export { default as PlatformNode } from './PlatformNode';
+export { default as AccessNode } from './AccessNode';

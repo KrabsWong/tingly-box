@@ -3,7 +3,7 @@ import type { BotSettings } from '@/types/bot.ts';
 import { ccProfileIdFromDefaultAgent } from '@/types/bot.ts';
 import type { Provider } from '@/types/provider.ts';
 import type { ProfileInfo } from '@/contexts/ProfileContext';
-import { ArrowNode, NodeContainer, PlatformNode, graphRowStyles } from '../nodes';
+import { AccessNode, ArrowNode, ImBotNode, NodeContainer, graphRowStyles } from '../nodes';
 import BotModelNode from '../nodes/BotModelNode.tsx';
 import AgentNode from '../nodes/AgentNode.tsx';
 import AtNode from '../nodes/AtNode.tsx';
@@ -16,6 +16,11 @@ export interface RemoteControlGraphProps {
     readOnly?: boolean;
     onModelClick?: () => void;
     onBotClick?: () => void;
+    onAccessClick?: () => void;
+    directChatCount?: number;
+    groupCount?: number;
+    accessLoading?: boolean;
+    accessError?: string;
     /** Configured Claude Code profiles (to resolve the selected profile name). */
     ccProfiles?: ProfileInfo[];
     /** Opens the Claude Code profile picker for this bot's @cc branch. */
@@ -35,24 +40,40 @@ const RemoteControlGraph: React.FC<RemoteControlGraphProps> = ({
     readOnly = false,
     onModelClick,
     onBotClick,
-    ccProfiles = [],
+    ccProfiles,
     onCCProfileClick,
+    onAccessClick,
+    directChatCount = 0,
+    groupCount = 0,
+    accessLoading = false,
+    accessError,
 }) => {
     const providerName = getProviderName(imbot.smartguide_provider, providers);
 
     // Which Claude Code configuration serves @cc: '' = main claude_code
     // scenario, otherwise a profile ID from default_agent ("claude_code:<id>").
     const ccProfileId = ccProfileIdFromDefaultAgent(imbot.default_agent);
-    const ccProfileName = ccProfiles.find(p => p.id === ccProfileId)?.name;
+    const ccProfileName = ccProfiles?.find(p => p.id === ccProfileId)?.name;
 
     return (
         <Box sx={graphRowStyles}>
-            {/* Bot node */}
+            {/* Access is both the summary and the entry point for concrete
+                authorized resources, so authorization has one work surface. */}
             <NodeContainer>
-                {/* Entry: the platform the chat traffic comes from. Which bot
-                    serves it is the card header's job — the node only marks
-                    the source platform and whether the hop is live. */}
-                <PlatformNode platform={imbot.platform} botUUID={imbot.uuid} active={isBotEnabled} onClick={readOnly ? undefined : onBotClick} />
+                <AccessNode
+                    directChats={directChatCount}
+                    groups={groupCount}
+                    active={isBotEnabled}
+                    loading={accessLoading}
+                    error={accessError}
+                    onClick={readOnly ? undefined : onAccessClick}
+                />
+            </NodeContainer>
+
+            <ArrowNode direction="forward" />
+
+            <NodeContainer>
+                <ImBotNode imbot={imbot} active={isBotEnabled} onClick={readOnly ? undefined : onBotClick}/>
             </NodeContainer>
 
             <ArrowNode direction="forward" />
