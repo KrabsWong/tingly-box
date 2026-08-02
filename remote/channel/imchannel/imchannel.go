@@ -119,6 +119,7 @@ func ToAskRequest(channelID, platform string, target channel.Target, ix interact
 		Title:    ix.Title,
 		Message:  ix.Body,
 		Timeout:  ix.Timeout,
+		Metadata: map[string]interface{}{},
 	}
 	if req.Message == "" {
 		req.Message = ix.Title
@@ -143,6 +144,11 @@ func ToAskRequest(channelID, platform string, target channel.Target, ix interact
 	}
 	if v, ok := ix.Meta["reason"].(string); ok {
 		req.Reason = v
+	}
+	for _, key := range []string{"capability", "reply_action"} {
+		if v, ok := ix.Meta[key].(string); ok {
+			req.Metadata[key] = v
+		}
 	}
 	return req
 }

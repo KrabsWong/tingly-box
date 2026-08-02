@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tingly-dev/tingly-box/remote/access"
 	"github.com/tingly-dev/tingly-box/remote/channel"
 	"github.com/tingly-dev/tingly-box/remote/interaction"
 )
@@ -19,7 +20,8 @@ import (
 // asked to Send, so the notify test can assert delivery.
 type recordingChannel struct {
 	*fakeChannel
-	sent []interaction.Notification
+	sent    []interaction.Notification
+	targets []channel.Target
 }
 
 func newRecordingChannel(id string) *recordingChannel {
@@ -28,7 +30,23 @@ func newRecordingChannel(id string) *recordingChannel {
 
 func (c *recordingChannel) Send(ctx context.Context, t channel.Target, m interaction.Notification) error {
 	c.sent = append(c.sent, m)
+	c.targets = append(c.targets, t)
 	return nil
+}
+
+type fakeDeliveryAccess struct {
+	facts access.DecisionFacts
+	chat  access.DirectChat
+}
+
+func (f fakeDeliveryAccess) Snapshot(context.Context, access.AuthorizationRequest) (access.DecisionFacts, error) {
+	return f.facts, nil
+}
+func (f fakeDeliveryAccess) GetDirectChat(_ context.Context, botUUID, id string) (access.DirectChat, bool, error) {
+	return f.chat, f.chat.BotUUID == botUUID && f.chat.ID == id, nil
+}
+func (f fakeDeliveryAccess) GetGroup(context.Context, string, string) (access.Group, bool, error) {
+	return access.Group{}, false, nil
 }
 
 // newBotTestRouter builds a gin engine with the bot interaction routes mounted
@@ -96,6 +114,40 @@ func TestBotAPI_Notify_Delivers(t *testing.T) {
 	}
 	if got := ch.sent[0].Meta["level"]; got != "error" {
 		t.Fatalf("level not passed through: %v", got)
+	}
+}
+
+func TestBotAPI_Notify_ProductionResolvesInternalTargetAfterAuthorization(t *testing.T) {
+	ch := newRecordingChannel("bot-1")
+	registry := channel.NewRegistry()
+	registry.Register(ch)
+	facts := access.DecisionFacts{BotEnabled: true, CapabilityEnabled: true, TransportStatus: access.TransportOnline, TransportSupports: true, TargetFound: true, TargetCapability: access.EffectAllow, TargetAction: access.EffectAllow}
+	delivery := fakeDeliveryAccess{facts: facts, chat: access.DirectChat{ID: "chat-internal", BotUUID: "bot-1", ExternalChatID: "telegram:4242"}}
+	handler := NewBotAPIHandler(registry, interaction.New[interaction.Result](time.Minute), nil, delivery)
+	r := gin.New()
+	r.POST("/api/v1/bots/:bot/notify", handler.Notify)
+
+	w := doJSON(t, r, http.MethodPost, "/api/v1/bots/bot-1/notify", gin.H{"target": gin.H{"kind": "direct_chat", "id": "chat-internal"}, "body": "hello"})
+	requireCode(t, w, http.StatusOK)
+	if len(ch.targets) != 1 || ch.targets[0].ChatID != "telegram:4242" {
+		t.Fatalf("channel target = %+v, want resolved external id", ch.targets)
+	}
+
+	delivery.facts.TargetBlocked = true
+	handler = NewBotAPIHandler(registry, interaction.New[interaction.Result](time.Minute), nil, delivery)
+	r = gin.New()
+	r.POST("/api/v1/bots/:bot/notify", handler.Notify)
+	w = doJSON(t, r, http.MethodPost, "/api/v1/bots/bot-1/notify", gin.H{"target": gin.H{"kind": "direct_chat", "id": "chat-internal"}, "chat_id": "attacker-controlled", "body": "blocked"})
+	requireCode(t, w, http.StatusNotFound)
+	if len(ch.targets) != 1 {
+		t.Fatalf("denied target was delivered: %+v", ch.targets)
+	}
+}
+
+func requireCode(t *testing.T, w *httptest.ResponseRecorder, want int) {
+	t.Helper()
+	if w.Code != want {
+		t.Fatalf("status = %d, want %d: %s", w.Code, want, w.Body.String())
 	}
 }
 

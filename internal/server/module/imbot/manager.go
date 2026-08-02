@@ -108,6 +108,7 @@ func NewBotManager(ctx context.Context, cfg *config.Config, channelRegistry *cha
 	// Create internal bot manager
 	internalMgr := bot.NewManager(store, notifyConsumer, remoteAgentConsumer)
 	internalMgr.SetChatStore(chatStore)
+	internalMgr.SetAccessStore(sm.BotAccess())
 	// Wire the channel registry BEFORE periodicBotSync's goroutine gets a
 	// chance to Start() any bot — see the constructor doc comment.
 	internalMgr.SetChannelRegistry(channelRegistry)

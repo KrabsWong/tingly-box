@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tingly-dev/tingly-box/internal/data/db"
+	"github.com/tingly-dev/tingly-box/remote/access"
 	"github.com/tingly-dev/tingly-box/remote/binding"
 	channel2 "github.com/tingly-dev/tingly-box/remote/channel"
 	"github.com/tingly-dev/tingly-box/remote/interaction"
@@ -13,6 +14,18 @@ import (
 type fakeStore struct{ settings []db.Settings }
 
 func (f *fakeStore) ListEnabledSettings() ([]db.Settings, error) { return f.settings, nil }
+
+type fakeRouteResolver struct{ resolved *access.ResolvedRoute }
+
+func (f fakeRouteResolver) ResolveRoute(context.Context, string, string) (*access.ResolvedRoute, error) {
+	return f.resolved, nil
+}
+
+type allowAuthorizer struct{}
+
+func (allowAuthorizer) Evaluate(context.Context, access.AuthorizationRequest) access.AuthorizationDecision {
+	return access.AuthorizationDecision{Allowed: true, Reason: access.ReasonAllowed}
+}
 
 type recordingChannel struct {
 	id          string
@@ -53,6 +66,19 @@ func TestRuntimeResolveBoundChannel(t *testing.T) {
 	}
 	if target.ChatID != "chat-1" {
 		t.Fatalf("got target chat=%s", target.ChatID)
+	}
+}
+
+func TestRouteRuntimeUsesInternalTargetAndAuthorizer(t *testing.T) {
+	channels := channel2.NewRegistry()
+	channels.Register(&recordingChannel{id: "bot-1"})
+	rt := NewRouteRuntime(channels, fakeRouteResolver{resolved: &access.ResolvedRoute{Route: access.Route{ID: "route-1", BotUUID: "bot-1", Target: access.TargetRef{Kind: access.TargetGroup, ID: "group-1"}}, ExternalTargetID: "telegram-group"}}, allowAuthorizer{}, nil)
+	ch, target, ok, err := rt.Resolve(context.Background(), Event{Scenario: "claude_code", Payload: map[string]any{"hook_event_name": "Stop"}})
+	if err != nil || !ok {
+		t.Fatalf("Resolve ok=%v err=%v", ok, err)
+	}
+	if ch.ID() != "bot-1" || target.ChatID != "telegram-group" {
+		t.Fatalf("resolved channel=%q target=%q", ch.ID(), target.ChatID)
 	}
 }
 

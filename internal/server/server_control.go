@@ -21,7 +21,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/server/module/statusline"
 	usagemodule "github.com/tingly-dev/tingly-box/internal/server/module/usage"
 	virtualmodelmodule "github.com/tingly-dev/tingly-box/internal/server/module/virtualmodel"
-	"github.com/tingly-dev/tingly-box/remote/binding"
+	"github.com/tingly-dev/tingly-box/remote/access"
 	"github.com/tingly-dev/tingly-box/remote/channel"
 	"github.com/tingly-dev/tingly-box/remote/interaction"
 	remotescenario "github.com/tingly-dev/tingly-box/remote/scenario"
@@ -134,8 +134,7 @@ func (s *Server) UseUIEndpoints(ctx context.Context) {
 		s.interactionRegistry = interaction.New[interaction.Result](30 * time.Second)
 		s.scenarioRegistry = remotescenario.NewRegistry()
 		s.scenarioRegistry.Register(claudecode.New(s.interactionRegistry))
-		resolver := binding.NewResolver(sm.ImBotSettings())
-		runtime := remotescenario.NewDefaultRuntime(s.channelRegistry, resolver, RuntimeAuditSink())
+		runtime := remotescenario.NewRouteRuntime(s.channelRegistry, sm.BotAccess(), access.NewEvaluator(sm.BotAccess()), RuntimeAuditSink())
 		notifyHandler = notifymodule.NewHandlerWithRouting(s.scenarioRegistry, s.interactionRegistry, runtime)
 	} else {
 		notifyHandler = notifymodule.NewHandler()
@@ -215,7 +214,7 @@ func (s *Server) UseUIEndpoints(ctx context.Context) {
 		if imbotHandler != nil {
 			chatManager = newBotChatManager(s.channelRegistry, imbotHandler)
 		}
-		botAPI := notifymodule.NewBotAPIHandler(s.channelRegistry, s.interactionRegistry, chatManager)
+		botAPI := notifymodule.NewBotAPIHandler(s.channelRegistry, s.interactionRegistry, chatManager, s.config.StoreManager().BotAccess())
 		notifymodule.RegisterBotRoutes(apiV1, botAPI)
 	}
 
