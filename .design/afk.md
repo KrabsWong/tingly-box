@@ -103,20 +103,42 @@ first-step failure cannot leave a bare user message on disk.
 
 ### 3.2 Cache breakpoints roll, and are never written in place
 
-Two breakpoints: one on the system prompt (which covers the tools too, since the
-request renders `tools → system → messages` and a breakpoint caches everything
-up to its own block), and one on the final content block, moving forward every
-request.
+`cache_control` is a **per-content-block field in the request body**. There is no
+header that turns caching on: prompt caching has been GA since the
+`prompt-caching-2024-07-31` beta was retired, and the 1h TTL is a `ttl` field on
+the `cache_control` object, not a beta flag either. The only request-level form
+is `BetaMessageNewParams.CacheControl`, which auto-places a *single* breakpoint on
+the last cacheable block — strictly less than what we place by hand, so we don't
+use it.
 
-The rolling one is not an optimization. A breakpoint only searches backwards a
-bounded number of content blocks for an existing cache entry, and one tool-heavy
-turn can append more blocks than that window — a pinned breakpoint would go cold
-exactly on the runs that cost the most.
+Two breakpoints, out of a per-request budget of four:
+
+1. **The static prefix** — on the system prompt, which covers the tools too,
+   since the request renders `tools → system → messages` and a breakpoint caches
+   everything up to its own block. Only when there is no system prompt do we fall
+   back to marking the last tool.
+2. **The conversation tail** — on the final content block, moving forward every
+   request.
+
+The rolling one is not an optimization. A breakpoint searches backwards **at most
+20 content blocks** for an existing cache entry, and one tool-heavy turn can
+append more blocks than that — a pinned breakpoint would go cold exactly on the
+runs that cost the most. Dropping it instead of rolling it is worse still: the
+message history would be re-processed at full price on every step, and in an
+agentic run that history is the *large* half of the prompt (it grows to the
+compaction trigger, §3.7), while the static prefix is the small one.
 
 The breakpoint is applied to a **copy** of the tail. Message content blocks are
 pointers into the caller's history, which Smart Guide persists verbatim; writing
 through would leak breakpoints into the stored session and accumulate them until
 a request exceeded the per-request limit. Two tests fail if the copy is removed.
+
+**Verification is `Usage.CacheReadInputTokens`.** Zero across repeated requests
+with a stable prefix means something is invalidating it. The prefix is
+byte-stable today by construction: the system prompt is an embedded static file
+(`default_system_prompt.v5`, no timestamp interpolation), `BuildTools` returns a
+fixed-order slice rather than a map walk, and skill names are sorted (§3.5).
+Anything that makes one of those vary per request silently costs the whole cache.
 
 ### 3.3 Reasoning is not an answer
 
@@ -303,6 +325,36 @@ context window, because `@tb` routes by bot-UUID rule and the window is not know
 at runtime. 120k suits the models compaction is available on (all 1M-window) and
 would be too high for a small one.
 
+**We mark one message, Claude Code marks two.** Read off its shipped bundle
+(`claude-code/cli.js`), its rule is `J > A.length - 3` — a breakpoint on the last
+content block of each of the **last two** messages, user and assistant alike,
+skipping a `thinking` / `redacted_thinking` tail. The second one is the answer to
+the same 20-block problem §3.2 describes, from the other side: an older
+breakpoint sitting exactly on the previous request's write point is a precise hit
+that does not depend on the lookback window at all, so a turn that appended more
+than 20 blocks still reads. Its system handling matches ours — every dynamic
+system fragment is joined into one block and marked once, so the effective static
+prefix is a single breakpoint. Budget-wise it runs 2 + 2 = 4, exactly the cap;
+we are at 2 and a third fits. *Not adopted yet; a deliberate open item.*
+
+**1h TTL and cache scope stay off, and that is Claude Code's default too.** Its
+`cache_control` factory emits a bare `{type: "ephemeral"}` — 5 minutes — and adds
+`ttl: "1h"` only for query sources on a remote-config allowlist, or on Bedrock
+behind an env var; `scope: "global"` is likewise gated on a flag plus
+`CLAUDE_CODE_FORCE_GLOBAL_CACHE`. A 1h write costs 2× against 5m's 1.25× and
+needs three reads to break even rather than two, and `@tb` has neither a query
+-source dimension to allowlist by nor knowledge of the model it was routed to.
+Off is the defensible default; the escape hatches upstream exist for callers who
+can make that judgement per route, and we cannot.
+
+**The minimum cacheable prefix is model-dependent and not monotonic** — 512
+tokens on Opus 5, 1024 on Opus 4.8 and Sonnet 5, 2048 on Opus 4.7, 4096 on
+Opus 4.6 and Haiku 4.5. Below it nothing caches and **nothing errors**
+(`cache_creation_input_tokens` is simply 0). Same shape of problem as the
+compaction trigger: the gateway routes by bot-UUID rule, so AFK cannot know which
+threshold applies. A short system prompt may quietly cache on one model and not
+another.
+
 **Thinking and effort are configurable but unset by default** (§3.3, §3.4) —
 "unset" meaning the parameter is not sent, which on current models still means the
 model thinks. The default is unset rather than `ThinkingVisible` or a named effort
@@ -362,7 +414,14 @@ means designing it against a single caller.
   exists, with no enable flag; steering is always on; compaction is on with a
   pinned trigger and no per-chat setting. Both compaction knobs
   (`DisableServerCompaction`, `ServerCompactTrigger`) are escape hatches, not
-  settings anyone is expected to tune.
+  settings anyone is expected to tune. Prompt caching is the same call in the
+  other direction: breakpoints are placed unconditionally with no flag, while 1h
+  TTL and cache scope stay off because turning them on needs a per-route
+  judgement `@tb` has no basis to make (§5).
+- **#7 diagnostics must traverse the real path** — cache health is read from
+  `Usage.CacheReadInputTokens` on the actual response, not inferred from the fact
+  that we set the breakpoints. A silent invalidator (§3.2) produces a correct
+  request that simply never reads, and only the real number shows it.
 - **#4 separate orthogonal axes / #2 no mode pickers** — thinking and effort are
   the two genuine multi-value settings, and the principle cuts both ways here.
   Thinking stays a *single* field because its values are not orthogonal (§3.3):
