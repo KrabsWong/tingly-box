@@ -60,8 +60,9 @@ const NotifyPage = () => {
         loadBots();
     }, [loadBots]);
 
-    // Notify is an explicit Capability, orthogonal to the Bot transport's
-    // enabled state. The routing graph reflects both without conflating them.
+    // Notify is an explicit capability. Its lifecycle is reconciled by the
+    // backend: enabling it starts the Bot, and disabling the last capability
+    // stops the Bot.
     const handleToggle = useCallback(async (uuid: string, enabled: boolean) => {
         setToggling(uuid);
         try {

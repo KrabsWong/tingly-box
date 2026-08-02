@@ -149,6 +149,11 @@ func (h *Handler) PutCapability(c *gin.Context) {
 		return
 	}
 	capability := access.BotCapability{BotUUID: c.Param("bot"), Name: name, Enabled: req.Enabled, Config: req.Config}
+	botSettings, err := h.store.GetSettingsByUUID(capability.BotUUID)
+	if err != nil || botSettings.UUID == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "bot not found"})
+		return
+	}
 	if err := h.accessStore.PutCapability(c.Request.Context(), capability); err != nil {
 		accessError(c, err)
 		return
@@ -158,12 +163,24 @@ func (h *Handler) PutCapability(c *gin.Context) {
 		accessError(c, err)
 		return
 	}
-	botSettings, err := h.store.GetSettingsByUUID(capability.BotUUID)
-	if err != nil || botSettings.UUID == "" {
-		c.JSON(http.StatusNotFound, gin.H{"error": "bot not found"})
-		return
+	// Capability changes and the Bot lifecycle gate form one operational
+	// action: enabling any capability starts a stopped Bot; disabling the last
+	// capability turns the now-unused Bot off. When another capability remains,
+	// preserve the Bot gate so disabling Notify cannot wake or stop Remote (and
+	// vice versa).
+	desiredBotEnabled := botSettings.Enabled
+	if req.Enabled {
+		desiredBotEnabled = true
+	} else if !enabled {
+		desiredBotEnabled = false
 	}
-	shouldRun := botSettings.Enabled && enabled
+	if desiredBotEnabled != botSettings.Enabled {
+		if err := h.store.SetEnabled(capability.BotUUID, desiredBotEnabled); err != nil {
+			accessError(c, err)
+			return
+		}
+	}
+	shouldRun := desiredBotEnabled && enabled
 	if h.botMgr != nil {
 		if shouldRun && !h.botMgr.IsRunning(capability.BotUUID) {
 			_ = h.botMgr.StartBot(context.Background(), capability.BotUUID)

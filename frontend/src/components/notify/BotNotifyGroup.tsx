@@ -273,11 +273,11 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
                         </IconButton>
                     </Tooltip>
                 )}
-                <Tooltip title={capabilityOn
+                <Tooltip title={enabled
                     ? t('notify.group.disableHint', {defaultValue: 'Disable Notify for this bot'})
-                    : t('notify.group.enableHint', {defaultValue: 'Enable Notify for this bot'})}>
-                    {/* Capability and transport are separate axes: this switch
-                        controls Notify only; the graph is live when both are on. */}
+                    : t('notify.group.enableHint', {defaultValue: 'Enable Notify. The bot starts automatically if needed.'})}>
+                    {/* Present one operational state. The backend reconciles
+                        the capability and Bot lifecycle as one action. */}
                     <Stack
                         direction="row"
                         spacing={0.75}
@@ -286,15 +286,15 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
                         <Switch
                             size="small"
                             color="success"
-                            checked={capabilityOn}
+                            checked={enabled}
                             disabled={isToggling}
                             onChange={(_, checked) => onToggle(bot.uuid!, checked)}
                         />
                         {isToggling ? (
                             <CircularProgress size={14} />
                         ) : (
-                            <Typography variant="body2" sx={{color: capabilityOn ? 'success.main' : 'text.secondary', fontWeight: 600}}>
-                                {capabilityOn ? t('common.on', {defaultValue: 'On'}) : t('common.off', {defaultValue: 'Off'})}
+                            <Typography variant="body2" sx={{color: enabled ? 'success.main' : 'text.secondary', fontWeight: 600}}>
+                                {enabled ? t('common.on', {defaultValue: 'On'}) : t('common.off', {defaultValue: 'Off'})}
                             </Typography>
                         )}
                     </Stack>

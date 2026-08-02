@@ -26,7 +26,7 @@ type Settings struct {
 	AuthType      string            `json:"auth_type"`
 	Auth          map[string]string `json:"auth"`
 	ProxyURL      string            `json:"proxy_url,omitempty"`
-	ChatIDLock    string            `json:"chat_id_lock,omitempty"` // Restriction on which chat is accepted, NOT a live chat id (see bot.BotSetting)
+	ChatIDLock    string            `json:"chat_id_lock,omitempty"` // Deprecated: retained for storage compatibility; not an authorization gate.
 	BashAllowlist []string          `json:"bash_allowlist,omitempty"`
 	DefaultCwd    string            `json:"default_cwd,omitempty"`   // Default working directory
 	DefaultAgent  string            `json:"default_agent,omitempty"` // Default Agent UUID
@@ -324,6 +324,25 @@ func (s *ImBotSettingsStore) ToggleSettings(uuid string) (bool, error) {
 	}
 
 	return newEnabled, nil
+}
+
+// SetEnabled writes the Bot's explicit lifecycle gate without touching any
+// other settings. Capability lifecycle reconciliation uses this narrow method
+// so it cannot accidentally clear partial-update fields such as scenarios.
+func (s *ImBotSettingsStore) SetEnabled(uuid string, enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result := s.db.Model(&ImBotSettingsRecord{}).
+		Where("bot_uuid = ?", uuid).
+		Updates(map[string]interface{}{"enabled": enabled, "updated_at": time.Now()})
+	if result.Error != nil {
+		return fmt.Errorf("failed to set imbot enabled state: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("imbot settings with uuid %s not found", uuid)
+	}
+	return nil
 }
 
 // recordToSettings converts an ImBotSettingsRecord to a Settings struct.
