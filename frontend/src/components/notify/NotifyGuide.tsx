@@ -22,7 +22,7 @@ const NotifyGuide: React.FC = () => {
     const origin = getDisplayOrigin();
 
     // Concrete, copy-pasteable curl. <BOT_UUID> and <TARGET_UUID> are left as
-    // placeholders the operator fills from the table below + the per-bot chats
+    // placeholders the operator fills from Delivery targets + the per-bot chats
     // list — the guide points there explicitly in section 3.
     const curl = `curl -X POST ${origin}/api/v1/bots/<BOT_UUID>/notify \\
   -H "Authorization: Bearer <USER_TOKEN>" \\
@@ -75,11 +75,11 @@ const NotifyGuide: React.FC = () => {
             {/* 3. Where to get the internal target UUID */}
             <Box>
                 <Typography variant="subtitle2" sx={{fontWeight: 600, mb: 0.5}}>
-                    {t('notify.guide.chatid.title', {defaultValue: '3. Copy the target UUID from the graph below'})}
+                    {t('notify.guide.chatid.title', {defaultValue: '3. Copy the target UUID from Delivery targets'})}
                 </Typography>
                 <Typography variant="body2" sx={{color: 'text.secondary'}}>
                     {t('notify.guide.chatid.body', {
-                        defaultValue: 'Each Chat node shows the real platform Chat ID for recognition; its tooltip also shows the stable internal Target UUID required by the API. Use the copy action beside the node, or send a test directly from the probe bench.',
+                        defaultValue: 'Each Chat node on this page shows the real platform Chat ID for recognition; its tooltip also shows the stable internal Target UUID required by the API. Use the copy action beside the node, or send a test directly from the probe bench.',
                     })}
                 </Typography>
             </Box>

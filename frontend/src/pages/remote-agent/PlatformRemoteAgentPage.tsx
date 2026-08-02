@@ -2,7 +2,7 @@ import { BotConfigDialog, RemoteAgentBotCard, useBotModelDialog } from '@/compon
 import CCProfileDialog from '@/components/bot/CCProfileDialog';
 import EmptyState from '@/components/EmptyState';
 import { PageLayout } from '@/components/PageLayout';
-import SetupGuideDrawer from '@/components/remote-control/SetupGuideDrawer';
+import GuideDrawer from '@/components/remote-control/GuideDrawer';
 import UnifiedCard from '@/components/UnifiedCard';
 import { api } from '@/services/api';
 import { usePlatformGuide } from '@/constants/platformGuides';
@@ -284,14 +284,21 @@ const PlatformRemoteAgentPage = ({ platformId, platformName, platformPicker }: P
                 )}
             </UnifiedCard>
             {guideConfig?.guide && (
-                <SetupGuideDrawer
+                <GuideDrawer
                     open={guideOpen}
-                    platformName={platformName}
+                    title={t('remoteControl.guide.title', {
+                        defaultValue: '{{platform}} Setup Guide',
+                        platform: platformName,
+                    })}
+                    description={t('remoteControl.guide.drawerHint', {
+                        defaultValue: 'Connection steps, credentials, and examples',
+                    })}
                     onClose={() => setGuideOpen(false)}
-                    onConnectBot={openAddDialog}
+                    actionLabel={t('remoteControl.bots.addBot', { defaultValue: 'Connect a bot' })}
+                    onAction={openAddDialog}
                 >
                     {guideConfig.guide}
-                </SetupGuideDrawer>
+                </GuideDrawer>
             )}
             {/* Shared bot-resource dialog: add/edit a bot without leaving this page */}
             <BotConfigDialog

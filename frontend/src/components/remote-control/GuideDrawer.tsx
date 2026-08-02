@@ -11,26 +11,30 @@ import {
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-interface SetupGuideDrawerProps {
+interface GuideDrawerProps {
     open: boolean;
-    platformName: string;
+    title: string;
+    description?: string;
     children: ReactNode;
     onClose: () => void;
-    onConnectBot: () => void;
+    actionLabel?: string;
+    onAction?: () => void;
 }
 
-const SetupGuideDrawer = ({
+const GuideDrawer = ({
     open,
-    platformName,
+    title,
+    description,
     children,
     onClose,
-    onConnectBot,
-}: SetupGuideDrawerProps) => {
+    actionLabel,
+    onAction,
+}: GuideDrawerProps) => {
     const { t } = useTranslation();
 
-    const handleConnectBot = () => {
+    const handleAction = () => {
         onClose();
-        onConnectBot();
+        onAction?.();
     };
 
     return (
@@ -66,16 +70,13 @@ const SetupGuideDrawer = ({
                 >
                     <Box sx={{ minWidth: 0 }}>
                         <Typography variant="h4" component="h2" sx={{ fontWeight: 600 }}>
-                            {t('remoteControl.guide.title', {
-                                defaultValue: '{{platform}} Setup Guide',
-                                platform: platformName,
-                            })}
+                            {title}
                         </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                            {t('remoteControl.guide.drawerHint', {
-                                defaultValue: 'Connection steps, credentials, and examples',
-                            })}
-                        </Typography>
+                        {description && (
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                {description}
+                            </Typography>
+                        )}
                     </Box>
                     <IconButton
                         aria-label={t('common.close', { defaultValue: 'Close' })}
@@ -89,15 +90,19 @@ const SetupGuideDrawer = ({
                 <Box sx={{ flex: 1, overflowY: 'auto', px: 3, py: 2.5 }}>
                     <Stack spacing={2}>{children}</Stack>
                 </Box>
-                <Divider />
-                <Box sx={{ px: 3, py: 2 }}>
-                    <Button fullWidth variant="contained" onClick={handleConnectBot}>
-                        {t('remoteControl.bots.addBot', { defaultValue: 'Connect a bot' })}
-                    </Button>
-                </Box>
+                {actionLabel && onAction && (
+                    <>
+                        <Divider />
+                        <Box sx={{ px: 3, py: 2 }}>
+                            <Button fullWidth variant="contained" onClick={handleAction}>
+                                {actionLabel}
+                            </Button>
+                        </Box>
+                    </>
+                )}
             </Box>
         </Drawer>
     );
 };
 
-export default SetupGuideDrawer;
+export default GuideDrawer;
