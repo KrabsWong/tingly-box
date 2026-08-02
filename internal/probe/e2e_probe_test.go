@@ -4,10 +4,12 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tingly-dev/tingly-box/ai"
 	"github.com/tingly-dev/tingly-box/internal/client"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
@@ -200,4 +202,100 @@ func TestWithProbeHeaders_ContextRoundTrip(t *testing.T) {
 
 	_, ok = client.GetProbeHeaders(context.Background())
 	assert.False(t, ok)
+}
+
+// ---- resolveOpenAIProbeEndpoint ----
+
+func TestResolveOpenAIProbeEndpoint_OverrideWins(t *testing.T) {
+	chatOnly := &typ.Provider{AuthType: typ.AuthTypeAPIKey}
+	codexOAuth := &typ.Provider{
+		AuthType:    typ.AuthTypeOAuth,
+		OAuthDetail: &typ.OAuthDetail{Issuer: ai.IssuerCodex},
+	}
+
+	assert.Equal(t, "chat", resolveOpenAIProbeEndpoint("chat", chatOnly))
+	assert.Equal(t, "chat", resolveOpenAIProbeEndpoint("chat", codexOAuth),
+		"an explicit override must win even over a Codex OAuth provider")
+	assert.Equal(t, "responses", resolveOpenAIProbeEndpoint("responses", chatOnly))
+	assert.Equal(t, "responses", resolveOpenAIProbeEndpoint("responses", codexOAuth))
+}
+
+func TestResolveOpenAIProbeEndpoint_DefaultsWithoutOverride(t *testing.T) {
+	chatOnly := &typ.Provider{AuthType: typ.AuthTypeAPIKey}
+	codexOAuth := &typ.Provider{
+		AuthType:    typ.AuthTypeOAuth,
+		OAuthDetail: &typ.OAuthDetail{Issuer: ai.IssuerCodex},
+	}
+
+	assert.Equal(t, "chat", resolveOpenAIProbeEndpoint("", chatOnly))
+	assert.Equal(t, "responses", resolveOpenAIProbeEndpoint("", codexOAuth))
+}
+
+func TestResolveOpenAIProbeEndpoint_InvalidOverrideFallsBackToDefault(t *testing.T) {
+	chatOnly := &typ.Provider{AuthType: typ.AuthTypeAPIKey}
+	assert.Equal(t, "chat", resolveOpenAIProbeEndpoint("bogus", chatOnly))
+}
+
+// ---- endpointProbeCache ----
+
+func TestEndpointProbeCache_HitAfterRemember(t *testing.T) {
+	c := newEndpointProbeCache()
+	assert.False(t, c.hit("p1", "gpt-4o", "responses"), "unseeded key should miss")
+
+	c.remember("p1", "gpt-4o", "responses")
+	assert.True(t, c.hit("p1", "gpt-4o", "responses"))
+}
+
+func TestEndpointProbeCache_KeyIsFullyQualified(t *testing.T) {
+	c := newEndpointProbeCache()
+	c.remember("p1", "gpt-4o", "responses")
+
+	assert.False(t, c.hit("p2", "gpt-4o", "responses"), "different provider must not hit")
+	assert.False(t, c.hit("p1", "gpt-4o-mini", "responses"), "different model must not hit")
+	assert.False(t, c.hit("p1", "gpt-4o", "chat"), "different endpoint must not hit")
+}
+
+func TestEndpointProbeCache_ExpiresAfterTTL(t *testing.T) {
+	c := newEndpointProbeCache()
+	key := endpointProbeCacheKey("p1", "gpt-4o", "responses")
+	// Backdate the entry past the TTL instead of sleeping in the test.
+	c.entries[key] = time.Now().Add(-endpointProbeCacheTTL - time.Second)
+
+	assert.False(t, c.hit("p1", "gpt-4o", "responses"), "stale entry must be treated as a miss")
+
+	c.mu.Lock()
+	_, stillPresent := c.entries[key]
+	c.mu.Unlock()
+	assert.False(t, stillPresent, "hit() should evict the stale entry")
+}
+
+// ---- E2EService.Probe cache short-circuit ----
+
+// TestProbe_CachedEndpointCheck_SkipsDispatch proves a cache hit on the
+// direct provider+model+endpoint shape returns success without reaching the
+// SDK dispatch path — clientPool is left nil, which would panic if dispatch
+// were attempted, so a clean success return is itself the assertion.
+func TestProbe_CachedEndpointCheck_SkipsDispatch(t *testing.T) {
+	cfg := newTestConfig(t)
+	p := &typ.Provider{
+		UUID: "p-cache", Name: "OpenAI", APIBase: "https://api.openai.com/v1",
+		APIStyle: protocol.APIStyleOpenAI, Enabled: true, Models: []string{"gpt-4o"},
+	}
+	addProvider(t, cfg, p)
+
+	svc := NewE2EService(cfg, nil) // nil clientPool: dispatch would panic
+	svc.endpointCache.remember("p-cache", "gpt-4o", "responses")
+
+	result, err := svc.Probe(context.Background(), &E2ERequest{
+		TargetType:   E2ETargetProvider,
+		ProviderUUID: "p-cache",
+		Model:        "gpt-4o",
+		TestMode:     E2EModeSimple,
+		Direct:       true,
+		Endpoint:     "responses",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Success)
 }

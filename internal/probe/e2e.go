@@ -18,15 +18,17 @@ import (
 // provider, or an inline provider config. It is independent of *Server and
 // is wired in NewServer.
 type E2EService struct {
-	config     *config.Config
-	clientPool *client.ClientPool
+	config        *config.Config
+	clientPool    *client.ClientPool
+	endpointCache *endpointProbeCache
 }
 
 // NewE2EService constructs a E2EService.
 func NewE2EService(cfg *config.Config, pool *client.ClientPool) *E2EService {
 	return &E2EService{
-		config:     cfg,
-		clientPool: pool,
+		config:        cfg,
+		clientPool:    pool,
+		endpointCache: newEndpointProbeCache(),
 	}
 }
 
@@ -36,11 +38,27 @@ func (e *E2EService) Probe(ctx context.Context, req *E2ERequest) (*E2EData, erro
 	if err != nil {
 		return nil, err
 	}
+
+	// Narrow cache: only the direct provider+model+endpoint capability-check
+	// shape (target_type=provider, direct=true, endpoint forced) is
+	// cacheable — see endpointProbeCache's doc comment for why. Every other
+	// probe shape (rule tests, tool-mode/streaming checks, generic
+	// connectivity) always dispatches for real.
+	cacheable := req.TargetType == E2ETargetProvider && req.Direct &&
+		(req.Endpoint == "chat" || req.Endpoint == "responses")
+	if cacheable && e.endpointCache.hit(provider.UUID, model, req.Endpoint) {
+		return &ProbeResult{Success: true, Message: "Verified recently (cached)"}, nil
+	}
+
 	if len(probeHeaders) > 0 {
 		ctx = client.WithProbeHeaders(ctx, probeHeaders)
 	}
 	message := E2EMessage(req.TestMode, req.Message)
-	return e.ProbeProviderWithSDK(ctx, provider, model, message, req.TestMode)
+	result, err := e.ProbeProviderWithSDK(ctx, provider, model, message, req.TestMode, req.Endpoint)
+	if cacheable && err == nil && result != nil && result.Success {
+		e.endpointCache.remember(provider.UUID, model, req.Endpoint)
+	}
+	return result, err
 }
 
 // ProbeStream performs a streaming probe against the target described by req.
@@ -53,7 +71,7 @@ func (e *E2EService) ProbeStream(ctx context.Context, req *E2ERequest) (*E2EData
 		ctx = client.WithProbeHeaders(ctx, probeHeaders)
 	}
 	message := E2EMessage(req.TestMode, req.Message)
-	return e.probeProviderStream(ctx, provider, model, message, req.TestMode)
+	return e.probeProviderStream(ctx, provider, model, message, req.TestMode, req.Endpoint)
 }
 
 // resolveTargetToProviderModel resolves an E2ERequest to a provider, model,
@@ -166,7 +184,7 @@ func (e *E2EService) resolveProviderTarget(ctx context.Context, req *E2ERequest)
 	apiStyle := provider.APIStyle
 	probeHeaders := map[string]string{
 		"X-Tingly-Probe-Service": req.ProviderUUID + ":" + model,
-		"X-Tingly-Debug-Routing":   "1",
+		"X-Tingly-Debug-Routing": "1",
 	}
 	logrus.Debugf("[probe-e2e] provider %s -> TB loopback %s (service pin=%s:%s)", provider.UUID, apiBase, req.ProviderUUID, model)
 
@@ -181,6 +199,23 @@ func (e *E2EService) resolveProviderTarget(ctx context.Context, req *E2ERequest)
 		return nil, "", nil, err
 	}
 	return loopbackProvider, loopbackModel, probeHeaders, nil
+}
+
+// resolveOpenAIProbeEndpoint decides which OpenAI endpoint a probe should hit,
+// folding both special cases that previously lived as separate branches in
+// ProbeProviderWithSDK into one place: an explicit override always wins;
+// absent that, Codex OAuth providers only speak Responses, everything else
+// defaults to Chat.
+func resolveOpenAIProbeEndpoint(override string, provider *typ.Provider) string {
+	switch override {
+	case "chat", "responses":
+		return override
+	default:
+		if isCodexOAuth(provider) {
+			return "responses"
+		}
+		return "chat"
+	}
 }
 
 // loopbackAPIBase returns the TB loopback base URL for the given scenario.
@@ -281,7 +316,10 @@ func (e *E2EService) resolveRuleTarget(ctx context.Context, req *E2ERequest) (*t
 // ProbeProviderWithSDK runs an SDK probe by dispatching a minimal request
 // through the provider's real-traffic client methods. Public because the
 // server's provider onboarding path (testProviderConnectivity) reuses it.
-func (e *E2EService) ProbeProviderWithSDK(ctx context.Context, provider *typ.Provider, model, message string, testMode E2EMode) (*E2EData, error) {
+// endpointOverride forces which OpenAI endpoint to hit ("chat"/"responses");
+// pass "" for resolveOpenAIProbeEndpoint's default (Codex OAuth -> responses,
+// everything else -> chat).
+func (e *E2EService) ProbeProviderWithSDK(ctx context.Context, provider *typ.Provider, model, message string, testMode E2EMode, endpointOverride string) (*E2EData, error) {
 	mode := testMode
 
 	_, wrapProbeHeaders := client.GetProbeHeaders(ctx)
@@ -300,11 +338,11 @@ func (e *E2EService) ProbeProviderWithSDK(ctx context.Context, provider *typ.Pro
 			client.ApplyProbeHeadersToClient(oc)
 			routing = client.ApplyRoutingCaptureToClient(oc)
 		}
-		// Codex OAuth providers only speak the Responses API.
-		if isCodexOAuth(provider) {
-			result, err = probeOpenAIResponses(ctx, oc, model, message, mode)
-		} else {
+		switch resolveOpenAIProbeEndpoint(endpointOverride, provider) {
+		case "chat":
 			result, err = probeOpenAIChat(ctx, oc, model, message, mode)
+		case "responses":
+			result, err = probeOpenAIResponses(ctx, oc, model, message, mode)
 		}
 		if err == nil && routing != nil {
 			applyRoutingCapture(result, routing)
@@ -367,6 +405,6 @@ func applyRoutingCapture(result *E2EData, cap *client.RoutingCapture) {
 	}
 }
 
-func (e *E2EService) probeProviderStream(ctx context.Context, provider *typ.Provider, model, message string, testMode E2EMode) (*E2EData, error) {
-	return e.ProbeProviderWithSDK(ctx, provider, model, message, testMode)
+func (e *E2EService) probeProviderStream(ctx context.Context, provider *typ.Provider, model, message string, testMode E2EMode, endpointOverride string) (*E2EData, error) {
+	return e.ProbeProviderWithSDK(ctx, provider, model, message, testMode, endpointOverride)
 }

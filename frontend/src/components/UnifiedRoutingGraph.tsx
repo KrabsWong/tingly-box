@@ -24,6 +24,7 @@ import {TierGuideDialog} from '@/components/tier/TierGuideDialog';
 import {EntryGuideDialog} from '@/components/tier/EntryGuideDialog';
 import type {Provider} from '../types/provider';
 import type {ConfigRecord} from './RoutingGraphTypes';
+import {useCodexResponsesToggle} from '@/hooks/useCodexResponsesToggle';
 
 // Routing mode controls display behavior
 export type RoutingMode = 'smart' | 'direct' | 'auto';
@@ -263,6 +264,21 @@ export const UnifiedRoutingGraph: React.FC<UnifiedRoutingGraphProps> = ({
         return [...list].sort((a, b) => (a.tier ?? 0) - (b.tier ?? 0));
     }, [record.providers]);
 
+    // Native OpenAI Responses API toggle (Codex-scenario rules only). Codex is
+    // a special-cased page, not a generic capability: deliberately scoped to
+    // record.scenario === 'codex' rather than every OpenAI-style rule,
+    // matching how the feature was scoped end to end. Logic lives in
+    // useCodexResponsesToggle (pre-flight probe + mid-session revalidation).
+    const primaryService = sortedDefaultProviders.find((p) => p.active !== false) || sortedDefaultProviders[0];
+    const showResponsesToggle = record.scenario === 'codex'
+        && !!primaryService
+        && getApiStyle(primaryService.provider) === 'openai';
+    const {
+        enabled: responsesEnabled,
+        probing: responsesProbing,
+        onToggle: handleResponsesToggle,
+    } = useCodexResponsesToggle({record, primaryService, onUpdateRecord});
+
     // Group already-sorted providers into tiers (single pass — order preserved from sortedDefaultProviders)
     const tierGroups = React.useMemo(() => {
         const groups = new Map<number, typeof sortedDefaultProviders>();
@@ -478,6 +494,9 @@ export const UnifiedRoutingGraph: React.FC<UnifiedRoutingGraphProps> = ({
                     // Notify parent for scenario-specific handling
                     onContext1MToggle?.(newState, record.uuid);
                 }}
+                responsesEnabled={responsesEnabled}
+                responsesProbing={responsesProbing}
+                onResponsesToggle={showResponsesToggle ? handleResponsesToggle : undefined}
             />
 
             {/* Tier Guide Dialog */}
