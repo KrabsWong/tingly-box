@@ -2,7 +2,7 @@ import { BotConfigDialog, RemoteAgentBotCard, useBotModelDialog } from '@/compon
 import CCProfileDialog from '@/components/bot/CCProfileDialog';
 import EmptyState from '@/components/EmptyState';
 import { PageLayout } from '@/components/PageLayout';
-import CollapsibleGuide from '@/components/remote-control/CollapsibleGuide';
+import SetupGuideDrawer from '@/components/remote-control/SetupGuideDrawer';
 import UnifiedCard from '@/components/UnifiedCard';
 import { api } from '@/services/api';
 import { usePlatformGuide } from '@/constants/platformGuides';
@@ -10,7 +10,7 @@ import { useProfileContext } from '@/contexts/ProfileContext';
 import type { BotSettings } from '@/types/bot';
 import { defaultAgentForCCProfile } from '@/types/bot';
 import type { Provider } from '@/types/provider';
-import { Add } from '@/components/icons';
+import { Add, HelpOutline } from '@/components/icons';
 import { Alert, Box, Button, CircularProgress, Snackbar } from '@mui/material';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -36,6 +36,7 @@ const PlatformRemoteAgentPage = ({ platformId, platformName, platformPicker }: P
     // Bots section. mode 'add' from the Add button / empty state; mode 'edit'
     // from a card's edit action while the Bots nav section is hidden.
     const [dialogOpen, setDialogOpen] = useState(false);
+    const [guideOpen, setGuideOpen] = useState(false);
     const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
     const [dialogEditUuid, setDialogEditUuid] = useState<string | null>(null);
     const openAddDialog = useCallback(() => {
@@ -235,6 +236,17 @@ const PlatformRemoteAgentPage = ({ platformId, platformName, platformPicker }: P
                 subtitle={t('remoteAgent.routesSubtitle', { defaultValue: 'Access → Bot → Agent. Click a node to change that part of the route.' })}
                 size="full"
                 sx={{ mb: 2 }}
+                rightAction={guideConfig?.guide ? (
+                    <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<HelpOutline />}
+                        onClick={() => setGuideOpen(true)}
+                        sx={{ whiteSpace: 'nowrap' }}
+                    >
+                        {t('remoteControl.guide.action', { defaultValue: 'Setup guide' })}
+                    </Button>
+                ) : undefined}
             >
                 {loading ? (
                     <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -271,12 +283,15 @@ const PlatformRemoteAgentPage = ({ platformId, platformName, platformPicker }: P
                     </Box>
                 )}
             </UnifiedCard>
-            {!loading && guideConfig?.guide && (
-                <CollapsibleGuide
+            {guideConfig?.guide && (
+                <SetupGuideDrawer
+                    open={guideOpen}
                     platformName={platformName}
-                    platformGuide={guideConfig.guide}
-                    defaultExpanded={filteredBots.length === 0}
-                />
+                    onClose={() => setGuideOpen(false)}
+                    onConnectBot={openAddDialog}
+                >
+                    {guideConfig.guide}
+                </SetupGuideDrawer>
             )}
             {/* Shared bot-resource dialog: add/edit a bot without leaving this page */}
             <BotConfigDialog
