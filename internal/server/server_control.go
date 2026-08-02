@@ -21,7 +21,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/server/module/statusline"
 	usagemodule "github.com/tingly-dev/tingly-box/internal/server/module/usage"
 	virtualmodelmodule "github.com/tingly-dev/tingly-box/internal/server/module/virtualmodel"
-	"github.com/tingly-dev/tingly-box/remote/binding"
+	"github.com/tingly-dev/tingly-box/remote/access"
 	"github.com/tingly-dev/tingly-box/remote/channel"
 	"github.com/tingly-dev/tingly-box/remote/interaction"
 	remotescenario "github.com/tingly-dev/tingly-box/remote/scenario"
@@ -134,8 +134,7 @@ func (s *Server) UseUIEndpoints(ctx context.Context) {
 		s.interactionRegistry = interaction.New[interaction.Result](30 * time.Second)
 		s.scenarioRegistry = remotescenario.NewRegistry()
 		s.scenarioRegistry.Register(claudecode.New(s.interactionRegistry))
-		resolver := binding.NewResolver(sm.ImBotSettings())
-		runtime := remotescenario.NewDefaultRuntime(s.channelRegistry, resolver, RuntimeAuditSink())
+		runtime := remotescenario.NewRouteRuntime(s.channelRegistry, sm.BotAccess(), access.NewEvaluator(sm.BotAccess()), RuntimeAuditSink())
 		notifyHandler = notifymodule.NewHandlerWithRouting(s.scenarioRegistry, s.interactionRegistry, runtime)
 	} else {
 		notifyHandler = notifymodule.NewHandler()
@@ -206,15 +205,16 @@ func (s *Server) UseUIEndpoints(ctx context.Context) {
 	// is wired (channelRegistry + interactionRegistry present); without IM
 	// settings there is no channel to drive. See .design/bot-interaction-api.md.
 	if s.channelRegistry != nil && s.interactionRegistry != nil {
-		// chatLister backs GET /bots/:bot/chats — it scopes the shared chat
-		// store to the bot's platform (a bot can only reach chats on its own
-		// platform) and to its chat-id lock when one is set. nil when no IM
-		// handler is wired, in which case /chats reports unavailable.
-		var chatLister notifymodule.ChatLister
+		// chatManager backs the chat lifecycle endpoints (GET /chats,
+		// DELETE, PUT .../disabled) and the outbound blocklist check — it
+		// scopes the shared chat store to each bot's platform and chat-id
+		// lock. nil when no IM handler is wired, in which case those
+		// endpoints report unavailable.
+		var chatManager notifymodule.BotChatManager
 		if imbotHandler != nil {
-			chatLister = buildBotChatLister(s.channelRegistry, imbotHandler)
+			chatManager = newBotChatManager(s.channelRegistry, imbotHandler)
 		}
-		botAPI := notifymodule.NewBotAPIHandler(s.channelRegistry, s.interactionRegistry, chatLister)
+		botAPI := notifymodule.NewBotAPIHandler(s.channelRegistry, s.interactionRegistry, chatManager, s.config.StoreManager().BotAccess())
 		notifymodule.RegisterBotRoutes(apiV1, botAPI)
 	}
 

@@ -1,10 +1,10 @@
-import { BotTable, BotConfigDialog, PlatformPicker } from '@/components/bot';
+import { BotTable, BotConfigDialog, PlatformPicker, BotAccessDialog } from '@/components/bot';
 import EmptyState from '@/components/EmptyState';
 import { PageLayout } from '@/components/PageLayout';
 import UnifiedCard from '@/components/UnifiedCard';
 import CollapsibleGuide from '@/components/remote-control/CollapsibleGuide';
 import { BOT_PLATFORM_IDS, PLATFORM_BRAND_ICONS, platformDisplayName, usePlatformGuide } from '@/constants/platformGuides';
-import { api } from '@/services/api';
+import { api, enrichBotsWithCapabilities } from '@/services/api';
 import { countBotsByPlatform } from '@/types/bot';
 import type { BotSettings } from '@/types/bot';
 import { useBotToggle } from '@/hooks/useBotToggle';
@@ -34,6 +34,7 @@ const BotOverviewPage = () => {
     const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
     const [dialogEditUuid, setDialogEditUuid] = useState<string | null>(null);
     const [dialogPlatformId, setDialogPlatformId] = useState('telegram');
+    const [accessBot, setAccessBot] = useState<BotSettings | null>(null);
 
     const [botLoading, setBotLoading] = useState(true);
     const [restartingBotUuid, setRestartingBotUuid] = useState<string | null>(null);
@@ -53,7 +54,7 @@ const BotOverviewPage = () => {
             setBotLoading(true);
             const data = await api.getImBotSettingsList();
             if (data?.success && Array.isArray(data.settings)) {
-                setBots(data.settings);
+                setBots(await enrichBotsWithCapabilities(data.settings));
             } else if (data?.success === false) {
                 showNotification(data.error || t('remoteControl.notify.loadFailed', { defaultValue: 'Failed to load bot settings' }), 'error');
             }
@@ -80,7 +81,8 @@ const BotOverviewPage = () => {
         {
             id: 'all',
             label: t('bots.overview.allPlatforms', { defaultValue: 'All' }),
-            icon: (active: boolean) => <ListAlt sx={{ fontSize: 20, color: active ? 'primary.main' : 'text.disabled' }} />,
+            icon: <ListAlt sx={{fontSize: 20, color: 'text.disabled'}}/>,
+            activeIcon: <ListAlt sx={{fontSize: 20, color: 'primary.main'}}/>,
             subtitle: countLabel(bots.filter(b => b.enabled).length, bots.length),
         },
         ...BOT_PLATFORM_IDS.map((id) => {
@@ -89,7 +91,8 @@ const BotOverviewPage = () => {
             return {
                 id,
                 label: platformDisplayName(id, t),
-                icon: (active: boolean) => <BrandIcon size={20} grayscale={!active} />,
+                icon: <BrandIcon size={20} grayscale/>,
+                activeIcon: <BrandIcon size={20} grayscale={false}/>,
                 subtitle: c ? countLabel(c.active, c.total) : undefined,
             };
         }),
@@ -171,18 +174,20 @@ const BotOverviewPage = () => {
     const platformName = selectedPlatform === 'all' ? '' : platformDisplayName(selectedPlatform, t);
 
     return (
-        <PageLayout loading={false}>
+        <PageLayout
+            loading={false}
+            title={t('bots.overview.title', {defaultValue: 'Bots'})}
+            subtitle={t('bots.overview.pageSubtitle', {defaultValue: 'Connect and maintain the messaging accounts used by Remote Control and IM Notify.'})}
+            rightAction={
+                <Button variant="contained" startIcon={<Add/>} onClick={openAddDialog} size="small">
+                    {t('bots.overview.connectBot', {defaultValue: 'Connect a bot'})}
+                </Button>
+            }
+        >
             <PlatformPicker items={pickerItems} value={selectedPlatform} onChange={selectPlatform} />
-            {!botLoading && selectedPlatform !== 'all' && guideConfig?.guide && (
-                <CollapsibleGuide
-                    platformName={platformName}
-                    platformGuide={guideConfig.guide}
-                    defaultExpanded={filteredBots.length === 0}
-                />
-            )}
             <UnifiedCard
                 title={selectedPlatform === 'all'
-                    ? t('bots.overview.title', { defaultValue: 'Bots' })
+                    ? t('bots.overview.allConnections', { defaultValue: 'All connections' })
                     : t('bots.overview.platformTitle', { defaultValue: '{{platform}} Bots', platform: platformName })}
                 subtitle={t('bots.overview.subtitle', {
                     defaultValue: `${filteredBots.length} bot${filteredBots.length !== 1 ? 's' : ''} connected`,
@@ -190,17 +195,7 @@ const BotOverviewPage = () => {
                 })}
                 size="full"
                 sx={{ mb: 2 }}
-                titleHeadingLevel={1}
-                rightAction={
-                    <Button
-                        variant="contained"
-                        startIcon={<Add />}
-                        onClick={openAddDialog}
-                        size="small"
-                    >
-                        {t('bots.overview.connectBot', { defaultValue: 'Connect a bot' })}
-                    </Button>
-                }
+                titleHeadingLevel={2}
             >
                 {botLoading ? (
                     <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -224,9 +219,17 @@ const BotOverviewPage = () => {
                         onRestart={(uuid) => handleBotRestart(uuid)}
                         isToggling={isToggling}
                         isRestarting={(uuid) => restartingBotUuid === uuid}
+                        onManageAccess={setAccessBot}
                     />
                 )}
             </UnifiedCard>
+            {!botLoading && selectedPlatform !== 'all' && guideConfig?.guide && (
+                <CollapsibleGuide
+                    platformName={platformName}
+                    platformGuide={guideConfig.guide}
+                    defaultExpanded={filteredBots.length === 0}
+                />
+            )}
             {/* Shared add/edit dialog for the bot resource. Locked to the
                 selected platform when browsing one; unlocked under "All" so
                 the user picks a platform in the dialog itself. */}
@@ -240,6 +243,12 @@ const BotOverviewPage = () => {
                 onClose={() => setDialogOpen(false)}
                 onSaved={loadBotSettings}
                 notify={showNotification}
+            />
+            <BotAccessDialog
+                open={Boolean(accessBot)}
+                bot={accessBot}
+                onClose={() => setAccessBot(null)}
+                onChanged={loadBotSettings}
             />
             <Snackbar
                 open={snackbar.open}

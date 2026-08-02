@@ -12,10 +12,16 @@ export * from './styles';
 
 // Remote Graph nodes
 export { default as AtNode } from './AtNode';
-export { default as ImBotNode } from './ImBotNode';
 export { default as AgentNode } from './AgentNode';
 export { default as AgentConfigNode } from './AgentConfigNode';
 export { default as RoutingModeNode } from './RoutingModeNode';
 export { default as CWDNode } from './ConfigNode';
 export { default as BotModelNode } from './BotModelNode';
 export { default as CrossNode } from './CrossNode';
+
+// Notify Graph nodes
+export { default as ApiEntryNode } from './ApiEntryNode';
+export { default as ChatNode } from './ChatNode';
+export { default as ImBotNode } from './ImBotNode';
+export { default as PlatformNode } from './PlatformNode';
+export { default as AccessNode } from './AccessNode';

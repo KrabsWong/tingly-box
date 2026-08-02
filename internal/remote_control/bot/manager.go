@@ -12,6 +12,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/tingly-dev/tingly-box/imbot"
+	"github.com/tingly-dev/tingly-box/remote/access"
 	"github.com/tingly-dev/tingly-box/remote/channel"
 	"github.com/tingly-dev/tingly-box/remote/channel/imchannel"
 )
@@ -22,13 +23,16 @@ import (
 // prompt replies — because the channel is a property of a running bot, not of
 // any one purpose. The bot's behavior is supplied by the injected Consumers
 // (remote_agent, notify, …), which are users of that channel; inbound
-// messages go to the host's prompt-reply router first, then through the
-// consumers in order until one claims, so the catch-all (remote_agent) sits
-// last.
+// messages go to the host's disabled-chat gate first, then the prompt-reply
+// router, then through the consumers in order until one claims, so the
+// catch-all (remote_agent) sits last. The gate must run before the
+// prompt-reply router: it is the one place that can drop a disabled chat's
+// traffic before promptReplyRouter, which sits ahead of every consumer's own
+// blocklist check, gets to answer it.
 //
 // chatStore is injected into the Manager and shared by every bot it runs —
 // see Manager.SetChatStore. This function must not close it.
-func runBotWithSettings(ctx context.Context, setting BotSetting, chatStore ChatStoreInterface, consumers []Consumer, pairing *PairingManager, channels *channel.Registry) error {
+func runBotWithSettings(ctx context.Context, setting BotSetting, chatStore ChatStoreInterface, consumers []Consumer, pairing *PairingManager, channels *channel.Registry, accessStore AccessStore, authorizer access.Authorizer) error {
 	// Create platform-specific auth config
 	authConfig := buildAuthConfig(setting)
 	platform := imbot.Platform(setting.Platform)
@@ -86,7 +90,25 @@ func runBotWithSettings(ctx context.Context, setting BotSetting, chatStore ChatS
 		}
 		attachedList = append(attachedList, attached)
 	}
-	handlers := make([]OnMessage, 0, len(attachedList)+1)
+	handlers := make([]OnMessage, 0, len(attachedList)+2)
+	handlers = append(handlers, disabledChatGate(chatStore))
+	if accessStore != nil && authorizer != nil {
+		handlers = append(handlers, authorizationGate(accessStore, authorizer, chatStore, setting.IsRequirePairing(), func(chatID string) (access.CapabilityName, access.ActionName) {
+			pending := prompter.GetPendingRequestsForChat(chatID)
+			if len(pending) == 0 {
+				return "", ""
+			}
+			capability := access.CapabilityRemoteControl
+			action := access.ActionRemoteControlApprove
+			if value, ok := pending[0].Metadata["capability"].(string); ok {
+				capability = access.CapabilityName(value)
+			}
+			if value, ok := pending[0].Metadata["reply_action"].(string); ok {
+				action = access.ActionName(value)
+			}
+			return capability, action
+		}))
+	}
 	handlers = append(handlers, promptReplyRouter(manager, prompter))
 	for _, attached := range attachedList {
 		if attached.OnMessage != nil {
@@ -199,7 +221,12 @@ type Manager struct {
 	// know where chats live. Sharing is not an optimization: a per-bot store
 	// is how concurrent bots used to erase each other's chats.
 	// See .design/remote-storage.md.
-	chatStore ChatStoreInterface
+	chatStore       ChatStoreInterface
+	capabilityStore interface {
+		GetCapability(context.Context, string, access.CapabilityName) (access.BotCapability, bool, error)
+	}
+	accessStore AccessStore
+	authorizer  access.Authorizer
 }
 
 // NewManager creates a new bot manager with a settings store and the
@@ -225,11 +252,48 @@ func NewManager(store SettingsStore, consumers ...Consumer) *Manager {
 func (m *Manager) mountedConsumers(setting BotSetting) []Consumer {
 	mounted := make([]Consumer, 0, len(m.consumers))
 	for _, c := range m.consumers {
-		if c != nil && c.Mounted(setting) {
+		if c == nil {
+			continue
+		}
+		if m.capabilityStore != nil {
+			name := access.CapabilityName(c.Name())
+			if c.Name() == "remote_agent" {
+				name = access.CapabilityRemoteControl
+			}
+			capability, found, err := m.capabilityStore.GetCapability(context.Background(), setting.UUID, name)
+			if err == nil && found && capability.Enabled {
+				mounted = append(mounted, c)
+			}
+			continue
+		}
+		if c.Mounted(setting) {
 			mounted = append(mounted, c)
 		}
 	}
 	return mounted
+}
+
+// SetCapabilityStore makes explicit BotCapability rows the lifecycle source
+// of truth. The legacy Mounted method remains only for standalone callers
+// that have not wired the final-state persistence layer.
+func (m *Manager) SetCapabilityStore(store interface {
+	GetCapability(context.Context, string, access.CapabilityName) (access.BotCapability, bool, error)
+}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.capabilityStore = store
+}
+
+func (m *Manager) SetAccessStore(store AccessStore) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.accessStore = store
+	m.capabilityStore = store
+	if store != nil {
+		m.authorizer = access.NewEvaluator(store)
+	} else {
+		m.authorizer = nil
+	}
 }
 
 // SetChannelRegistry wires a remote channel registry so each running
@@ -352,7 +416,8 @@ func (m *Manager) Start(parentCtx context.Context, uuid string) error {
 	// Start bot in goroutine
 	pairing := m.pairing
 	channels := m.channels
-	go m.runBotSupervised(ctx, uuid, s, chatStore, mounted, pairing, channels, doneChan)
+	accessStore, authorizer := m.accessStore, m.authorizer
+	go m.runBotSupervised(ctx, uuid, s, chatStore, mounted, pairing, channels, accessStore, authorizer, doneChan)
 
 	logrus.WithField("uuid", uuid).WithField("name", name).WithField("platform", platform).Info("Bot started")
 	return nil
@@ -371,6 +436,8 @@ func (m *Manager) runBotSupervised(
 	consumers []Consumer,
 	pairing *PairingManager,
 	channels *channel.Registry,
+	accessStore AccessStore,
+	authorizer access.Authorizer,
 	doneChan chan struct{},
 ) {
 	defer close(doneChan)
@@ -389,7 +456,7 @@ func (m *Manager) runBotSupervised(
 		}
 	}()
 
-	if err := runBotWithSettings(ctx, s, chatStore, consumers, pairing, channels); err != nil {
+	if err := runBotWithSettings(ctx, s, chatStore, consumers, pairing, channels, accessStore, authorizer); err != nil {
 		logrus.WithError(err).WithField("uuid", uuid).Warn("Bot stopped with error")
 	}
 	logrus.WithField("uuid", uuid).Info("Bot stopped")

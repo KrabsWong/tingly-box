@@ -12,11 +12,39 @@ import (
 	"github.com/tingly-dev/tingly-box/remote/channel/imchannel"
 )
 
+// disabledChatGate builds the bot-host-level inbound handler that drops all
+// traffic from a disabled chat before any other handler — including
+// promptReplyRouter — gets a chance to claim it. It must run first: a
+// disabled chat with an outstanding permission prompt would otherwise have
+// its "perm" callback or text answer claimed by promptReplyRouter, which sits
+// ahead of the per-consumer blocklist check in remoteagent.HandleMessage and
+// would generate exactly the outbound reply disable exists to suppress.
+// Silently: replying would give a blocked party a probe signal.
+//
+// This is the managed-mode gate. remoteagent.HandleMessage keeps its own copy
+// of the IsChatDisabled check for the standalone / host-less path (CLI + test
+// harness), which never enters this dispatch chain — two paths into the
+// handler, two gates. See the spec (bot-chat-lifecycle-collapse §3b).
+func disabledChatGate(chatStore ChatStoreInterface) OnMessage {
+	return func(msg imbot.Message, platform imbot.Platform, botUUID string) bool {
+		chatID := msg.GetReplyTarget()
+		if chatID == "" || chatStore == nil {
+			return false
+		}
+		if chatStore.IsChatDisabled(chatID) {
+			logrus.Debugf("chat %s is disabled, dropping message before dispatch", chatID)
+			return true
+		}
+		return false
+	}
+}
+
 // promptReplyRouter builds the bot-host-level inbound handler that routes the
 // user's answers back to the bot's shared channel prompter. The host runs it
-// BEFORE any consumer: the "perm" callback namespace and pending-answer texts
-// belong entirely to the one prompter, so an unknown "perm" request ID is
-// claimed and reported as expired rather than falling through.
+// after disabledChatGate and before any consumer: the "perm" callback
+// namespace and pending-answer texts belong entirely to the one prompter, so
+// an unknown "perm" request ID is claimed and reported as expired rather than
+// falling through.
 func promptReplyRouter(mgr *imbot.Manager, prompter *imchannel.IMPrompter) OnMessage {
 	return func(msg imbot.Message, platform imbot.Platform, botUUID string) bool {
 		chatID := msg.GetReplyTarget()

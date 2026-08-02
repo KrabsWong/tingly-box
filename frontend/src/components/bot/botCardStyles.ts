@@ -8,6 +8,8 @@
 // laid over the card so an inactive row is unmistakable at a glance. The
 // overlay is pointer-transparent, so the card stays fully interactive (you
 // can still toggle it back on / edit through the hatch).
+import { inactiveHatchSx } from '../nodes/styles';
+
 export const botCardSx = (active: boolean) => ({
     position: 'relative' as const,
     bgcolor: 'background.paper',
@@ -15,18 +17,7 @@ export const botCardSx = (active: boolean) => ({
     borderColor: 'divider',
     borderRadius: 2,
     boxShadow: 'none',
-    ...(active ? {} : {
-        '&::before': {
-            content: '""',
-            position: 'absolute',
-            inset: 0,
-            borderRadius: 'inherit',
-            zIndex: 2,
-            pointerEvents: 'none',
-            backgroundImage:
-                'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.035) 10px, rgba(0,0,0,0.035) 20px)',
-        },
-    }),
+    ...(active ? {} : inactiveHatchSx),
 });
 
 export const statusChipSx = { height: 22, minWidth: 40 } as const;

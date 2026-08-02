@@ -1,20 +1,21 @@
 package notify
 
 import (
+	"github.com/tingly-dev/tingly-box/remote/access"
 	"github.com/tingly-dev/tingly-box/swagger"
 )
 
 // BotNotifyRequest is the swagger model for POST /bots/:bot/notify.
 type BotNotifyRequest struct {
-	ChatID string `json:"chat_id" example:"dm:ops"`
-	Title  string `json:"title,omitempty" example:"Build #412 failed"`
-	Body   string `json:"body" example:"main branch is red"`
-	Level  string `json:"level,omitempty" example:"info"`
+	Target access.TargetRef `json:"target"`
+	Title  string           `json:"title,omitempty" example:"Build #412 failed"`
+	Body   string           `json:"body" example:"main branch is red"`
+	Level  string           `json:"level,omitempty" example:"info"`
 }
 
 // BotInteractRequest is the swagger model for POST /bots/:bot/interact.
 type BotInteractRequest struct {
-	ChatID         string              `json:"chat_id" example:"dm:ops"`
+	Target         access.TargetRef    `json:"target"`
 	Kind           string              `json:"kind" example:"confirm"`
 	Title          string              `json:"title" example:"Deploy to prod?"`
 	Body           string              `json:"body,omitempty" example:"commit a1b2c3"`
@@ -36,7 +37,20 @@ type BotChatSummary struct {
 	IsPaired      bool   `json:"is_paired,omitempty" example:"true"`
 	IsWhitelisted bool   `json:"is_whitelisted,omitempty" example:"false"`
 	ProjectPath   string `json:"project_path,omitempty" example:"/home/user/proj"`
+	Disabled      bool   `json:"disabled,omitempty" example:"false"`
+	DisabledAt    string `json:"disabled_at,omitempty" example:"2026-07-28T12:00:00Z"`
 	UpdatedAt     string `json:"updated_at,omitempty" example:"2026-07-25T12:00:00Z"`
+}
+
+// BotChatSetDisabledRequest is the swagger model for
+// PUT /bots/:bot/chats/:chat_id/disabled.
+type BotChatSetDisabledRequest struct {
+	Disabled *bool `json:"disabled" example:"true"`
+}
+
+// BotChatOKResponse is the swagger model for the chat mutation endpoints.
+type BotChatOKResponse struct {
+	OK bool `json:"ok" example:"true"`
 }
 
 // BotChatsResponse is the swagger model for the GET /bots/:bot/chats body.
@@ -95,13 +109,4 @@ func RegisterBotRoutes(router *swagger.RouteGroup, handler *BotAPIHandler) {
 		),
 	)
 
-	router.GET("/bots/:bot/chats", handler.ListChats,
-		swagger.WithTags("bot-interaction"),
-		swagger.WithDescription("List the chats a running bot can reach. Use the returned chat_id as the chat_id field in POST /bots/:bot/notify and /interact. A bot that isn't running returns an empty list with running:false rather than an error."),
-		swagger.WithPathParam("bot", "string", "Target bot UUID"),
-		swagger.WithResponseModel(BotChatsResponse{}),
-		swagger.WithErrorResponses(
-			swagger.ErrorResponseConfig{Code: 503, Message: "Chat listing unavailable"},
-		),
-	)
 }

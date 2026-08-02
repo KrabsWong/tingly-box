@@ -34,6 +34,7 @@ type StoreManager struct {
 	taskStore          *TaskStore
 	remoteChatStore    *RemoteChatStore
 	remoteSessionStore *RemoteSessionStore
+	botAccessStore     *BotAccessStore
 }
 
 // StoreManagerConfig holds configuration for StoreManager initialization.
@@ -284,6 +285,9 @@ func (sm *StoreManager) initTaskStore() error {
 // These replace the JSON files the remote subsystem used to keep beside the
 // database; see .design/remote-storage.md.
 func (sm *StoreManager) initRemoteStores() error {
+	if err := migrateBotAccessTables(sm.db); err != nil {
+		return fmt.Errorf("migrate bot access tables: %w", err)
+	}
 	if err := sm.db.AutoMigrate(
 		&RemoteChatRecord{},
 		&RemoteSessionRecord{},
@@ -297,6 +301,7 @@ func (sm *StoreManager) initRemoteStores() error {
 	}
 	sm.remoteChatStore = NewRemoteChatStore(sm.db)
 	sm.remoteSessionStore = NewRemoteSessionStore(sm.db, transcript)
+	sm.botAccessStore = NewBotAccessStore(sm.db)
 
 	// Migrating here, rather than from whichever feature happens to construct
 	// a store first, is what makes every entry point — server, standalone CLI
@@ -306,6 +311,13 @@ func (sm *StoreManager) initRemoteStores() error {
 		logrus.WithError(err).Error("Failed to import legacy remote JSON stores; leaving files in place")
 	}
 	return nil
+}
+
+// BotAccess returns the final-state Bot Capability and access-policy store.
+func (sm *StoreManager) BotAccess() *BotAccessStore {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.botAccessStore
 }
 
 // RemoteChats returns the RemoteChatStore (thread-safe).
@@ -426,6 +438,7 @@ func (sm *StoreManager) Close() error {
 	sm.taskStore = nil
 	sm.remoteChatStore = nil
 	sm.remoteSessionStore = nil
+	sm.botAccessStore = nil
 	sm.db = nil
 
 	logrus.Info("StoreManager: Closed all stores")

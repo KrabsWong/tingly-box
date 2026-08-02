@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tingly-dev/tingly-box/imbot"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
+	"github.com/tingly-dev/tingly-box/remote/access"
 )
 
 // =============================================
@@ -24,25 +25,22 @@ type SettingsResponse struct {
 
 // CreateRequest represents the request to create ImBot settings
 type CreateRequest struct {
-	UUID               string            `json:"uuid,omitempty"`
-	Name               string            `json:"name,omitempty"`
-	Platform           string            `json:"platform"`
-	AuthType           string            `json:"auth_type"`
-	Auth               map[string]string `json:"auth"`
-	ProxyURL           string            `json:"proxy_url,omitempty"`
-	ChatID             string            `json:"chat_id_lock,omitempty"`
-	BashAllowlist      []string          `json:"bash_allowlist,omitempty"`
-	DefaultCwd         string            `json:"default_cwd,omitempty"`   // Default working directory
-	DefaultAgent       string            `json:"default_agent,omitempty"` // Default Agent UUID
-	Enabled            bool              `json:"enabled"`
-	Token              string            `json:"token,omitempty"`               // Legacy field
-	SmartGuideProvider string            `json:"smartguide_provider,omitempty"` // Provider UUID
-	SmartGuideModel    string            `json:"smartguide_model,omitempty"`    // Model identifier
-	RequirePairing     *bool             `json:"require_pairing,omitempty"`     // TOFU pairing gate; nil → platform default
-	// RemoteAgent is the remote_agent mount switch: whether this bot is used to
-	// control Claude Code / SmartGuide from chat. nil → default (mounted). When
-	// set true it also enables the bot (a mount with no live bot is useless).
-	RemoteAgent *bool `json:"remote_agent,omitempty"`
+	UUID               string                                            `json:"uuid,omitempty"`
+	Name               string                                            `json:"name,omitempty"`
+	Platform           string                                            `json:"platform"`
+	AuthType           string                                            `json:"auth_type"`
+	Auth               map[string]string                                 `json:"auth"`
+	ProxyURL           string                                            `json:"proxy_url,omitempty"`
+	ChatID             string                                            `json:"chat_id_lock,omitempty"`
+	BashAllowlist      []string                                          `json:"bash_allowlist,omitempty"`
+	DefaultCwd         string                                            `json:"default_cwd,omitempty"`   // Default working directory
+	DefaultAgent       string                                            `json:"default_agent,omitempty"` // Default Agent UUID
+	Enabled            bool                                              `json:"enabled"`
+	Token              string                                            `json:"token,omitempty"`               // Legacy field
+	SmartGuideProvider string                                            `json:"smartguide_provider,omitempty"` // Provider UUID
+	SmartGuideModel    string                                            `json:"smartguide_model,omitempty"`    // Model identifier
+	RequirePairing     *bool                                             `json:"require_pairing,omitempty"`     // TOFU pairing gate; nil → platform default
+	Capabilities       map[access.CapabilityName]CapabilityUpdateRequest `json:"capabilities,omitempty"`
 }
 
 // UpdateRequest represents the request to update ImBot settings
@@ -61,11 +59,6 @@ type UpdateRequest struct {
 	SmartGuideProvider *string           `json:"smartguide_provider,omitempty"` // Provider UUID
 	SmartGuideModel    *string           `json:"smartguide_model,omitempty"`    // Model identifier
 	RequirePairing     *bool             `json:"require_pairing,omitempty"`     // TOFU pairing gate; nil → unchanged
-	// RemoteAgent toggles the remote_agent mount (control Claude Code / SmartGuide
-	// from chat). nil → unchanged. Setting it true also enables the bot (cascade);
-	// setting it false leaves Enabled as-is but the bot stops if it was the only
-	// active mount.
-	RemoteAgent *bool `json:"remote_agent,omitempty"`
 }
 
 // PairingCodeResponse represents the response for pairing-code reveal/rotate.

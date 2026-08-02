@@ -7,7 +7,6 @@ import {
 } from '@/components/icons';
 import {
     Box,
-    Button,
     Chip,
     Collapse,
     IconButton,
@@ -17,20 +16,20 @@ import {
     MenuItem,
     Stack,
     Switch,
-    TextField,
     Tooltip,
     Typography,
 } from '@mui/material';
 import {styled} from '@mui/material/styles';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import type {BotSettings} from '@/types/bot';
-import {isRemoteAgentMounted} from '@/types/bot';
+import type {BotGroupDetail, BotSettings, DirectChatDetail} from '@/types/bot';
+import {capabilityEnabled} from '@/types/bot';
 import type {Provider} from '@/types/provider';
 import type {ProfileInfo} from '@/contexts/ProfileContext';
 import {botCardSx, statusChipSx} from './botCardStyles';
-import PairingCodePanel from './PairingCodePanel';
 import RemoteControlGraph from './RemoteControlGraph';
-import {useEffect, useState} from 'react';
+import BotAccessDialog from './BotAccessDialog';
+import {api} from '@/services/api';
+import {useCallback, useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 
 const GraphContainer = styled(Box)(({theme}) => ({
@@ -49,13 +48,13 @@ interface RemoteAgentBotCardProps {
     ccProfiles?: ProfileInfo[];
     /** Opens the Claude Code profile picker for this bot. */
     onCCProfileClick?: () => void;
-    onAgentSettingsSave: (settings: { chat_id_lock: string; bash_allowlist: string[] }) => Promise<void>;
     /** Opens the shared BotConfigDialog in edit mode (bot resource fields). */
     onEdit: () => void;
     onRestart: () => void;
     onDelete: () => void;
     isToggling?: boolean;
     isRestarting?: boolean;
+    onAccessChanged?: () => void;
 }
 
 // RemoteAgentBotCard is the PURPOSE card: one row per bot on the Remote page.
@@ -64,10 +63,9 @@ interface RemoteAgentBotCardProps {
 //
 // While the Bots nav section is hidden (bot has a single purpose today), this
 // card also hosts the bot RESOURCE operations so the Remote page is fully
-// self-sufficient: edit (shared BotConfigDialog), restart/delete (overflow
-// menu), and the pairing code — the artifact the user needs next to actually
-// start chatting. When a second purpose ships and Bots is surfaced again,
-// these graduate back to the Bots section.
+// self-sufficient: edit (shared BotConfigDialog) and restart/delete (overflow
+// menu). Access and pairing live in the Access work surface opened from the
+// first graph node, keeping authorization under one source of truth.
 const RemoteAgentBotCard: React.FC<RemoteAgentBotCardProps> = ({
     bot,
     providers,
@@ -75,49 +73,56 @@ const RemoteAgentBotCard: React.FC<RemoteAgentBotCardProps> = ({
     onModelClick,
     ccProfiles,
     onCCProfileClick,
-    onAgentSettingsSave,
     onEdit,
     onRestart,
     onDelete,
     isToggling = false,
     isRestarting = false,
+    onAccessChanged,
 }) => {
     const {t} = useTranslation();
-    const isMounted = isRemoteAgentMounted(bot.scenarios);
+    const isMounted = capabilityEnabled(bot,'remote_control');
     const isEnabled = bot.enabled ?? true;
     const hasModel = Boolean(bot.smartguide_provider && bot.smartguide_model);
 
-    const [chatIdDraft, setChatIdDraft] = useState(bot.chat_id_lock || '');
-    const [allowlistDraft, setAllowlistDraft] = useState((bot.bash_allowlist || []).join('\n'));
-    const [saving, setSaving] = useState(false);
     const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [accessDialogOpen, setAccessDialogOpen] = useState(false);
+    const [accessLoading, setAccessLoading] = useState(false);
+    const [accessError, setAccessError] = useState('');
+    const [accessCounts, setAccessCounts] = useState({directChats: 0, groups: 0});
 
-    // Re-sync drafts when the bot record refreshes (e.g. after reload).
-    useEffect(() => {
-        setChatIdDraft(bot.chat_id_lock || '');
-        setAllowlistDraft((bot.bash_allowlist || []).join('\n'));
-    }, [bot.chat_id_lock, bot.bash_allowlist]);
-
-    const dirty = chatIdDraft.trim() !== (bot.chat_id_lock || '') ||
-        allowlistDraft.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean).join(',') !==
-        (bot.bash_allowlist || []).join(',');
-
-    const handleSave = async () => {
-        setSaving(true);
+    const loadAccess = useCallback(async () => {
+        if (!bot.uuid) return;
+        setAccessLoading(true);
+        setAccessError('');
         try {
-            await onAgentSettingsSave({
-                chat_id_lock: chatIdDraft.trim(),
-                bash_allowlist: allowlistDraft.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean),
-            });
+            const [chatData, groupData] = await Promise.all([
+                api.listBotDirectChats(bot.uuid),
+                api.listBotGroups(bot.uuid),
+            ]);
+            const groupDetails = await Promise.all((groupData.groups || []).map((group: {id: string}) =>
+                api.getBotGroup(bot.uuid!, group.id)));
+            const directChats = (chatData.chats || []).filter((detail: DirectChatDetail) =>
+                detail.permissions.some((permission) =>
+                    permission.capability === 'remote_control' &&
+                    permission.action === 'access' &&
+                    permission.effect === 'allow'));
+            const groups = groupDetails.filter((detail: BotGroupDetail) =>
+                detail.capabilities.remote_control === 'allow');
+            setAccessCounts({directChats: directChats.length, groups: groups.length});
+        } catch (error) {
+            setAccessError((error as Error).message);
         } finally {
-            setSaving(false);
+            setAccessLoading(false);
         }
-    };
+    }, [bot.uuid]);
+
+    useEffect(() => { void loadAccess(); }, [loadAccess]);
 
     // Off (hatched) when this purpose isn't live: unmounted, or the bot
-    // itself is disabled. The config below stays fully editable through the
-    // overlay — the hatch is purely a "this isn't running" affordance.
+    // itself is disabled. Graph nodes remain editable through the overlay —
+    // the hatch is purely a "this isn't running" affordance.
     const isActive = isMounted && isEnabled;
 
     return (
@@ -134,11 +139,6 @@ const RemoteAgentBotCard: React.FC<RemoteAgentBotCardProps> = ({
                         {bot.name || bot.platform}
                     </Typography>
                     <Chip label={bot.platform} size="small"/>
-                    {!isEnabled && (
-                        <Tooltip title={t('remoteAgent.card.botDisabledHint', { defaultValue: 'The bot itself is disabled — mounting will re-enable it' })}>
-                            <Chip label={t('remoteAgent.card.botDisabled', { defaultValue: 'bot off' })} size="small" color="warning" variant="outlined"/>
-                        </Tooltip>
-                    )}
                     {isMounted && !hasModel && (
                         <Tooltip title={t('remoteControl.card.noModelConfigured', { defaultValue: 'No model configured - click to select a model' })}>
                             <WarningIcon sx={{fontSize: '1.1rem', color: 'warning.main'}}/>
@@ -147,16 +147,16 @@ const RemoteAgentBotCard: React.FC<RemoteAgentBotCardProps> = ({
                 </Box>
                 <Box sx={{display: 'flex', alignItems: 'center', gap: 1.5}}>
                     <Stack direction="row" spacing={1} sx={{alignItems: 'center'}}>
-                        <Tooltip title={isMounted
-                            ? t('remoteControl.card.remoteAgentUnmount', { defaultValue: 'Unmount Remote Control (bot stays configured but stops)' })
-                            : t('remoteControl.card.remoteAgentMountOn', { defaultValue: 'Mount Remote Control (also enables the bot)' })}>
-                            <Switch checked={isMounted} onChange={() => onMountToggle(!isMounted)} size="small" color="primary" disabled={isToggling}/>
+                        <Tooltip title={isActive
+                            ? t('remoteControl.card.remoteAgentOff', { defaultValue: 'Turn off Remote Control. The bot remains available to other capabilities.' })
+                            : t('remoteControl.card.remoteAgentOn', { defaultValue: 'Turn on Remote Control. The bot starts automatically if needed.' })}>
+                            <Switch checked={isActive} onChange={() => onMountToggle(!isActive)} size="small" color="primary" disabled={isToggling}/>
                         </Tooltip>
                         <Chip
-                            label={isMounted ? t('common.on', { defaultValue: 'On' }) : t('common.off', { defaultValue: 'Off' })}
+                            label={isActive ? t('common.on', { defaultValue: 'On' }) : t('common.off', { defaultValue: 'Off' })}
                             size="small"
-                            color={isMounted ? 'success' : 'default'}
-                            variant={isMounted ? 'filled' : 'outlined'}
+                            color={isActive ? 'success' : 'default'}
+                            variant={isActive ? 'filled' : 'outlined'}
                             sx={statusChipSx}
                         />
                     </Stack>
@@ -196,49 +196,18 @@ const RemoteAgentBotCard: React.FC<RemoteAgentBotCardProps> = ({
                     <RemoteControlGraph
                         imbot={bot}
                         providers={providers}
-                        isBotEnabled={isEnabled}
+                        isBotEnabled={isActive}
                         readOnly={isToggling}
                         onModelClick={onModelClick}
                         ccProfiles={ccProfiles}
                         onCCProfileClick={onCCProfileClick}
+                        directChatCount={accessCounts.directChats}
+                        groupCount={accessCounts.groups}
+                        accessLoading={accessLoading}
+                        accessError={accessError}
+                        onAccessClick={() => setAccessDialogOpen(true)}
                     />
                 </GraphContainer>
-                <Stack spacing={1.5} sx={{px: 2, py: 1.5}}>
-                    <TextField
-                        label={t('remoteControl.dialog.chatIdLock', { defaultValue: 'Chat ID Lock' })}
-                        placeholder="e.g. 123456789"
-                        value={chatIdDraft}
-                        onChange={(e) => setChatIdDraft(e.target.value)}
-                        fullWidth
-                        size="small"
-                        helperText={t('remoteControl.dialog.chatIdLockHelper', { defaultValue: 'Optional: when set, only this chat ID can use the bot.' })}
-                        disabled={saving}
-                    />
-                    <TextField
-                        label={t('remoteControl.dialog.bashAllowlist', { defaultValue: 'Bash Allowlist' })}
-                        placeholder={'cd\nls\npwd'}
-                        value={allowlistDraft}
-                        onChange={(e) => setAllowlistDraft(e.target.value)}
-                        fullWidth
-                        multiline
-                        minRows={2}
-                        size="small"
-                        helperText={t('remoteControl.dialog.bashAllowlistHelper', { defaultValue: 'Allowlisted /bash subcommands. Default: cd, ls, pwd.' })}
-                        disabled={saving}
-                    />
-                    {dirty && (
-                        <Box sx={{display: 'flex', justifyContent: 'flex-end'}}>
-                            <Button size="small" variant="contained" onClick={handleSave} disabled={saving}>
-                                {saving
-                                    ? t('remoteControl.dialog.saving', { defaultValue: 'Saving...' })
-                                    : t('remoteAgent.card.saveAgentSettings', { defaultValue: 'Save agent settings' })}
-                            </Button>
-                        </Box>
-                    )}
-                    {/* Pairing code — the artifact needed for the next step
-                        (send /bind in the chat), so it lives right here. */}
-                    <PairingCodePanel bot={bot}/>
-                </Stack>
             </Collapse>
 
             <ConfirmDialog
@@ -249,6 +218,15 @@ const RemoteAgentBotCard: React.FC<RemoteAgentBotCardProps> = ({
                 confirmColor="error"
                 onClose={() => setDeleteModalOpen(false)}
                 onConfirm={() => { setDeleteModalOpen(false); onDelete(); }}
+            />
+            <BotAccessDialog
+                open={accessDialogOpen}
+                bot={bot}
+                onClose={() => setAccessDialogOpen(false)}
+                onChanged={() => {
+                    void loadAccess();
+                    onAccessChanged?.();
+                }}
             />
         </Box>
     );

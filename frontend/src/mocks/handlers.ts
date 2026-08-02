@@ -2702,22 +2702,62 @@ export const handlers = [
         })
     }),
 
-    // Bot interaction API — GET /bots/:bot/chats and POST /bots/:bot/notify.
-    // Mirrors internal/server/module/notify/bot_api.go. Returns a couple of
-    // sample chats so the chat_id picker + copy is exercisable in mock mode.
+    // Bot access + interaction APIs. The fixtures intentionally include an
+    // authorized Direct Chat, an observed-but-denied Direct Chat, and a Group
+    // so the Notify work surface can exercise every primary state.
+    http.get('/api/v1/bots/:bot/capabilities', ({ params }) => {
+        return HttpResponse.json({capabilities: [
+            {bot_uuid: params.bot, capability: 'remote_control', enabled: true, config: {}},
+            {bot_uuid: params.bot, capability: 'notify', enabled: true, config: {}},
+        ], bot_running: true})
+    }),
+
+    http.put('/api/v1/bots/:bot/capabilities/:capability', async ({ params, request }) => {
+        const body = await request.json().catch(() => ({})) as any
+        return HttpResponse.json({
+            capability: {bot_uuid: params.bot, capability: params.capability, enabled: Boolean(body.enabled), config: body.config || {}},
+            bot_running: Boolean(body.enabled),
+        })
+    }),
+
     http.get('/api/v1/bots/:bot/chats', () => {
         return HttpResponse.json({
             chats: [
-                { chat_id: 'telegram:123456789', platform: 'telegram', is_paired: true, updated_at: new Date().toISOString() },
-                { chat_id: 'telegram:987654321', platform: 'telegram', is_paired: false, updated_at: new Date().toISOString() },
+                {
+                    chat: {id: 'direct-1', bot_uuid: 'mock-bot', platform: 'telegram', external_chat_id: 'telegram:123456789', peer_actor_id: 'actor-1', blocked: false},
+                    permissions: [
+                        {capability: 'notify', action: 'access', effect: 'allow'},
+                        {capability: 'notify', action: 'notify.receive', effect: 'allow'},
+                        {capability: 'notify', action: 'notify.reply', effect: 'allow'},
+                    ],
+                },
+                {
+                    chat: {id: 'direct-2', bot_uuid: 'mock-bot', platform: 'telegram', external_chat_id: 'telegram:987654321', peer_actor_id: 'actor-2', blocked: false},
+                    permissions: [],
+                },
             ],
         })
     }),
 
+    http.put('/api/v1/bots/:bot/chats/:chat/permissions/:capability/:action', () => HttpResponse.json({ok: true})),
+    http.put('/api/v1/bots/:bot/chats/:chat/blocked', () => HttpResponse.json({ok: true})),
+    http.delete('/api/v1/bots/:bot/chats/:chat', () => HttpResponse.json({ok: true})),
+
+    http.get('/api/v1/bots/:bot/groups', () => HttpResponse.json({groups: [
+        {id: 'group-1', bot_uuid: 'mock-bot', platform: 'telegram', external_group_id: 'telegram:-10024681012', name: 'Release Crew', blocked: false},
+    ]})),
+    http.get('/api/v1/bots/:bot/groups/:group', () => HttpResponse.json({
+        group: {id: 'group-1', bot_uuid: 'mock-bot', platform: 'telegram', external_group_id: 'telegram:-10024681012', name: 'Release Crew', blocked: false},
+        capabilities: {notify: 'allow', remote_control: 'deny'},
+        actors: [],
+    })),
+    http.put('/api/v1/bots/:bot/groups/:group/capabilities/:capability', () => HttpResponse.json({ok: true})),
+    http.put('/api/v1/bots/:bot/groups/:group/blocked', () => HttpResponse.json({ok: true})),
+
     http.post('/api/v1/bots/:bot/notify', async ({ request }) => {
         const body = await request.json().catch(() => null) as any
-        if (!body || !body.chat_id || !body.body) {
-            return HttpResponse.json({ error: 'chat_id and body are required' }, { status: 400 })
+        if (!body?.target?.kind || !body?.target?.id || !body.body) {
+            return HttpResponse.json({ error: 'target and body are required' }, { status: 400 })
         }
         return HttpResponse.json({ ok: true })
     }),
@@ -2728,8 +2768,8 @@ export const handlers = [
     // mock mode (real backend long-polls).
     http.post('/api/v1/bots/:bot/interact', async ({ params, request }) => {
         const body = await request.json().catch(() => null) as any
-        if (!body || !body.chat_id || !body.kind || !body.title) {
-            return HttpResponse.json({ error: 'chat_id, kind, and title are required' }, { status: 400 })
+        if (!body?.target?.kind || !body?.target?.id || !body.kind || !body.title) {
+            return HttpResponse.json({ error: 'target, kind, and title are required' }, { status: 400 })
         }
         const request_id = 'mock-req-' + Math.random().toString(36).slice(2, 10)
         return HttpResponse.json({

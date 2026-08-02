@@ -2,7 +2,7 @@
 
 import TinglyService from "@/bindings";
 import type {components} from '@/client';
-import type {BotChat} from '@/types/bot';
+import type {BotChat, BotSettings} from '@/types/bot';
 import {getApiBaseUrl} from '../utils/protocol';
 import {
     controlApi,
@@ -71,6 +71,37 @@ async function modelAPI(url: string, options: RequestInit = {}): Promise<any> {
     } catch (error) {
         return {success: false, error: (error as Error).message};
     }
+}
+
+// Temporary raw control-plane call for the Bot Access endpoints. The backend
+// models are already in Swagger; this helper can be removed after SDK codegen.
+async function botAccessAPI(path: string, options: RequestInit = {}): Promise<any> {
+    const base = await getApiBaseUrl();
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${base}${path}`, {
+        ...options,
+        headers: {...headers, 'Content-Type': 'application/json', ...(options.headers || {})},
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `request failed (${response.status})`);
+    return data;
+}
+
+const listBotCapabilities = (botUUID: string) =>
+    botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/capabilities`);
+
+// Capability records are exposed separately from the generated bot settings
+// model. Keep the join in one place so every bot surface gets the same
+// per-bot failure fallback while SDK codegen catches up.
+export async function enrichBotsWithCapabilities(bots: BotSettings[]): Promise<BotSettings[]> {
+    return Promise.all(bots.map(async (bot) => {
+        try {
+            const result = await listBotCapabilities(bot.uuid!);
+            return {...bot, capabilities: result.capabilities || []};
+        } catch {
+            return {...bot, capabilities: []};
+        }
+    }));
 }
 
 export const api = {
@@ -1517,6 +1548,42 @@ export const api = {
         }
     },
 
+    listBotCapabilities,
+    setBotCapability: (botUUID: string, capability: 'notify' | 'remote_control', enabled: boolean) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/capabilities/${capability}`, {
+            method: 'PUT', body: JSON.stringify({enabled, config: {}}),
+        }),
+    listBotDirectChats: (botUUID: string) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/chats`),
+    setBotDirectChatBlocked: (botUUID: string, chatID: string, blocked: boolean) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/chats/${encodeURIComponent(chatID)}/blocked`, {
+            method: 'PUT', body: JSON.stringify({blocked}),
+        }),
+    deleteBotDirectChat: (botUUID: string, chatID: string) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/chats/${encodeURIComponent(chatID)}`, {
+            method: 'DELETE',
+        }),
+    setBotDirectChatPermission: (botUUID: string, chatID: string, capability: string, action: string, effect: 'allow' | 'deny') =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/chats/${encodeURIComponent(chatID)}/permissions/${capability}/${action}`, {
+            method: 'PUT', body: JSON.stringify({effect}),
+        }),
+    listBotGroups: (botUUID: string) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/groups`),
+    getBotGroup: (botUUID: string, groupID: string) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/groups/${encodeURIComponent(groupID)}`),
+    setBotGroupBlocked: (botUUID: string, groupID: string, blocked: boolean) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/groups/${encodeURIComponent(groupID)}/blocked`, {
+            method: 'PUT', body: JSON.stringify({blocked}),
+        }),
+    setBotGroupCapability: (botUUID: string, groupID: string, capability: string, effect: 'allow' | 'deny') =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/groups/${encodeURIComponent(groupID)}/capabilities/${capability}`, {
+            method: 'PUT', body: JSON.stringify({effect}),
+        }),
+    addBotGroupActor: (botUUID: string, groupID: string, actorID: string, externalActorID: string, displayName?: string) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/groups/${encodeURIComponent(groupID)}/actors/${encodeURIComponent(actorID)}`, {
+            method: 'PUT', body: JSON.stringify({external_actor_id: externalActorID, display_name: displayName, label: 'Controller'}),
+        }),
+
     // List the chats a bot can reach (GET /api/v1/bots/:bot/chats).
     // Placeholder until codegen regenerates the client SDK for the new
     // bot-interaction endpoint — calls the raw path directly.
@@ -1530,7 +1597,21 @@ export const api = {
             if (!response.ok) {
                 return {error: `failed to list chats (${response.status})`};
             }
-            return await response.json();
+            const payload = await response.json();
+            return {
+                chats: (payload.chats || []).map((item: any) => ({
+                    chat_id: item.chat?.external_chat_id,
+                    id: item.chat?.id,
+                    platform: item.chat?.platform,
+                    is_paired: Boolean(item.chat?.peer_actor_id),
+                    blocked: item.chat?.blocked,
+                    can_notify: (item.permissions || []).some((permission: any) =>
+                        permission.capability === 'notify' &&
+                        permission.action === 'notify.receive' &&
+                        permission.effect === 'allow'),
+                })),
+                running: true,
+            };
         } catch (error: any) {
             return {error: error.message};
         }
@@ -1539,10 +1620,10 @@ export const api = {
     // Send a one-way notification to a running bot's chat
     // (POST /api/v1/bots/:bot/notify). Placeholder until codegen regenerates
     // the client SDK — calls the raw path directly. Field names mirror the
-    // backend notifyRequest: chat_id + body required, title/level optional.
+    // backend notifyRequest: stable internal target + body required.
     notifyBot: async (
         botUUID: string,
-        body: {chat_id: string; title?: string; body: string; level?: string},
+        body: {target: {kind: 'direct_chat' | 'group'; id: string}; title?: string; body: string; level?: string},
     ): Promise<{ok?: boolean; error?: string}> => {
         try {
             const base = await getApiBaseUrl();
@@ -1565,12 +1646,12 @@ export const api = {
     // Start an interactive prompt on a running bot's chat
     // (POST /api/v1/bots/:bot/interact). Placeholder until codegen regenerates
     // the client SDK. Returns request_id + wait_url + expires_at, or {error}.
-    // Field names mirror backend interactRequest: chat_id/kind/title required,
+    // Field names mirror backend interactRequest: target/kind/title required,
     // options required for confirm/choose, timeout_seconds optional (≤30m).
     interactBot: async (
         botUUID: string,
         body: {
-            chat_id: string;
+            target: {kind: 'direct_chat' | 'group'; id: string};
             kind: 'confirm' | 'choose' | 'ask';
             title: string;
             body?: string;

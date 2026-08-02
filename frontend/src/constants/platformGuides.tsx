@@ -43,7 +43,7 @@ const buildFeishuFamilyGuide = (t: TFunction, opts: {
             <Typography variant="body2" sx={{
                 color: "text.secondary"
             }}>
-                {t('remoteControl.guides.feishuFamily.step1TextBefore', { defaultValue: 'Click "Add Bot" above, choose' })}{' '}
+                {t('remoteControl.guides.feishuFamily.step1TextBefore', { defaultValue: 'Select "Connect a bot", then choose' })}{' '}
                 <strong>{t('remoteControl.guides.feishuFamily.oneClickOption', { defaultValue: 'One-click (scan QR)' })}</strong>
                 {opts.step1TextAfter}
             </Typography>
@@ -166,7 +166,7 @@ const buildPlatformGuides = (t: TFunction): Record<string, PlatformGuideConfig> 
                     <Typography variant="body2" sx={{
                         color: "text.secondary"
                     }}>
-                        {t('remoteControl.guides.telegram.step2Text', { defaultValue: 'Click "Add Bot" button above and paste the token to create your bot.' })}
+                        {t('remoteControl.guides.telegram.step2Text', { defaultValue: 'Select "Connect a bot" and paste the token to create your bot.' })}
                     </Typography>
                 </Box>
             </Stack>
@@ -254,7 +254,7 @@ const buildPlatformGuides = (t: TFunction): Record<string, PlatformGuideConfig> 
                     <Typography variant="body2" sx={{
                         color: "text.secondary"
                     }}>
-                        {t('remoteControl.guides.dingtalk.step2Text', { defaultValue: 'Click "Add Bot" button above and fill in App Key and App Secret to create your bot.' })}
+                        {t('remoteControl.guides.dingtalk.step2Text', { defaultValue: 'Select "Connect a bot" and enter the App Key and App Secret to create your bot.' })}
                     </Typography>
                 </Box>
             </Stack>
@@ -299,7 +299,7 @@ const buildPlatformGuides = (t: TFunction): Record<string, PlatformGuideConfig> 
                     <Typography variant="body2" sx={{
                         color: "text.secondary"
                     }}>
-                        {t('remoteControl.guides.weixin.step2Text', { defaultValue: 'Click "Add Bot" button above and scan the QR code with Weixin to bind your account.' })}
+                        {t('remoteControl.guides.weixin.step2Text', { defaultValue: 'Select "Connect a bot" and scan the QR code with Weixin to bind your account.' })}
                     </Typography>
                 </Box>
             </Stack>
@@ -372,7 +372,7 @@ const buildPlatformGuides = (t: TFunction): Record<string, PlatformGuideConfig> 
                     <Typography variant="body2" sx={{
                         color: "text.secondary"
                     }}>
-                        {t('remoteControl.guides.wecom.step4Text', { defaultValue: 'Click "Add Bot" above and enter the Bot ID and Secret to connect.' })}
+                        {t('remoteControl.guides.wecom.step4Text', { defaultValue: 'Select "Connect a bot" and enter the Bot ID and Secret to connect.' })}
                     </Typography>
                 </Box>
             </Stack>

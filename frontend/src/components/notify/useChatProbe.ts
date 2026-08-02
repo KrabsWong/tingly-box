@@ -48,7 +48,7 @@ const WAIT_TIMEOUT_MS = 45_000;
 export interface UseChatProbeResult {
     results: ResultMap;
     running: Record<string, boolean>;
-    run: (botUUID: string, chatID: string, capability: ChatCapability) => Promise<void>;
+    run: (botUUID: string, targetKey: string, targetID: string, targetKind: 'direct_chat' | 'group', capability: ChatCapability) => Promise<void>;
     isRunning: (chatID: string, capability: ChatCapability) => boolean;
     getResult: (chatID: string, capability: ChatCapability) => ChatProbeResult | undefined;
     clear: (chatID: string, capability: ChatCapability) => void;
@@ -65,9 +65,9 @@ export function useChatProbe(): UseChatProbeResult {
         setRunning((prev) => ({...prev, [k]: v}));
     }, []);
 
-    const runNotify = useCallback(async (botUUID: string, chatID: string, started: number): Promise<ChatProbeResult> => {
+    const runNotify = useCallback(async (botUUID: string, targetID: string, targetKind: 'direct_chat' | 'group', started: number): Promise<ChatProbeResult> => {
         const result = await api.notifyBot(botUUID, {
-            chat_id: chatID,
+            target: {kind: targetKind, id: targetID},
             title: 'Test notification',
             body: 'Sent from the IM Notify probe — this verifies one-way delivery to this chat.',
             level: 'info',
@@ -79,9 +79,9 @@ export function useChatProbe(): UseChatProbeResult {
         return {capability: 'notify', success: true, status: 'delivered', latencyMs, raw: result};
     }, []);
 
-    const runConfirm = useCallback(async (botUUID: string, chatID: string, started: number): Promise<ChatProbeResult> => {
+    const runConfirm = useCallback(async (botUUID: string, targetID: string, targetKind: 'direct_chat' | 'group', started: number): Promise<ChatProbeResult> => {
         const start = await api.interactBot(botUUID, {
-            chat_id: chatID,
+            target: {kind: targetKind, id: targetID},
             kind: 'confirm',
             title: 'Test: approve?',
             body: 'This verifies the bot\'s interactive prompt works. Tap Allow or Deny.',
@@ -124,14 +124,14 @@ export function useChatProbe(): UseChatProbeResult {
         return {capability: 'confirm', success: false, status: 'timed-out', latencyMs: Date.now() - started, raw: {start, ...last}};
     }, []);
 
-    const run = useCallback(async (botUUID: string, chatID: string, capability: ChatCapability) => {
-        const k = key(chatID, capability);
+    const run = useCallback(async (botUUID: string, targetKey: string, targetID: string, targetKind: 'direct_chat' | 'group', capability: ChatCapability) => {
+        const k = key(targetKey, capability);
         setRun(k, true);
         const started = Date.now();
         try {
             const r = capability === 'notify'
-                ? await runNotify(botUUID, chatID, started)
-                : await runConfirm(botUUID, chatID, started);
+                ? await runNotify(botUUID, targetID, targetKind, started)
+                : await runConfirm(botUUID, targetID, targetKind, started);
             setResult(k, r);
         } finally {
             setRun(k, false);

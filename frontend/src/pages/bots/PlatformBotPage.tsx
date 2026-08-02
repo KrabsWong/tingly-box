@@ -1,9 +1,9 @@
-import { BotTable, BotConfigDialog } from '@/components/bot';
+import { BotTable, BotConfigDialog, BotAccessDialog } from '@/components/bot';
 import EmptyState from '@/components/EmptyState';
 import { PageLayout } from '@/components/PageLayout';
 import CollapsibleGuide from '@/components/remote-control/CollapsibleGuide';
 import UnifiedCard from '@/components/UnifiedCard';
-import { api } from '@/services/api';
+import { api, enrichBotsWithCapabilities } from '@/services/api';
 import type { BotSettings } from '@/types/bot';
 import { useBotToggle } from '@/hooks/useBotToggle';
 import { Add } from '@/components/icons';
@@ -24,6 +24,7 @@ const PlatformBotPage = ({ platformId, platformName, platformGuide }: PlatformBo
 
     // Bot settings state - filtered by platform
     const [bots, setBots] = useState<BotSettings[]>([]);
+	const [accessBot,setAccessBot]=useState<BotSettings|null>(null);
 
     // Add/Edit dialog state — the dialog itself is the shared BotConfigDialog.
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -64,7 +65,7 @@ const PlatformBotPage = ({ platformId, platformName, platformGuide }: PlatformBo
             setBotLoading(true);
             const data = await api.getImBotSettingsList();
             if (data?.success && Array.isArray(data.settings)) {
-                setBots(data.settings);
+                setBots(await enrichBotsWithCapabilities(data.settings));
             } else if (data?.success === false) {
                 showNotification(data.error || t('remoteControl.notify.loadFailed', { defaultValue: 'Failed to load bot settings' }), 'error');
             }
@@ -140,38 +141,25 @@ const PlatformBotPage = ({ platformId, platformName, platformGuide }: PlatformBo
     }, [loadBotSettings, showNotification, t]);
 
     return (
-        <PageLayout loading={false}>
-            {/* Platform-specific Guide with Preview Notice. Gated on
-                !botLoading so CollapsibleGuide only mounts once the real bot
-                count is known - its default-expanded state is fixed at
-                mount and would otherwise lock in based on the empty initial
-                array. */}
-            {!botLoading && platformGuide && (
-                <CollapsibleGuide
-                    platformName={platformName}
-                    platformGuide={platformGuide}
-                    defaultExpanded={filteredBots.length === 0}
-                />
-            )}
+        <PageLayout
+            loading={false}
+            title={t('bots.overview.title', {defaultValue: 'Bots'})}
+            subtitle={t('bots.overview.pageSubtitle', {defaultValue: 'Connect and maintain the messaging accounts used by Remote Control and IM Notify.'})}
+            rightAction={
+                <Button variant="contained" startIcon={<Add/>} onClick={openAddDialog} size="small">
+                    {t('bots.overview.connectBot', {defaultValue: 'Connect a bot'})}
+                </Button>
+            }
+        >
             <UnifiedCard
-                title={t('remoteControl.bots.title', { defaultValue: '{{platform}} Bots', platform: platformName })}
-                titleHeadingLevel={1}
+                title={t('bots.overview.platformTitle', { defaultValue: '{{platform}} Bots', platform: platformName })}
+                titleHeadingLevel={2}
                 subtitle={t('remoteControl.bots.configuredCount', {
                     defaultValue: `${filteredBots.length} bot${filteredBots.length !== 1 ? 's' : ''} configured`,
                     count: filteredBots.length,
                 })}
                 size="full"
                 sx={{ mb: 2 }}
-                rightAction={
-                    <Button
-                        variant="contained"
-                        startIcon={<Add />}
-                        onClick={openAddDialog}
-                        size="small"
-                    >
-                        {t('remoteControl.bots.addBot', { defaultValue: 'Add Bot' })}
-                    </Button>
-                }
             >
                 {botLoading ? (
                     <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -195,9 +183,17 @@ const PlatformBotPage = ({ platformId, platformName, platformGuide }: PlatformBo
                         onRestart={(uuid) => handleBotRestart(uuid)}
                         isToggling={isToggling}
                         isRestarting={(uuid) => restartingBotUuid === uuid}
+						onManageAccess={(bot)=>setAccessBot(bot)}
                     />
                 )}
             </UnifiedCard>
+            {!botLoading && platformGuide && (
+                <CollapsibleGuide
+                    platformName={platformName}
+                    platformGuide={platformGuide}
+                    defaultExpanded={filteredBots.length === 0}
+                />
+            )}
             {/* Shared add/edit dialog for the bot resource */}
             <BotConfigDialog
                 open={dialogOpen}
@@ -209,6 +205,7 @@ const PlatformBotPage = ({ platformId, platformName, platformGuide }: PlatformBo
                 onSaved={loadBotSettings}
                 notify={showNotification}
             />
+			<BotAccessDialog open={Boolean(accessBot)} bot={accessBot} onClose={()=>setAccessBot(null)} onChanged={loadBotSettings}/>
             {/* Snackbar for notifications */}
             <Snackbar
                 open={snackbar.open}

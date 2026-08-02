@@ -13,7 +13,7 @@ type BotSetting struct {
 	AuthType      string            `json:"auth_type"`                // Auth type: token, oauth, qr
 	Auth          map[string]string `json:"auth"`                     // Dynamic auth fields based on platform
 	ProxyURL      string            `json:"proxy_url,omitempty"`      // Optional proxy URL
-	ChatIDLock    string            `json:"chat_id_lock,omitempty"`   // Optional chat ID lock (restriction, not a live chat id)
+	ChatIDLock    string            `json:"chat_id_lock,omitempty"`   // Deprecated: retained for settings compatibility; access policy supersedes it.
 	BashAllowlist []string          `json:"bash_allowlist,omitempty"` // Optional bash command allowlist
 	DefaultCwd    string            `json:"default_cwd,omitempty"`    // Default working directory if no project bound
 	Enabled       bool              `json:"enabled"`                  // Whether this bot is enabled
@@ -128,10 +128,11 @@ type ChatStoreInterface interface {
 	// Records with an empty or mismatched Platform are dropped at the source:
 	// the store key has no platform dimension, so an unattributed record
 	// cannot be proven to belong to this bot's channel and must not leak into
-	// its /chats list. Used by the GET /bots/:bot/chats API so callers of the
+	// its /chats list. Disabled chats are excluded unless includeDisabled is
+	// set. Used by the GET /bots/:bot/chats API so callers of the
 	// notify/interact endpoints can discover the channel-native chat_id they
 	// must pass in the request body.
-	ListChats(platform string) ([]*Chat, error)
+	ListChats(platform string, includeDisabled bool) ([]*Chat, error)
 
 	// ListChatProjectPaths returns the MRU project-path history for a chat.
 	ListChatProjectPaths(chatID string) ([]string, error)
@@ -171,6 +172,21 @@ type ChatStoreInterface interface {
 
 	// IsChatPaired reports whether the chat is paired with the given bot UUID.
 	IsChatPaired(chatID, botUUID string) bool
+
+	// DeleteChat hard-deletes the chat row. All chat state (pairing,
+	// whitelist, project binding) is gone; a new message from the same chat
+	// recreates it fresh via the normal auto-create path. Sessions are
+	// untouched. Deleting a missing chat is a no-op.
+	DeleteChat(chatID string) error
+
+	// SetChatDisabled toggles the inbound blocklist flag. A disabled chat's
+	// messages are dropped before any handler runs and the chat is excluded
+	// from the reachable list. The row survives auto-create paths — only an
+	// explicit enable clears the flag.
+	SetChatDisabled(chatID string, disabled bool) error
+
+	// IsChatDisabled reports the blocklist flag. Missing chat → false.
+	IsChatDisabled(chatID string) bool
 }
 
 // Ensure the SQLite-backed store satisfies the interface. The JSON store this

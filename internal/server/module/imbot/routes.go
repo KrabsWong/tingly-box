@@ -7,6 +7,7 @@ import (
 
 // RegisterRoutes registers all ImBot settings routes with swagger documentation
 func RegisterRoutes(router *swagger.RouteGroup, handler *Handler) {
+	RegisterAccessRoutes(router, handler)
 	// GET /imbot-settings - List all ImBot configurations
 	router.GET("/imbot-settings", handler.ListSettings,
 		swagger.WithTags("imbot-settings"),

@@ -32,6 +32,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 
+	"github.com/tingly-dev/tingly-box/remote/access"
 	"github.com/tingly-dev/tingly-box/remote/channel"
 	"github.com/tingly-dev/tingly-box/remote/interaction"
 )
@@ -52,7 +53,18 @@ const MaxInteractTimeout = 30 * time.Minute
 type BotAPIHandler struct {
 	channels   *channel.Registry
 	results    *interaction.Registry[interaction.Result]
-	chatLister ChatLister
+	chats      BotChatManager
+	access     DeliveryAccess
+	authorizer access.Authorizer
+}
+
+// DeliveryAccess resolves stable, bot-scoped internal targets. Production
+// delivery always authorizes the internal target before its platform-native
+// identifier is revealed to the channel adapter.
+type DeliveryAccess interface {
+	access.FactSource
+	GetDirectChat(context.Context, string, string) (access.DirectChat, bool, error)
+	GetGroup(context.Context, string, string) (access.Group, bool, error)
 }
 
 // ChatSummary is the projection of a bot's chat record exposed by
@@ -65,25 +77,64 @@ type ChatSummary struct {
 	IsPaired      bool   `json:"is_paired,omitempty"`
 	IsWhitelisted bool   `json:"is_whitelisted,omitempty"`
 	ProjectPath   string `json:"project_path,omitempty"`
+	Disabled      bool   `json:"disabled,omitempty"`
+	DisabledAt    string `json:"disabled_at,omitempty"`
 	UpdatedAt     string `json:"updated_at,omitempty"`
 }
 
-// ChatLister returns the chats a bot can reach, scoped to that bot's
-// platform (and to its chat-id lock when one is set). Defined here so the
-// notify package does not import remote_control/bot — the server wires the
-// concrete implementation. Returns (nil, nil) when no lister is configured.
-type ChatLister func(botUUID string) ([]ChatSummary, error)
+// BotChatManager is the chat-lifecycle capability the bot interaction API
+// needs: list / delete / toggle-disabled / is-disabled. Defined here as one
+// interface so notify does not import remote_control/bot — the server wires
+// the concrete implementation in server_control_chats.go. One seam instead of
+// one func type per operation means adding a capability is one interface
+// method, not a new field + constructor arg + wiring closure + nil check.
+// Method names mirror the underlying ChatStoreInterface (ListChats/DeleteChat/
+// SetChatDisabled/IsChatDisabled) so a reader carries one vocabulary across
+// both layers.
+type BotChatManager interface {
+	// ListChats returns the chats a bot can reach, scoped to that bot's
+	// platform; includeDisabled adds blocklisted chats.
+	ListChats(botUUID string, includeDisabled bool) ([]ChatSummary, error)
+	// DeleteChat hard-deletes a chat record reachable by the bot.
+	DeleteChat(botUUID, chatID string) error
+	// SetChatDisabled toggles a reachable chat's inbound blocklist flag.
+	SetChatDisabled(botUUID, chatID string, disabled bool) error
+	// IsChatDisabled reports whether a chat is blocklisted. Used by Notify and
+	// Interact so disable cuts both directions — a disabled chat neither
+	// reaches the bot nor is reachable from it. Unknown chats report false so
+	// pushes to fresh chat ids keep working.
+	IsChatDisabled(chatID string) bool
+}
+
+// ErrChatNotFound is returned by BotChatManager.Delete/SetDisabled when the
+// chat is not in the bot's reachable set (unknown, wrong platform, or paired
+// to a different bot). Mapped to HTTP 404.
+var ErrChatNotFound = errors.New("chat not found")
 
 // NewBotAPIHandler builds the handler. channels and results are the same
-// registries the Claude Code scenario path uses.
-// chatLister may be nil — the /chats endpoint then reports unavailable.
-func NewBotAPIHandler(channels *channel.Registry, results *interaction.Registry[interaction.Result], chatLister ChatLister) *BotAPIHandler {
-	return &BotAPIHandler{channels: channels, results: results, chatLister: chatLister}
+// registries the Claude Code scenario path uses. chats may be nil — the chat
+// lifecycle endpoints and the disabled-check then report unavailable.
+func NewBotAPIHandler(channels *channel.Registry, results *interaction.Registry[interaction.Result], chats BotChatManager, deliveryAccess ...DeliveryAccess) *BotAPIHandler {
+	h := &BotAPIHandler{channels: channels, results: results, chats: chats}
+	if len(deliveryAccess) > 0 && deliveryAccess[0] != nil {
+		h.access = deliveryAccess[0]
+		h.authorizer = access.NewEvaluator(deliveryAccess[0])
+	}
+	return h
+}
+
+// isChatDisabled reports the blocklist flag through the wired manager; a nil
+// manager (stock setups without chat management) never blocks.
+func (h *BotAPIHandler) isChatDisabled(chatID string) bool {
+	return h.chats != nil && h.chats.IsChatDisabled(chatID)
 }
 
 // notifyRequest is the body of POST /bots/:bot/notify — a one-way push.
 type notifyRequest struct {
-	ChatID string `json:"chat_id" binding:"required"`
+	Target access.TargetRef `json:"target"`
+	// ChatID exists only for isolated legacy callers where no DeliveryAccess
+	// is wired. Runtime server construction always wires DeliveryAccess.
+	ChatID string `json:"chat_id,omitempty"`
 	Title  string `json:"title,omitempty"`
 	Body   string `json:"body" binding:"required"`
 	// Level is an optional render hint: info | warn | error. Passed through
@@ -95,7 +146,8 @@ type notifyRequest struct {
 // interactRequest is the body of POST /bots/:bot/interact — starts an
 // interactive prompt and returns a request_id the caller long-polls.
 type interactRequest struct {
-	ChatID string `json:"chat_id" binding:"required"`
+	Target access.TargetRef `json:"target"`
+	ChatID string           `json:"chat_id,omitempty"`
 	// Kind is one of interaction.Kind: confirm | choose | ask.
 	Kind    string               `json:"kind" binding:"required"`
 	Title   string               `json:"title" binding:"required"`
@@ -120,12 +172,29 @@ func (h *BotAPIHandler) Notify(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
 		return
 	}
+	externalChatID, decision, err := h.resolveAuthorizedTarget(c.Request.Context(), botUUID, req.Target, req.ChatID)
+	if err != nil {
+		logrus.WithError(err).WithField("bot", botUUID).Warn("bot notify target resolution failed")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "target resolution failed"})
+		return
+	}
+	if !decision.Allowed {
+		h.auditLog(botUUID, "bot.notify.denied", map[string]any{"target": req.Target, "reason": decision.Reason, "failed_gate": decision.FailedGate})
+		c.JSON(http.StatusNotFound, gin.H{"error": "target not reachable", "reason": decision.Reason})
+		return
+	}
 
 	ch, ok := h.resolveChannel(botUUID)
 	if !ok {
 		// Uniform 404 for unknown and stopped bots — see spec §3.5 (defend in
 		// depth: an authenticated caller must not probe which bots exist).
 		c.JSON(http.StatusNotFound, gin.H{"error": "bot not running"})
+		return
+	}
+	if h.access == nil && h.isChatDisabled(externalChatID) {
+		// Disable cuts both directions: same body as an unknown chat so the
+		// caller cannot distinguish blocked from nonexistent.
+		c.JSON(http.StatusNotFound, gin.H{"error": "chat not reachable"})
 		return
 	}
 
@@ -137,7 +206,7 @@ func (h *BotAPIHandler) Notify(c *gin.Context) {
 		notification.Meta = map[string]any{"level": req.Level}
 	}
 
-	target := channel.Target{ChatID: req.ChatID}
+	target := channel.Target{ChatID: externalChatID}
 	// Send is fire-and-forget at the protocol level but synchronous here so we
 	// can report delivery failure. A short bounded context guards against a
 	// wedged channel blocking the request thread.
@@ -147,17 +216,17 @@ func (h *BotAPIHandler) Notify(c *gin.Context) {
 	if err := ch.Send(ctx, target, notification); err != nil {
 		logrus.WithError(err).WithFields(logrus.Fields{
 			"bot":     botUUID,
-			"chat_id": req.ChatID,
+			"chat_id": externalChatID,
 		}).Warn("bot notify push failed")
 		h.auditLog(botUUID, "bot.notify.error", map[string]any{
-			"chat_id": req.ChatID,
+			"chat_id": externalChatID,
 			"err":     err.Error(),
 		})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "delivery failed"})
 		return
 	}
 
-	h.auditLog(botUUID, "bot.notify", map[string]any{"chat_id": req.ChatID})
+	h.auditLog(botUUID, "bot.notify", map[string]any{"target": req.Target})
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -180,6 +249,17 @@ func (h *BotAPIHandler) Interact(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
 		return
 	}
+	externalChatID, decision, err := h.resolveAuthorizedTarget(c.Request.Context(), botUUID, req.Target, req.ChatID)
+	if err != nil {
+		logrus.WithError(err).WithField("bot", botUUID).Warn("bot interact target resolution failed")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "target resolution failed"})
+		return
+	}
+	if !decision.Allowed {
+		h.auditLog(botUUID, "bot.interact.denied", map[string]any{"target": req.Target, "reason": decision.Reason, "failed_gate": decision.FailedGate})
+		c.JSON(http.StatusNotFound, gin.H{"error": "target not reachable", "reason": decision.Reason})
+		return
+	}
 
 	kind := interaction.Kind(req.Kind)
 	if !validKind(kind) {
@@ -194,6 +274,11 @@ func (h *BotAPIHandler) Interact(c *gin.Context) {
 	ch, ok := h.resolveChannel(botUUID)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "bot not running"})
+		return
+	}
+	if h.access == nil && h.isChatDisabled(externalChatID) {
+		// Disable cuts both directions — see Notify.
+		c.JSON(http.StatusNotFound, gin.H{"error": "chat not reachable"})
 		return
 	}
 
@@ -213,8 +298,9 @@ func (h *BotAPIHandler) Interact(c *gin.Context) {
 		Body:    req.Body,
 		Options: req.Options,
 		Timeout: budget,
+		Meta:    map[string]any{"capability": "notify", "reply_action": "notify.reply"},
 	}
-	target := channel.Target{ChatID: req.ChatID}
+	target := channel.Target{ChatID: externalChatID}
 
 	// Drive the prompt in the background and resolve the registry entry with
 	// the final reply (or a timeout/error). Mirrors the Claude Code plugin's
@@ -223,7 +309,7 @@ func (h *BotAPIHandler) Interact(c *gin.Context) {
 
 	h.auditLog(botUUID, "bot.interact.start", map[string]any{
 		"interaction_id": id,
-		"chat_id":        req.ChatID,
+		"target":         req.Target,
 		"kind":           string(kind),
 	})
 
@@ -286,6 +372,7 @@ func (h *BotAPIHandler) Wait(c *gin.Context) {
 //	503  chat listing unavailable (no store wired)
 func (h *BotAPIHandler) ListChats(c *gin.Context) {
 	botUUID := c.Param("bot")
+	includeDisabled := c.Query("include_disabled") == "true"
 
 	_, running := h.resolveChannel(botUUID)
 	if !running {
@@ -295,12 +382,12 @@ func (h *BotAPIHandler) ListChats(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"chats": []ChatSummary{}, "running": false})
 		return
 	}
-	if h.chatLister == nil {
+	if h.chats == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "chat listing unavailable"})
 		return
 	}
 
-	chats, err := h.chatLister(botUUID)
+	chats, err := h.chats.ListChats(botUUID, includeDisabled)
 	if err != nil {
 		logrus.WithError(err).WithField("bot", botUUID).Warn("bot chats list failed")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "chat listing failed"})
@@ -312,6 +399,88 @@ func (h *BotAPIHandler) ListChats(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"chats": chats, "running": true})
 }
 
+// DeleteChat handles DELETE /api/v1/bots/:bot/chats/:chat_id.
+//
+// Hard-deletes the chat record: pairing, whitelist, and project binding are
+// gone. If the chat messages the bot again, the normal auto-create path
+// rebuilds it as a brand-new chat (re-pair required when pairing is
+// enforced). Session history is untouched.
+//
+//	200  deleted
+//	404  chat not in this bot's reachable set
+//	503  chat management unavailable (no deleter wired)
+func (h *BotAPIHandler) DeleteChat(c *gin.Context) {
+	botUUID := c.Param("bot")
+	chatID := c.Param("chat_id")
+
+	if h.chats == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "chat management unavailable"})
+		return
+	}
+
+	if err := h.chats.DeleteChat(botUUID, chatID); err != nil {
+		if errors.Is(err, ErrChatNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "chat not found"})
+			return
+		}
+		logrus.WithError(err).WithFields(logrus.Fields{"bot": botUUID, "chat_id": chatID}).Warn("bot chat delete failed")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "chat delete failed"})
+		return
+	}
+
+	h.auditLog(botUUID, "bot.chat.delete", map[string]any{"chat_id": chatID})
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// SetChatDisabled handles PUT /api/v1/bots/:bot/chats/:chat_id/disabled.
+//
+// Toggles the chat's inbound blocklist flag. A disabled chat's messages are
+// dropped before any handler runs (including /bind — it cannot re-enable
+// itself) and it disappears from the reachable list, notify, and interact.
+//
+//	200  updated
+//	400  malformed body
+//	404  chat not in this bot's reachable set
+//	503  chat management unavailable (no disabler wired)
+func (h *BotAPIHandler) SetChatDisabled(c *gin.Context) {
+	botUUID := c.Param("bot")
+	chatID := c.Param("chat_id")
+
+	if h.chats == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "chat management unavailable"})
+		return
+	}
+
+	var req setChatDisabledRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		return
+	}
+	if req.Disabled == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "disabled field is required"})
+		return
+	}
+
+	if err := h.chats.SetChatDisabled(botUUID, chatID, *req.Disabled); err != nil {
+		if errors.Is(err, ErrChatNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "chat not found"})
+			return
+		}
+		logrus.WithError(err).WithFields(logrus.Fields{"bot": botUUID, "chat_id": chatID}).Warn("bot chat disable failed")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "chat update failed"})
+		return
+	}
+
+	h.auditLog(botUUID, "bot.chat.disabled", map[string]any{"chat_id": chatID, "disabled": *req.Disabled})
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// setChatDisabledRequest is the body of PUT /bots/:bot/chats/:chat_id/disabled.
+// Disabled is a pointer so an omitted field is a 400, not a silent enable.
+type setChatDisabledRequest struct {
+	Disabled *bool `json:"disabled"`
+}
+
 // resolveChannel looks up the bot's channel. Centralized so both Notify and
 // Interact return the identical 404 body for unknown and stopped bots.
 func (h *BotAPIHandler) resolveChannel(botUUID string) (channel.Channel, bool) {
@@ -319,6 +488,40 @@ func (h *BotAPIHandler) resolveChannel(botUUID string) (channel.Channel, bool) {
 		return nil, false
 	}
 	return h.channels.Get(botUUID)
+}
+
+func (h *BotAPIHandler) resolveAuthorizedTarget(ctx context.Context, botUUID string, target access.TargetRef, legacyChatID string) (string, access.AuthorizationDecision, error) {
+	if h.access == nil {
+		if legacyChatID == "" {
+			return "", access.AuthorizationDecision{Reason: access.ReasonTargetNotFound}, nil
+		}
+		return legacyChatID, access.AuthorizationDecision{Allowed: true, Reason: access.ReasonAllowed}, nil
+	}
+	if target.ID == "" || (target.Kind != access.TargetDirectChat && target.Kind != access.TargetGroup) {
+		return "", access.AuthorizationDecision{Reason: access.ReasonTargetNotFound, FailedGate: access.GateTarget}, nil
+	}
+	decision := h.authorizer.Evaluate(ctx, access.AuthorizationRequest{
+		BotUUID: botUUID, Target: target, Capability: access.CapabilityNotify, Action: access.ActionNotifyReceive,
+	})
+	if !decision.Allowed {
+		return "", decision, nil
+	}
+	switch target.Kind {
+	case access.TargetDirectChat:
+		chat, ok, err := h.access.GetDirectChat(ctx, botUUID, target.ID)
+		if err != nil || !ok {
+			return "", access.AuthorizationDecision{Reason: access.ReasonTargetNotFound, FailedGate: access.GateTarget}, err
+		}
+		return chat.ExternalChatID, decision, nil
+	case access.TargetGroup:
+		group, ok, err := h.access.GetGroup(ctx, botUUID, target.ID)
+		if err != nil || !ok {
+			return "", access.AuthorizationDecision{Reason: access.ReasonTargetNotFound, FailedGate: access.GateTarget}, err
+		}
+		return group.ExternalGroupID, decision, nil
+	default:
+		return "", access.AuthorizationDecision{Reason: access.ReasonTargetNotFound, FailedGate: access.GateTarget}, nil
+	}
 }
 
 // runPrompt drives Channel.Prompt to completion and resolves the registry

@@ -1,10 +1,10 @@
 import { BotConfigDialog, RemoteAgentBotCard, useBotModelDialog } from '@/components/bot';
 import CCProfileDialog from '@/components/bot/CCProfileDialog';
 import EmptyState from '@/components/EmptyState';
+import GuideAction from '@/components/GuideAction';
 import { PageLayout } from '@/components/PageLayout';
-import CollapsibleGuide from '@/components/remote-control/CollapsibleGuide';
 import UnifiedCard from '@/components/UnifiedCard';
-import { api } from '@/services/api';
+import { api, enrichBotsWithCapabilities } from '@/services/api';
 import { usePlatformGuide } from '@/constants/platformGuides';
 import { useProfileContext } from '@/contexts/ProfileContext';
 import type { BotSettings } from '@/types/bot';
@@ -13,19 +13,22 @@ import type { Provider } from '@/types/provider';
 import { Add } from '@/components/icons';
 import { Alert, Box, Button, CircularProgress, Snackbar } from '@mui/material';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface PlatformRemoteAgentPageProps {
     platformId: string;
     platformName: string;
+    platformPicker?: ReactNode;
 }
 
 // PlatformRemoteAgentPage is the PURPOSE page, deliberately mirroring the
 // Bots section's per-platform structure: same pagination, different content.
 // A Bots page manages this platform's bot connections; this page manages the
 // same bots' Remote Agent configuration — mount switch, SmartGuide model,
-// and agent behavior (chat lock, bash allowlist).
-const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAgentPageProps) => {
+// and its agent routing. Access is managed from the graph; connection and
+// advanced command policy remain in the shared Bot edit dialog.
+const PlatformRemoteAgentPage = ({ platformId, platformName, platformPicker }: PlatformRemoteAgentPageProps) => {
     const { t } = useTranslation();
     const guideConfig = usePlatformGuide(platformId);
 
@@ -74,7 +77,7 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
         try {
             const data = await api.getImBotSettingsList();
             if (data?.success && Array.isArray(data.settings)) {
-                setBots(data.settings);
+                setBots(await enrichBotsWithCapabilities(data.settings));
             } else if (data?.success === false) {
                 showNotification(data.error || t('remoteControl.notify.loadFailed', { defaultValue: 'Failed to load bot settings' }), 'error');
             }
@@ -98,17 +101,19 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
         loadProviders();
     }, [loadBots, loadProviders]);
 
-    // Toggle the remote_agent mount. Turning it on cascades the bot's Enabled
-    // flag server-side, so one flip lights the bot up.
-    const handleMountToggle = useCallback(async (uuid: string, mounted: boolean) => {
-        setTogglingBotUuid(uuid);
+    // Toggle the explicit Remote Control capability.
+    const handleMountToggle = useCallback(async (bot: BotSettings, enabled: boolean) => {
+        if (!bot.uuid) return;
+        setTogglingBotUuid(bot.uuid);
         try {
-            const result = await api.updateImBotSetting(uuid, { remote_agent: mounted });
-            if (result?.success) {
+            // Capability lifecycle is reconciled server-side: enabling Remote
+            // starts the Bot; disabling the last capability turns it off.
+            const result = await api.setBotCapability(bot.uuid, 'remote_control', enabled);
+            if (result?.capability) {
                 showNotification(
-                    mounted
-                        ? t('remoteControl.notify.remoteAgentOn', { defaultValue: 'Remote Control mounted' })
-                        : t('remoteControl.notify.remoteAgentOff', { defaultValue: 'Remote Control unmounted' }),
+                    enabled
+                        ? t('remoteControl.notify.remoteAgentOn', { defaultValue: 'Remote Control enabled' })
+                        : t('remoteControl.notify.remoteAgentOff', { defaultValue: 'Remote Control disabled' }),
                     'success'
                 );
                 await loadBots();
@@ -116,8 +121,13 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
                 showNotification(result?.error || t('remoteControl.notify.toggleFailedGeneric', { defaultValue: 'Failed to toggle bot' }), 'error');
             }
         } catch (err) {
-            console.error('Failed to toggle remote_agent mount:', err);
-            showNotification(t('remoteControl.notify.toggleFailedGeneric', { defaultValue: 'Failed to toggle bot' }), 'error');
+            console.error('Failed to toggle Remote Control capability:', err);
+            showNotification(
+                err instanceof Error && err.message
+                    ? err.message
+                    : t('remoteControl.notify.toggleFailedGeneric', { defaultValue: 'Failed to toggle Remote Control' }),
+                'error',
+            );
         } finally {
             setTogglingBotUuid(null);
         }
@@ -152,16 +162,6 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
             }
         } catch (err) {
             showNotification(t('remoteControl.notify.deleteFailedGeneric', { defaultValue: 'Failed to delete bot' }), 'error');
-        }
-    }, [loadBots, showNotification, t]);
-
-    const handleAgentSettingsSave = useCallback(async (uuid: string, settings: { chat_id_lock: string; bash_allowlist: string[] }) => {
-        const result = await api.updateImBotSetting(uuid, settings);
-        if (result?.success) {
-            showNotification(t('remoteAgent.notify.agentSettingsSaved', { defaultValue: 'Agent settings saved' }), 'success');
-            await loadBots();
-        } else {
-            showNotification(result?.error || t('remoteControl.notify.saveFailed', { defaultValue: 'Failed to save bot settings' }), 'error');
         }
     }, [loadBots, showNotification, t]);
 
@@ -217,33 +217,41 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
     }, [loadBots, showNotification, t]);
 
     return (
-        <PageLayout loading={false}>
-            {/* Same platform setup guide as the Bots page — mirrored sections
-                share the education. Gated on !loading so defaultExpanded locks
-                in against the real bot count. */}
-            {!loading && guideConfig?.guide && (
-                <CollapsibleGuide
-                    platformName={platformName}
-                    platformGuide={guideConfig.guide}
-                    defaultExpanded={filteredBots.length === 0}
-                />
-            )}
+        <PageLayout
+            loading={false}
+            title={t('remoteAgent.pageTitle', {defaultValue: 'Remote Control'})}
+            subtitle={t('remoteAgent.pageSubtitle', {defaultValue: 'Choose who can control each bot and where chat commands route.'})}
+            rightAction={
+                <Button variant="contained" startIcon={<Add/>} onClick={openAddDialog} size="small">
+                    {t('remoteControl.bots.addBot', {defaultValue: 'Connect a bot'})}
+                </Button>
+            }
+        >
+            {platformPicker}
             <UnifiedCard
-                title={t('remoteAgent.title', { defaultValue: '{{platform}} Remote Control', platform: platformName })}
-                titleHeadingLevel={1}
-                subtitle={t('remoteAgent.subtitle', { defaultValue: 'Mount {{platform}} bots to drive Claude Code / SmartGuide from chat, and configure how the agent behaves. Bot connections are managed on the Bots page.', platform: platformName })}
+                title={t('remoteAgent.routesTitle', { defaultValue: '{{platform}} routes', platform: platformName })}
+                titleHeadingLevel={2}
+                subtitle={t('remoteAgent.routesSubtitle', { defaultValue: 'Access → Bot → Agent. Click a node to change that part of the route.' })}
                 size="full"
                 sx={{ mb: 2 }}
-                rightAction={
-                    <Button
-                        variant="contained"
-                        startIcon={<Add />}
-                        onClick={openAddDialog}
-                        size="small"
+                rightAction={guideConfig?.guide ? (
+                    <GuideAction
+                        label={t('remoteControl.guide.action', { defaultValue: 'Setup guide' })}
+                        title={t('remoteControl.guide.title', {
+                            defaultValue: '{{platform}} Setup Guide',
+                            platform: platformName,
+                        })}
+                        description={t('remoteControl.guide.drawerHint', {
+                            defaultValue: 'Connection steps, credentials, and examples',
+                        })}
+                        primaryAction={{
+                            label: t('remoteControl.bots.addBot', { defaultValue: 'Connect a bot' }),
+                            onClick: openAddDialog,
+                        }}
                     >
-                        {t('remoteControl.bots.addBot', { defaultValue: 'Add Bot' })}
-                    </Button>
-                }
+                        {guideConfig.guide}
+                    </GuideAction>
+                ) : undefined}
             >
                 {loading ? (
                     <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -265,16 +273,16 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
                                 key={bot.uuid}
                                 bot={bot}
                                 providers={providers}
-                                onMountToggle={(mounted) => handleMountToggle(bot.uuid!, mounted)}
+                                onMountToggle={(enabled) => handleMountToggle(bot, enabled)}
                                 onModelClick={() => handleModelClick(bot)}
                                 ccProfiles={ccProfiles}
                                 onCCProfileClick={() => setProfileDialogBot(bot)}
-                                onAgentSettingsSave={(settings) => handleAgentSettingsSave(bot.uuid!, settings)}
                                 onEdit={() => openEditDialog(bot.uuid!)}
                                 onRestart={() => handleBotRestart(bot.uuid!)}
                                 onDelete={() => handleDeleteBot(bot.uuid!)}
                                 isToggling={togglingBotUuid === bot.uuid}
                                 isRestarting={restartingBotUuid === bot.uuid}
+                                onAccessChanged={() => void loadBots()}
                             />
                         ))}
                     </Box>

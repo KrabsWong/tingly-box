@@ -7,7 +7,7 @@ import type {ChatCapability} from './useChatProbe';
 // (ProbeDialog.tsx); chat has more capabilities, so this is the preset array
 // the probe lacks. See the IM Notify probe plan.
 //
-// `gated` capabilities are shown disabled with an experimental tooltip: their
+// `gated` capabilities are skipped by the probe bench (not rendered): their
 // backend option/free-text threading into the IM keyboard is incomplete
 // (imchannel.ToAskRequest doesn't copy ix.Options), so we don't expose them
 // until that's fixed — no point wiring a trigger that can't render its prompt.

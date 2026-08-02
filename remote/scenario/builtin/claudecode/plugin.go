@@ -286,11 +286,13 @@ func buildInteraction(id string, input HookInput, timeout time.Duration) interac
 		Body:    buildPromptBody(input),
 		Timeout: timeout,
 		Meta: map[string]any{
-			"tool_name":  toolNameForHook(input),
-			"tool_input": parseToolInput(input),
-			"session_id": input.SessionID,
-			"agent_type": string(agentboot.AgentTypeClaude),
-			"reason":     fmt.Sprintf("Claude Code hook: %s", input.HookEventName),
+			"capability":   "notify",
+			"reply_action": "notify.reply",
+			"tool_name":    toolNameForHook(input),
+			"tool_input":   parseToolInput(input),
+			"session_id":   input.SessionID,
+			"agent_type":   string(agentboot.AgentTypeClaude),
+			"reason":       fmt.Sprintf("Claude Code hook: %s", input.HookEventName),
 		},
 	}
 }

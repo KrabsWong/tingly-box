@@ -14,7 +14,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
-	"github.com/tingly-dev/tingly-box/remote/binding"
+	"github.com/tingly-dev/tingly-box/remote/access"
 	"github.com/tingly-dev/tingly-box/remote/channel"
 )
 
@@ -34,6 +34,8 @@ type LifecycleController interface {
 type Handler struct {
 	config           *config.Config
 	store            *db.ImBotSettingsStore
+	accessStore      *db.BotAccessStore
+	authorizer       access.Authorizer
 	botMgr           *BotManager           // Local bot manager, not global
 	qrLoginHandler   *WeChatQRLoginHandler // WeChat QR login handler
 	feishuRegHandler *FeishuRegHandler     // Feishu/Lark one-click registration handler
@@ -50,9 +52,14 @@ func NewHandler(ctx context.Context, cfg *config.Config, channelRegistry *channe
 		return nil, err
 	}
 	h := &Handler{
-		config: cfg,
-		store:  sm.ImBotSettings(),
-		botMgr: botMgr,
+		config:      cfg,
+		store:       sm.ImBotSettings(),
+		accessStore: sm.BotAccess(),
+		botMgr:      botMgr,
+	}
+	if h.accessStore != nil {
+		h.accessStore.SetTransportFactsSource(channelTransportFacts{registry: channelRegistry})
+		h.authorizer = access.NewEvaluator(h.accessStore)
 	}
 	// Initialize QR login handler
 	h.qrLoginHandler = NewWeChatQRLoginHandler(h.store)
@@ -172,24 +179,29 @@ func (h *Handler) CreateSettings(c *gin.Context) {
 		RequirePairing:     req.RequirePairing,
 	}
 
-	// Apply the remote_agent mount switch at birth (nil → default mounted).
-	// Turning it on cascades Enabled, same as UpdateSettings.
-	if req.RemoteAgent != nil {
-		updated, err := binding.SetScenarioEnabled(settings.Scenarios, binding.RemoteAgentScenario, *req.RemoteAgent)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mount state", "details": err.Error()})
-			return
-		}
-		settings.Scenarios = updated
-		if *req.RemoteAgent {
-			settings.Enabled = true
-		}
-	}
-
 	created, err := h.store.CreateSettings(settings)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	// Every Bot is born with a complete, explicit capability set. The default
+	// opens the primary Remote Control work surface while keeping unsolicited
+	// Notify delivery closed until a target/route is deliberately attached.
+	if h.accessStore != nil {
+		initial := map[access.CapabilityName]CapabilityUpdateRequest{
+			access.CapabilityRemoteControl: {Enabled: true},
+			access.CapabilityNotify:        {Enabled: false},
+		}
+		for name, value := range req.Capabilities {
+			initial[name] = value
+		}
+		for name, value := range initial {
+			if err := h.accessStore.PutCapability(c.Request.Context(), access.BotCapability{BotUUID: created.UUID, Name: name, Enabled: value.Enabled, Config: value.Config}); err != nil {
+				_ = h.store.DeleteSettings(created.UUID)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create bot capabilities", "details": err.Error()})
+				return
+			}
+		}
 	}
 
 	logrus.WithField("uuid", created.UUID).WithField("platform", created.Platform).Info("ImBot settings created")
@@ -347,20 +359,6 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 	// store writes the scenarios column unconditionally).
 	settings.Scenarios = currentSettings.Scenarios
 
-	// Handle the remote_agent mount toggle. Turning it on cascades the bot's
-	// Enabled flag on too, so the user flips one switch and the bot lights up.
-	if req.RemoteAgent != nil {
-		updated, err := binding.SetScenarioEnabled(settings.Scenarios, binding.RemoteAgentScenario, *req.RemoteAgent)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mount state", "details": err.Error()})
-			return
-		}
-		settings.Scenarios = updated
-		if *req.RemoteAgent {
-			settings.Enabled = true
-		}
-	}
-
 	if err := h.store.UpdateSettings(uuid, settings); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -386,17 +384,14 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		}
 	}
 
-	// Reconcile this bot's running state: it should run iff Enabled AND some
-	// purpose is mounted — remote_agent via its mount switch, or the customer
-	// channel via an active outbound scenario binding. StartBot/StopBot are
-	// no-ops when already in the desired state, so this covers mount toggles
-	// as well as Enabled flips; pure config changes still take effect via
-	// dynamic lookup (no restart).
+	// Reconcile from the explicit BotCapability source of truth.
 	if h.botMgr != nil {
 		ctx := context.Background()
-		shouldRun := settings.Enabled &&
-			(binding.ScenarioMounted(settings.Scenarios, binding.RemoteAgentScenario) ||
-				binding.OutboundScenarioMounted(settings.Scenarios))
+		hasCapability := false
+		if h.accessStore != nil {
+			hasCapability, _ = h.accessStore.AnyCapabilityEnabled(ctx, uuid)
+		}
+		shouldRun := settings.Enabled && hasCapability
 		go func() {
 			if shouldRun {
 				if err := h.botMgr.StartBot(ctx, uuid); err != nil {
@@ -616,20 +611,6 @@ func (h *Handler) ChatStore() (bot.ChatStoreInterface, error) {
 		return nil, fmt.Errorf("bot manager not initialized")
 	}
 	return h.botMgr.ChatStore()
-}
-
-// ChatIDLock returns the chat-id lock configured for a bot (empty when none).
-// Used by the GET /bots/:bot/chats lister to scope the shared chat store to
-// the single chat a locked bot can reach.
-func (h *Handler) ChatIDLock(botUUID string) string {
-	if h.store == nil || botUUID == "" {
-		return ""
-	}
-	settings, err := h.store.GetSettingsByUUID(botUUID)
-	if err != nil {
-		return ""
-	}
-	return settings.ChatIDLock
 }
 
 // StartAllEnabled starts all enabled bots (delegates to BotManager)

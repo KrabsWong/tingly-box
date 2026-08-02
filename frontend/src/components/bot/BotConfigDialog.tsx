@@ -1,8 +1,9 @@
 import BotAuthForm from './BotAuthForm';
 import BotPlatformSelector from './BotPlatformSelector';
+import { ExpandMore } from '@/components/icons';
 import { api } from '@/services/api';
 import type { BotPlatformConfig, BotSettings } from '@/types/bot';
-import { Box, Button, Modal, Stack, TextField, Typography } from '@mui/material';
+import { Accordion, AccordionDetails, AccordionSummary, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Stack, TextField, Typography } from '@mui/material';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -61,6 +62,7 @@ const BotConfigDialog: React.FC<BotConfigDialogProps> = ({
     const [platformDraft, setPlatformDraft] = useState(platformId);
     const [authDraft, setAuthDraft] = useState<Record<string, string>>({});
     const [proxyDraft, setProxyDraft] = useState('');
+    const [bashAllowlistDraft, setBashAllowlistDraft] = useState('');
     const [saving, setSaving] = useState(false);
 
     // Load platform configs once (first open).
@@ -94,6 +96,7 @@ const BotConfigDialog: React.FC<BotConfigDialogProps> = ({
                 setPlatformDraft(bot.platform || platformId);
                 setAuthDraft(bot.auth ? { ...bot.auth } : {});
                 setProxyDraft(bot.proxy_url || '');
+                setBashAllowlistDraft((bot.bash_allowlist || []).join('\n'));
                 setCurrentPlatformConfig(botPlatforms.find(p => p.platform === bot.platform) ?? null);
             }
             return;
@@ -105,6 +108,7 @@ const BotConfigDialog: React.FC<BotConfigDialogProps> = ({
         setPlatformDraft(platformId);
         setAuthDraft({});
         setProxyDraft('');
+        setBashAllowlistDraft('');
         const config = botPlatforms.find(p => p.platform === platformId) ?? null;
         setCurrentPlatformConfig(config);
         // For QR auth: reuse an existing orphan bot (one that was created by a
@@ -155,6 +159,12 @@ const BotConfigDialog: React.FC<BotConfigDialogProps> = ({
                 auth_type: platformConfig.auth_type,
                 auth: authDraft,
                 proxy_url: proxyDraft.trim(),
+                ...(dialogMode === 'edit' ? {
+                    bash_allowlist: bashAllowlistDraft
+                        .split(/[\n,]+/)
+                        .map(command => command.trim())
+                        .filter(Boolean),
+                } : {}),
                 enabled: true, // Enable the bot after saving
             };
 
@@ -181,39 +191,21 @@ const BotConfigDialog: React.FC<BotConfigDialogProps> = ({
         } finally {
             setSaving(false);
         }
-    }, [botPlatforms, platformDraft, targetUuid, authDraft, nameDraft, proxyDraft, dialogMode, onSaved, onClose, notify, t]);
+    }, [botPlatforms, platformDraft, targetUuid, authDraft, nameDraft, proxyDraft, bashAllowlistDraft, dialogMode, onSaved, onClose, notify, t]);
 
     return (
-        <Modal open={open} onClose={onClose}>
-            <Box
-                sx={{
-                    position: 'absolute',
-                    top: '50%',
-                    left: '50%',
-                    transform: 'translate(-50%, -50%)',
-                    width: 600,
-                    maxWidth: '80vw',
-                    maxHeight: '80vh',
-                    bgcolor: 'background.paper',
-                    boxShadow: 24,
-                    borderRadius: 2,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden',
-                }}
-            >
-                <Stack
-                    sx={{
-                        overflowY: 'auto',
-                        p: 4,
-                        gap: 2,
-                        flex: 1,
-                    }}
-                >
-                    <Typography variant="h6">
+        <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="sm">
+            <DialogTitle>
+                {dialogMode === 'edit'
+                    ? t('remoteControl.dialog.editTitle', { defaultValue: 'Edit bot' })
+                    : t('remoteControl.dialog.addTitle', { defaultValue: 'Connect a bot' })}
+            </DialogTitle>
+            <DialogContent dividers>
+                <Stack spacing={2}>
+                    <Typography variant="body2" color="text.secondary">
                         {dialogMode === 'edit'
-                            ? t('remoteControl.dialog.editTitle', { defaultValue: 'Edit Bot Configuration' })
-                            : t('remoteControl.dialog.addTitle', { defaultValue: 'Add Bot Configuration' })}
+                            ? t('remoteControl.dialog.editSubtitle', {defaultValue: 'Update this connection. Capabilities and people are managed from Access.'})
+                            : t('remoteControl.dialog.addSubtitle', {defaultValue: 'Choose a messaging platform and provide the credentials needed to connect it.'})}
                     </Typography>
                     <Stack spacing={2}>
                         <Stack spacing={1}>
@@ -282,21 +274,51 @@ const BotConfigDialog: React.FC<BotConfigDialogProps> = ({
                             helperText={t('remoteControl.dialog.proxyUrlHelper', { defaultValue: 'Optional HTTP/HTTPS proxy for bot API requests.' })}
                             disabled={saving}
                         />
-                    </Stack>
 
-                    <Stack direction="row" spacing={2} sx={{ justifyContent: 'flex-end' }}>
-                        <Button onClick={onClose} color="inherit" disabled={saving}>
-                            {t('remoteControl.dialog.cancel', { defaultValue: 'Cancel' })}
-                        </Button>
-                        <Button variant="contained" onClick={handleSave} disabled={saving}>
-                            {saving
-                                ? t('remoteControl.dialog.saving', { defaultValue: 'Saving...' })
-                                : t('remoteControl.dialog.save', { defaultValue: 'Save Configuration' })}
-                        </Button>
+                        {dialogMode === 'edit' && (
+                            <Accordion disableGutters elevation={0} sx={{border: 1, borderColor: 'divider', '&:before': {display: 'none'}}}>
+                                <AccordionSummary expandIcon={<ExpandMore fontSize="small"/>}>
+                                    <Box>
+                                        <Typography variant="body2" sx={{fontWeight: 600}}>
+                                            {t('remoteControl.dialog.advancedAgentPolicy', {defaultValue: 'Advanced agent policy'})}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                            {t('remoteControl.dialog.advancedAgentPolicyHelper', {defaultValue: 'Limits what an authorized controller may execute; it does not grant access.'})}
+                                        </Typography>
+                                    </Box>
+                                </AccordionSummary>
+                                <AccordionDetails>
+                                    <TextField
+                                        label={t('remoteControl.dialog.bashAllowlist', { defaultValue: 'Bash Allowlist' })}
+                                        placeholder={'cd\nls\npwd'}
+                                        value={bashAllowlistDraft}
+                                        onChange={(event) => setBashAllowlistDraft(event.target.value)}
+                                        fullWidth
+                                        multiline
+                                        minRows={3}
+                                        size="small"
+                                        helperText={t('remoteControl.dialog.bashAllowlistHelper', { defaultValue: 'Allowlisted /bash subcommands. Default: cd, ls, pwd.' })}
+                                        disabled={saving}
+                                    />
+                                </AccordionDetails>
+                            </Accordion>
+                        )}
                     </Stack>
                 </Stack>
-            </Box>
-        </Modal>
+            </DialogContent>
+            <DialogActions sx={{px: 3, py: 2}}>
+                <Button onClick={onClose} color="inherit" disabled={saving}>
+                    {t('remoteControl.dialog.cancel', { defaultValue: 'Cancel' })}
+                </Button>
+                <Button variant="contained" onClick={handleSave} disabled={saving}>
+                    {saving
+                        ? t('remoteControl.dialog.saving', { defaultValue: 'Saving...' })
+                        : dialogMode === 'edit'
+                            ? t('remoteControl.dialog.save', { defaultValue: 'Save changes' })
+                            : t('remoteControl.dialog.connect', {defaultValue: 'Connect bot'})}
+                </Button>
+            </DialogActions>
+        </Dialog>
     );
 };
 

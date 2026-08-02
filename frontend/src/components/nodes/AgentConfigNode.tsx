@@ -1,30 +1,35 @@
 import type { AgentConfig } from '@/types/remoteGraph';
 import { CheckCircle as CheckCircleIcon, Settings as SettingsIcon } from '@/components/icons';
 import { Box, Divider, styled } from '@mui/material';
-import { NODE_LAYER_STYLES } from './styles';
+import {
+    AGENT_CONFIG_NODE_STYLES,
+    NODE_LAYER_STYLES,
+    getRouteGraphBorderColor,
+    graphNodeBaseHoverStyles,
+    graphNodeHoverStyles,
+} from './styles';
 
+// Smaller supplementary node — keeps its own 180×60 footprint but speaks the
+// route-graph visual language (neutral alpha border, no static shadow, hover
+// emphasis ring).
 const StyledConfigNode = styled(Box)(({ theme }) => ({
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 8,
+    padding: AGENT_CONFIG_NODE_STYLES.padding,
     borderRadius: theme.shape.borderRadius,
-    border: '1px dashed',
-    borderColor: 'divider',
-    backgroundColor: 'background.paper',
+    border: '1px solid',
+    borderColor: getRouteGraphBorderColor(theme),
+    backgroundColor: theme.palette.background.paper,
     textAlign: 'center',
-    width: 180,
-    height: 60,
-    boxShadow: theme.shadows[1],
-    transition: 'all 0.2s ease-in-out',
+    width: AGENT_CONFIG_NODE_STYLES.width,
+    height: AGENT_CONFIG_NODE_STYLES.height,
+    transition: 'border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.18s ease, transform 0.18s ease',
     position: 'relative',
     cursor: 'pointer',
-    '&:hover': {
-        borderColor: 'primary.main',
-        boxShadow: theme.shadows[2],
-        transform: 'translateY(-1px)',
-    },
+    ...graphNodeBaseHoverStyles,
+    '&:hover': graphNodeHoverStyles(theme),
 }));
 
 interface AgentConfigNodeProps {

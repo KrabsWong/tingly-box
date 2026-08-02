@@ -19,20 +19,46 @@ import type {
 
 // BotSettings is an alias for Settings from codegen.
 //
-// chat_id_lock bridge: the backend ChatIDLock field was renamed from JSON
-// tag "chat_id" to "chat_id_lock" (it is an operator restriction, NOT a live
-// chat id — the collision with Chat.ChatID was the source of real confusion;
-// see ux-principles #3). Until `task codegen` regenerates Settings with the
-// new tag, we overlay chat_id_lock here so frontend code can use the correct
-// name today. Once codegen runs, Settings gains chat_id_lock natively and
-// this overlay becomes a harmless no-op (and the legacy chat_id can be
-// dropped from the codegen type).
+// chat_id_lock is retained only for compatibility with existing generated
+// Settings and persisted rows. Explicit DirectChat/Group access supersedes it;
+// new UI and runtime authorization must not use this field.
 export type BotSettings = Omit<Settings, 'chat_id'> & {
     chat_id_lock?: string;
     // Retained as an alias while codegen still emits it; new code should use
     // chat_id_lock. Removed once codegen drops chat_id.
     chat_id?: string;
+	capabilities?: BotCapability[];
 };
+
+export type CapabilityName = 'notify' | 'remote_control';
+export type AccessEffect = 'allow' | 'deny';
+export interface BotCapability { bot_uuid: string; capability: CapabilityName; enabled: boolean; config?: Record<string, unknown>; }
+export interface AccessPermission { capability: CapabilityName; action: string; effect: AccessEffect; }
+export interface DirectChat { id: string; bot_uuid: string; platform: string; external_chat_id: string; peer_actor_id?: string; blocked: boolean; paired_at?: string; }
+export interface DirectChatDetail { chat: DirectChat; permissions: AccessPermission[]; }
+export interface GroupActor { actor: {id:string; external_actor_id:string; display_name?:string}; label?:string; permissions:AccessPermission[]; }
+export interface BotGroup { id:string; bot_uuid:string; platform:string; external_group_id:string; name?:string; blocked:boolean; }
+export interface BotGroupDetail { group:BotGroup; capabilities:Partial<Record<CapabilityName,AccessEffect>>; actors:GroupActor[]; }
+export interface AuthorizationDecision { allowed:boolean; reason:string; failed_gate?:string; facts:Record<string,unknown>; }
+
+// One concrete destination on the IM Notify work surface. Direct Chats and
+// Groups are peer resources; the UI must not force users through a chat-kind
+// mode picker before they can inspect or test them.
+export interface NotifyTarget {
+    id: string;
+    kind: 'direct_chat' | 'group';
+    external_id: string;
+    name?: string;
+    platform?: string;
+    is_paired?: boolean;
+    blocked: boolean;
+    can_notify: boolean;
+    can_reply: boolean;
+}
+
+export function capabilityEnabled(bot: BotSettings, name: CapabilityName): boolean {
+    return bot.capabilities?.find((capability) => capability.capability === name)?.enabled === true;
+}
 
 // BotPlatformConfig is an alias for PlatformConfig from codegen
 export type BotPlatformConfig = PlatformConfig;
@@ -172,12 +198,16 @@ export interface NotifyRoute {
 // API requires in its request body — surfacing it here (and in BotTable) is
 // what makes those endpoints usable from the UI. Placeholder until codegen.
 export interface BotChat {
+    /** Stable internal DirectChat UUID used by control-plane mutations. */
+    id: string;
     chat_id: string;
     platform?: string;
     is_paired?: boolean;
     is_whitelisted?: boolean;
     project_path?: string;
     updated_at?: string;
+    blocked?: boolean;
+    can_notify?: boolean;
 }
 
 // notifyRoutes extracts a bot's outbound scenario bindings (every scenarios
@@ -206,13 +236,16 @@ export function isNotifyMounted(scenarios?: string): boolean {
 // once, from a list it already has loaded) and the Remote Control page's
 // picker (fetched separately, since that page doesn't otherwise need the
 // full bot list).
-export function countBotsByPlatform(bots: BotSettings[]): Record<string, { active: number; total: number }> {
+export function countBotsByPlatform(
+    bots: BotSettings[],
+    isActive: (bot: BotSettings) => boolean = (bot) => Boolean(bot.enabled),
+): Record<string, { active: number; total: number }> {
     const counts: Record<string, { active: number; total: number }> = {};
     for (const bot of bots) {
         if (!bot.platform) continue;
         const slot = counts[bot.platform] ?? (counts[bot.platform] = { active: 0, total: 0 });
         slot.total++;
-        if (bot.enabled) slot.active++;
+        if (isActive(bot)) slot.active++;
     }
     return counts;
 }

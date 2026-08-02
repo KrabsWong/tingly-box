@@ -1535,6 +1535,8 @@ export default {
     },
     "guide": {
       "title": "{{platform}} 配置指南",
+      "action": "配置指南",
+      "drawerHint": "连接步骤、凭据与示例",
       "showMore": "展开",
       "showLess": "收起"
     },
@@ -1625,11 +1627,11 @@ export default {
         "step1Send": "发送",
         "step1SendTail": "，按提示操作并复制生成的 Token",
         "step2Title": "2. 添加 Bot",
-        "step2Text": "点击上方「添加 Bot」按钮，粘贴 Token 即可创建你的 Bot。"
+        "step2Text": "选择「连接 Bot」，粘贴 Token 即可创建你的 Bot。"
       },
       "feishuFamily": {
         "step1Title": "1. 扫码创建（推荐）",
-        "step1TextBefore": "点击上方「添加 Bot」，选择",
+        "step1TextBefore": "选择「连接 Bot」，然后选择",
         "oneClickOption": "一键创建（扫码）",
         "step2Title": "2. 或手动创建",
         "step2LogIn": "并登录",
@@ -1662,7 +1664,7 @@ export default {
         "step1Permissions": "权限：添加发送消息所需的必要权限",
         "step1GetKeys": "在「凭证与基础信息」中获取 AppKey（Client ID）和 AppSecret（Client Secret）",
         "step1Publish": "发布应用",
-        "step2Text": "点击上方「添加 Bot」按钮，填写 App Key 和 App Secret 即可创建你的 Bot。"
+        "step2Text": "选择「连接 Bot」，填写 App Key 和 App Secret 即可创建你的 Bot。"
       },
       "weixin": {
         "description": "中国最流行的即时通讯平台",
@@ -1671,7 +1673,7 @@ export default {
         "step1Title": "1. 安装最新版微信",
         "step1TextBefore": "请确认你的设备已安装最新版本的",
         "step1TextAfter": "。",
-        "step2Text": "点击上方「添加 Bot」按钮，使用微信扫描二维码绑定账号。"
+        "step2Text": "选择「连接 Bot」，使用微信扫描二维码绑定账号。"
       },
       "wecom": {
         "description": "企业微信通讯平台",
@@ -1698,7 +1700,7 @@ export default {
         "step3PermissionsTextBefore": "按需配置后点击",
         "step3Save": "保存",
         "step4Title": "4. 添加 Bot",
-        "step4Text": "点击上方「添加 Bot」，填写 Bot ID 和 Secret 完成连接。"
+        "step4Text": "选择「连接 Bot」，填写 Bot ID 和 Secret 完成连接。"
       },
       "qq": {
         "description": "腾讯即时通讯平台"

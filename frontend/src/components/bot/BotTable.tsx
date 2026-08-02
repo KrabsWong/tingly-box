@@ -1,12 +1,11 @@
-import {ContentCopy as CopyIcon, Delete as DeleteIcon, Edit as EditIcon, RestartAlt as RestartIcon} from '@/components/icons';
+import {ContentCopy as CopyIcon, Delete as DeleteIcon, Edit as EditIcon, RestartAlt as RestartIcon, Security} from '@/components/icons';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import PairingCodePanel from './PairingCodePanel';
-import BotChatsButton from './BotChatsButton';
-import {isRemoteAgentMounted, isNotifyMounted, isPairingRequired} from '@/types/bot';
+import {capabilityEnabled} from '@/types/bot';
 import type {BotSettings} from '@/types/bot';
 import {notify} from '@/utils/notify';
 import {
     Box,
+    Button,
     Chip,
     IconButton,
     Stack,
@@ -21,7 +20,6 @@ import {
     Typography,
 } from '@mui/material';
 import {useCallback, useState} from 'react';
-import {useNavigate} from 'react-router-dom';
 import {useTranslation} from 'react-i18next';
 
 // BotTable is the RESOURCE table for connected bots — the table counterpart
@@ -44,6 +42,7 @@ interface BotTableProps {
     onRestart: (uuid: string) => void;
     isToggling?: (uuid: string) => boolean;
     isRestarting?: (uuid: string) => boolean;
+	onManageAccess?:(bot:BotSettings)=>void;
 }
 
 // Status chip sizing — matches ApiKeyTable's Status cell so On/Off reads the
@@ -56,7 +55,7 @@ const statusChipSx = {height: 22, minWidth: 40} as const;
 // Pairing column balloon and starved the others. Widths sum to tableMinWidth
 // so the table fills the card at any width above it.
 const headCellSx = {fontWeight: 600, py: 1.25, whiteSpace: 'nowrap', overflow: 'hidden'} as const;
-const tableMinWidth = 600;
+const tableMinWidth = 820;
 const col = (width: number, extra = {}) => ({...headCellSx, width, ...extra});
 
 const BotTable: React.FC<BotTableProps> = ({
@@ -67,9 +66,9 @@ const BotTable: React.FC<BotTableProps> = ({
     onRestart,
     isToggling,
     isRestarting,
+	onManageAccess,
 }) => {
     const {t} = useTranslation();
-    const navigate = useNavigate();
 
     const [deleteModal, setDeleteModal] = useState<{open: boolean; bot: BotSettings | null}>({
         open: false,
@@ -100,28 +99,26 @@ const BotTable: React.FC<BotTableProps> = ({
         <>
             <TableContainer
                 // No Paper, no border — the page's UnifiedCard is the shell.
-                sx={{overflowX: 'auto'}}
+                sx={{display: {xs: 'none', md: 'block'}, overflowX: 'auto'}}
             >
                 <Table sx={{tableLayout: 'fixed', minWidth: tableMinWidth}}>
                     <TableHead>
                         <TableRow sx={{bgcolor: 'action.hover'}}>
-                            <TableCell sx={col(80)}>{t('bots.table.status', {defaultValue: 'Status'})}</TableCell>
-                            <TableCell sx={col(100)}>{t('bots.table.name', {defaultValue: 'Name'})}</TableCell>
-                            <TableCell sx={col(100)}>{t('bots.table.botId', {defaultValue: 'Bot UUID'})}</TableCell>
-                            <TableCell sx={col(80)}>{t('bots.table.platform', {defaultValue: 'Platform'})}</TableCell>
-                            <TableCell sx={col(120)}>{t('bots.table.purpose', {defaultValue: 'Purpose'})}</TableCell>
-                            <TableCell sx={col(200, {textAlign: 'left'})}>{t('bots.table.pairing', {defaultValue: 'Pairing'})}</TableCell>
-                            <TableCell sx={col(100, {textAlign: 'left'})}>{t('bots.table.actions', {defaultValue: 'Actions'})}</TableCell>
+                            <TableCell sx={col(120)}>{t('bots.table.status', {defaultValue: 'Status'})}</TableCell>
+                            <TableCell sx={col(150)}>{t('bots.table.name', {defaultValue: 'Name'})}</TableCell>
+                            <TableCell sx={col(180)}>{t('bots.table.botId', {defaultValue: 'Bot UUID'})}</TableCell>
+                            <TableCell sx={col(100)}>{t('bots.table.platform', {defaultValue: 'Platform'})}</TableCell>
+                            <TableCell sx={col(170)}>{t('bots.table.capabilities', {defaultValue: 'Capabilities'})}</TableCell>
+                            <TableCell sx={col(200, {textAlign: 'right'})}>{t('bots.table.actions', {defaultValue: 'Actions'})}</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
                         {bots.map((bot) => {
                             const isActive = bot.enabled ?? true;
-                            const isMounted = isRemoteAgentMounted(bot.scenarios);
-                            const isNotified = isNotifyMounted(bot.scenarios);
+                            const isMounted = isActive && capabilityEnabled(bot,'remote_control');
+                            const isNotified = isActive && capabilityEnabled(bot,'notify');
                             const toggling = isToggling?.(bot.uuid!) ?? false;
                             const restarting = isRestarting?.(bot.uuid!) ?? false;
-                            const pairingNeeded = isPairingRequired(bot);
 
                             return (
                                 <TableRow
@@ -205,55 +202,29 @@ const BotTable: React.FC<BotTableProps> = ({
                                     <TableCell>
                                         <Chip label={bot.platform} size="small"/>
                                     </TableCell>
-                                    {/* Purpose — mount status, click-through to configure. */}
+                                    {/* Capabilities are status, not navigation. Access has one
+                                        explicit work-surface entry in the Actions column. */}
                                     <TableCell>
                                         <Box sx={{display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap'}}>
-                                            <Tooltip title={t('bots.card.remoteAgentChipHint', {defaultValue: 'Configure on the Remote Control page'})}>
-                                                <Chip
-                                                    label={t('bots.card.remoteAgentChip', {defaultValue: 'Remote Control'})}
-                                                    size="small"
-                                                    variant={isMounted ? 'filled' : 'outlined'}
-                                                    color={isMounted ? 'primary' : 'default'}
-                                                    onClick={() => navigate(`/remote-agent/${bot.platform}`)}
-                                                />
-                                            </Tooltip>
-                                            <Tooltip title={t('bots.card.notifyChipHint', {defaultValue: 'Configure on the IM Notify page'})}>
-                                                <Chip
-                                                    label={t('bots.card.notifyChip', {defaultValue: 'IM Notify'})}
-                                                    size="small"
-                                                    variant={isNotified ? 'filled' : 'outlined'}
-                                                    color={isNotified ? 'primary' : 'default'}
-                                                    onClick={() => navigate('/notify')}
-                                                />
-                                            </Tooltip>
+                                            <Chip label={t('bots.card.remoteAgentChip', {defaultValue: 'Remote'})} size="small" variant={isMounted ? 'filled' : 'outlined'} color={isMounted ? 'primary' : 'default'}/>
+                                            <Chip label={t('bots.card.notifyChip', {defaultValue: 'Notify'})} size="small" variant={isNotified ? 'filled' : 'outlined'} color={isNotified ? 'primary' : 'default'}/>
                                         </Box>
-                                    </TableCell>
-                                    {/* Pairing — the full PairingCodePanel inline (reveal/copy/rotate
-                                        + countdown), rendered directly so there's no popover layer.
-                                        Returns null when TOFU isn't required for the platform. */}
-                                    <TableCell align="left">
-                                        {pairingNeeded ? (
-                                            <PairingCodePanel bot={bot}/>
-                                        ) : (
-                                            <Typography variant="body2" sx={{color: 'text.disabled'}}>—</Typography>
-                                        )}
                                     </TableCell>
                                     {/* Actions */}
                                     <TableCell align="right">
                                         <Stack direction="row" spacing={0.5} sx={{alignItems: 'center', justifyContent: 'flex-end'}}>
-                                            {/* Reachable chats — surfaces the chat_id the notify/interact API
-                                                needs in its body, copyable. Kept in Actions (rather than its
-                                                own column) because it is reference data the operator copies
-                                                on demand, not a per-row status; the fixed column budget is
-                                                tuned for the always-visible columns. The button owns its own
-                                                tooltip so it can dismiss it when the popover opens (a
-                                                wrapping Tooltip here leaves its hover text lingering). */}
-                                            <BotChatsButton
-                                                botUUID={bot.uuid!}
-                                                platform={bot.platform}
-                                                pairingRequired={pairingNeeded}
-                                                disabled={toggling || restarting}
-                                            />
+                                            {onManageAccess && (
+                                                <Button
+                                                    size="small"
+                                                    variant="text"
+                                                    startIcon={<Security fontSize="small"/>}
+                                                    onClick={() => onManageAccess(bot)}
+                                                    disabled={toggling || restarting}
+                                                    sx={{textTransform: 'none'}}
+                                                >
+                                                    {t('bots.table.access', {defaultValue: 'Access'})}
+                                                </Button>
+                                            )}
                                             <Tooltip title={isActive
                                                 ? t('remoteControl.card.restartBot', {defaultValue: 'Restart Bot'})
                                                 : t('remoteControl.card.enableToRestart', {defaultValue: 'Enable bot to restart'})}>
@@ -296,6 +267,48 @@ const BotTable: React.FC<BotTableProps> = ({
                     </TableBody>
                 </Table>
             </TableContainer>
+
+            {/* On narrow screens the table's six columns hide the actions the
+                user came for. Cards preserve the same facts but organize each
+                Bot around the questions: is it running, what can it do, and
+                what can I do next? */}
+            <Stack spacing={1.25} sx={{display: {xs: 'flex', md: 'none'}}}>
+                {bots.map((bot) => {
+                    const isActive = bot.enabled ?? true;
+                    const isMounted = isActive && capabilityEnabled(bot, 'remote_control');
+                    const isNotified = isActive && capabilityEnabled(bot, 'notify');
+                    const toggling = isToggling?.(bot.uuid!) ?? false;
+                    const restarting = isRestarting?.(bot.uuid!) ?? false;
+                    return (
+                        <Box key={bot.uuid} sx={{p: 1.5, border: 1, borderColor: 'divider', borderRadius: 1.5}}>
+                            <Stack direction="row" sx={{alignItems: 'flex-start', justifyContent: 'space-between', gap: 1}}>
+                                <Box sx={{minWidth: 0}}>
+                                    <Typography variant="body2" noWrap sx={{fontWeight: 600}}>{bot.name || bot.platform}</Typography>
+                                    <Chip label={bot.platform} size="small" sx={{mt: 0.75}}/>
+                                </Box>
+                                <Stack direction="row" spacing={0.75} sx={{alignItems: 'center'}}>
+                                    <Switch checked={isActive} onChange={() => onBotToggle(bot.uuid!, !isActive)} size="small" color="success" disabled={toggling}/>
+                                    <Chip label={isActive ? t('common.on', {defaultValue: 'On'}) : t('common.off', {defaultValue: 'Off'})} size="small" color={isActive ? 'success' : 'default'} variant={isActive ? 'filled' : 'outlined'} sx={statusChipSx}/>
+                                </Stack>
+                            </Stack>
+                            <Stack direction="row" spacing={0.5} sx={{alignItems: 'center', mt: 1.25, minWidth: 0}}>
+                                <Typography variant="caption" noWrap sx={{fontFamily: 'monospace', color: 'text.secondary', flex: 1}}>{bot.uuid}</Typography>
+                                <IconButton size="small" onClick={() => handleCopyUuid(bot.uuid!)} disabled={!bot.uuid}><CopyIcon fontSize="inherit"/></IconButton>
+                            </Stack>
+                            <Stack direction="row" spacing={0.75} sx={{mt: 1, flexWrap: 'wrap'}}>
+                                <Chip label={t('bots.card.remoteAgentChip', {defaultValue: 'Remote'})} size="small" variant={isMounted ? 'filled' : 'outlined'} color={isMounted ? 'primary' : 'default'}/>
+                                <Chip label={t('bots.card.notifyChip', {defaultValue: 'Notify'})} size="small" variant={isNotified ? 'filled' : 'outlined'} color={isNotified ? 'primary' : 'default'}/>
+                            </Stack>
+                            <Stack direction="row" spacing={0.5} sx={{alignItems: 'center', justifyContent: 'flex-end', mt: 1.25, pt: 1, borderTop: 1, borderColor: 'divider'}}>
+                                {onManageAccess && <Button size="small" startIcon={<Security fontSize="small"/>} onClick={() => onManageAccess(bot)} sx={{textTransform: 'none'}}>{t('bots.table.access', {defaultValue: 'Access'})}</Button>}
+                                <IconButton size="small" color="primary" onClick={() => onRestart(bot.uuid!)} disabled={!isActive || toggling || restarting}><RestartIcon fontSize="small"/></IconButton>
+                                <IconButton size="small" color="primary" onClick={() => onEdit(bot.uuid!, bot.platform!)} disabled={toggling || restarting}><EditIcon fontSize="small"/></IconButton>
+                                <IconButton size="small" color="error" onClick={() => handleDeleteClick(bot)} disabled={toggling || restarting}><DeleteIcon fontSize="small"/></IconButton>
+                            </Stack>
+                        </Box>
+                    );
+                })}
+            </Stack>
 
             <ConfirmDialog
                 open={deleteModal.open}
