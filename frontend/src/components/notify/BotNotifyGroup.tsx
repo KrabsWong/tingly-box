@@ -315,14 +315,16 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
                     // actually receives a message on its channel, so the first
                     // view is expected to be stale until the operator re-pulls.
                     <Tooltip title={t('notify.group.refresh', {defaultValue: 'Refresh reachable chats'})}>
-                        <IconButton
-                            size="small"
-                            onClick={loadChats}
-                            disabled={loading || isToggling}
-                            aria-label={t('notify.group.refresh', {defaultValue: 'Refresh reachable chats'})}
-                        >
-                            {loading ? <CircularProgress size={16}/> : <RefreshIcon fontSize="small"/>}
-                        </IconButton>
+                        <span>
+                            <IconButton
+                                size="small"
+                                onClick={loadChats}
+                                disabled={loading || isToggling}
+                                aria-label={t('notify.group.refresh', {defaultValue: 'Refresh reachable chats'})}
+                            >
+                                {loading ? <CircularProgress size={16}/> : <RefreshIcon fontSize="small"/>}
+                            </IconButton>
+                        </span>
                     </Tooltip>
                 )}
                 <Tooltip title={enabled
