@@ -2,7 +2,7 @@ import {ContentCopy as CopyIcon, Edit as CustomIcon, Close as CloseIcon, Code as
 import {api} from '@/services/api';
 import {notify} from '@/utils/notify';
 import {capabilityEnabled, isPairingRequired} from '@/types/bot';
-import type {BotChat, BotSettings} from '@/types/bot';
+import type {BotGroupDetail, BotSettings, DirectChatDetail, NotifyTarget} from '@/types/bot';
 import {fontMono} from '@/theme/fonts';
 import NotifyTestDialog from '@/components/notify/NotifyTestDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -112,27 +112,53 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
     const capabilityOn = capabilityEnabled(bot, 'notify');
     const enabled = (bot.enabled ?? true) && capabilityOn;
 
-    const [chats, setChats] = useState<BotChat[]>([]);
+    const [targets, setTargets] = useState<NotifyTarget[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [testChatID, setTestChatID] = useState<string | null>(null);
+    const [testTargetID, setTestTargetID] = useState<string | null>(null);
     const [showDisabled, setShowDisabled] = useState(false);
-    const [busyChat, setBusyChat] = useState<string | null>(null); // chat_id with an in-flight mutation
-    const [deleteTarget, setDeleteTarget] = useState<string | null>(null); // chat_id pending confirm
+    const [busyTarget, setBusyTarget] = useState<string | null>(null);
+    const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
     const loadChats = useCallback(async () => {
         if (!bot.uuid) return;
         setLoading(true);
         setError(null);
-        // Always fetch with include_disabled — the visible set is filtered
-        // client-side, so the "Show disabled" toggle and post-mutation
-        // refreshes don't need extra round-trips.
-        const result = await api.listBotChats(bot.uuid);
-        setLoading(false);
-        if (result.error) {
-            setError(result.error);
-        } else {
-            setChats(result.chats ?? []);
+        try {
+            const [chatData, groupData] = await Promise.all([
+                api.listBotDirectChats(bot.uuid),
+                api.listBotGroups(bot.uuid),
+            ]);
+            const groupDetails: BotGroupDetail[] = await Promise.all(
+                (groupData.groups || []).map((group: {id: string}) => api.getBotGroup(bot.uuid!, group.id)),
+            );
+            const directTargets: NotifyTarget[] = (chatData.chats || []).map((detail: DirectChatDetail) => ({
+                id: detail.chat.id,
+                kind: 'direct_chat',
+                external_id: detail.chat.external_chat_id,
+                platform: detail.chat.platform,
+                is_paired: Boolean(detail.chat.peer_actor_id),
+                blocked: detail.chat.blocked,
+                can_notify: detail.permissions.some((permission) => permission.capability === 'notify' && permission.action === 'notify.receive' && permission.effect === 'allow'),
+                can_reply: detail.permissions.some((permission) => permission.capability === 'notify' && permission.action === 'notify.reply' && permission.effect === 'allow'),
+            }));
+            const groupTargets: NotifyTarget[] = groupDetails.map((detail) => ({
+                id: detail.group.id,
+                kind: 'group',
+                external_id: detail.group.external_group_id,
+                name: detail.group.name,
+                platform: detail.group.platform,
+                blocked: detail.group.blocked,
+                can_notify: detail.capabilities.notify === 'allow',
+                // Group replies are actor-scoped. Keep Confirm on Direct Chats
+                // until the UI can select and explain the replying Actor.
+                can_reply: false,
+            }));
+            setTargets([...directTargets, ...groupTargets]);
+        } catch (loadError) {
+            setError((loadError as Error).message);
+        } finally {
+            setLoading(false);
         }
     }, [bot.uuid]);
 
@@ -141,7 +167,7 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
     useEffect(() => {
         if (enabled) loadChats();
         else {
-            setChats([]);
+            setTargets([]);
             setError(null);
             // A fetch may still be in flight from before the toggle — clear
             // loading so the graph (with its disabled body) renders instead of
@@ -159,58 +185,84 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
         }
     }, [t]);
 
-    const openTest = useCallback((chatID: string) => setTestChatID(chatID), []);
-    const closeTest = useCallback(() => setTestChatID(null), []);
+    const openTest = useCallback((targetID: string) => setTestTargetID(targetID), []);
+    const closeTest = useCallback(() => setTestTargetID(null), []);
 
     // Chat lifecycle actions — disable (inbound blocklist; the chat also drops
     // out of notify/interact) and hard delete (record removed; the chat
     // re-registers fresh if it messages the bot again).
-    const handleToggleDisabled = useCallback(async (chat: BotChat) => {
+    const handleToggleDisabled = useCallback(async (target: NotifyTarget) => {
         if (!bot.uuid) return;
-        const target = !chat.blocked;
-        setBusyChat(chat.chat_id);
-        const result = await api.setBotDirectChatBlocked(bot.uuid, chat.id, target);
-        setBusyChat(null);
+        const blocked = !target.blocked;
+        setBusyTarget(target.id);
+        const result = target.kind === 'group'
+            ? await api.setBotGroupBlocked(bot.uuid, target.id, blocked)
+            : await api.setBotDirectChatBlocked(bot.uuid, target.id, blocked);
+        setBusyTarget(null);
         if (result.error) {
             notify.error(result.error);
             return;
         }
-        notify.success(target
-            ? t('notify.chat.disabled', {defaultValue: 'Chat disabled — its messages are now dropped'})
-            : t('notify.chat.enabled', {defaultValue: 'Chat re-enabled'}));
-        setChats(prev => prev.map(c => c.id === chat.id ? {...c, blocked: target} : c));
+        notify.success(blocked
+            ? t('notify.target.blocked', {defaultValue: 'Target blocked'})
+            : t('notify.target.unblocked', {defaultValue: 'Target unblocked'}));
+        setTargets(prev => prev.map(item => item.id === target.id ? {...item, blocked} : item));
     }, [bot.uuid, t]);
 
     const handleDelete = useCallback(async (chatID: string) => {
         if (!bot.uuid) return;
-        const chat = chats.find((candidate) => candidate.chat_id === chatID);
+        const chat = targets.find((candidate) => candidate.id === chatID && candidate.kind === 'direct_chat');
         if (!chat) return;
-        setBusyChat(chatID);
+        setBusyTarget(chatID);
         const result = await api.deleteBotDirectChat(bot.uuid, chat.id);
-        setBusyChat(null);
+        setBusyTarget(null);
         setDeleteTarget(null);
         if (result.error) {
             notify.error(result.error);
             return;
         }
         notify.success(t('notify.chat.deleted', {defaultValue: 'Chat deleted'}));
-        setChats(prev => prev.filter(c => c.chat_id !== chatID));
-    }, [bot.uuid, chats, t]);
+        setTargets(prev => prev.filter(target => target.id !== chatID));
+    }, [bot.uuid, targets, t]);
 
     // The capability probe runner — owns firing notify/confirm against a chat
     // and the per-(chat,capability) results. Lives at the group level so a
     // result persists across re-renders of the chat list.
     const probe = useChatProbe();
-    const handleProbe = useCallback((chat: BotChat, capability: ChatCapability) => {
+    const handleProbe = useCallback((target: NotifyTarget, capability: ChatCapability) => {
         if (!bot.uuid) return;
-        void probe.run(bot.uuid, chat.chat_id, chat.id, capability);
+        void probe.run(bot.uuid, target.id, target.id, target.kind, capability);
+    }, [bot.uuid, probe]);
+
+    const handleAllowAndTest = useCallback(async (target: NotifyTarget) => {
+        if (!bot.uuid) return;
+        setBusyTarget(target.id);
+        try {
+            if (target.kind === 'group') {
+                await api.setBotGroupCapability(bot.uuid, target.id, 'notify', 'allow');
+            } else {
+                await Promise.all([
+                    api.setBotDirectChatPermission(bot.uuid, target.id, 'notify', 'access', 'allow'),
+                    api.setBotDirectChatPermission(bot.uuid, target.id, 'notify', 'notify.receive', 'allow'),
+                    api.setBotDirectChatPermission(bot.uuid, target.id, 'notify', 'notify.reply', 'allow'),
+                ]);
+            }
+            setTargets(prev => prev.map(item => item.id === target.id ? {...item, can_notify: true, can_reply: target.kind === 'direct_chat'} : item));
+            await probe.run(bot.uuid, target.id, target.id, target.kind, 'notify');
+        } catch (authorizationError) {
+            notify.error((authorizationError as Error).message);
+        } finally {
+            setBusyTarget(null);
+        }
     }, [bot.uuid, probe]);
 
     // Disabled chats are hidden by default; the footer toggle reveals them
     // (dimmed) so they can be re-enabled or deleted.
-    const activeChats = chats.filter(c => !c.blocked);
-    const disabledCount = chats.length - activeChats.length;
-    const visibleChats = showDisabled ? chats : activeChats;
+    const activeTargets = targets.filter(target => !target.blocked);
+    const disabledCount = targets.length - activeTargets.length;
+    const visibleTargets = showDisabled ? targets : activeTargets;
+    const directCount = activeTargets.filter(target => target.kind === 'direct_chat').length;
+    const groupCount = activeTargets.filter(target => target.kind === 'group').length;
 
     return (
         <Box
@@ -253,9 +305,9 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
                 <Box sx={{flexGrow: 1}} />
                 {enabled && (
                     <Typography variant="body2" sx={{color: 'text.secondary'}}>
-                        {activeChats.length > 0
-                            ? t('notify.group.chatCount', {defaultValue: '{{count}} reachable chat(s)', count: activeChats.length})
-                            : t('notify.group.noChats', {defaultValue: 'No reachable chats'})}
+                        {activeTargets.length > 0
+                            ? t('notify.group.targetCount', {defaultValue: '{{direct}} direct · {{groups}} groups', direct: directCount, groups: groupCount})
+                            : t('notify.group.noTargets', {defaultValue: 'No observed targets'})}
                     </Typography>
                 )}
                 {enabled && (
@@ -315,29 +367,37 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
                 ) : error ? (
                     <Typography variant="body2" sx={{color: 'error.main', py: 1}}>{error}</Typography>
                 ) : (
-                    <Box sx={graphRowStyles}>
+                    <Box sx={(theme) => ({
+                        ...graphRowStyles(theme),
+                        [theme.breakpoints.down('md')]: {
+                            display: 'block',
+                            overflowX: 'visible',
+                        },
+                    })}>
                         {/* Source: the authenticated API surface — the concrete
                             path (real uuid, /api/v1 prefix) so the tooltip is a
                             copyable curl target (ux-principles #5/#11). */}
-                        <NodeContainer>
-                            <ApiEntryNode path={`/api/v1/bots/${bot.uuid}/notify`} active={enabled} />
-                        </NodeContainer>
+                        <Box sx={{display: {xs: 'none', md: 'contents'}}}>
+                            <NodeContainer>
+                                <ApiEntryNode path={`/api/v1/bots/${bot.uuid}/notify`} active={enabled} />
+                            </NodeContainer>
 
-                        <ArrowNode direction="forward" />
+                            <ArrowNode direction="forward" />
 
-                        {/* The bot channel the notify API drives — unlike the
-                            remote graph (whose entry is the platform traffic
-                            comes FROM), notify targets this specific bot, so
-                            the node carries the bot identity. */}
-                        <NodeContainer>
-                            <ImBotNode imbot={bot} active={enabled} />
-                        </NodeContainer>
+                            {/* The bot channel the notify API drives — unlike the
+                                remote graph (whose entry is the platform traffic
+                                comes FROM), notify targets this specific bot, so
+                                the node carries the bot identity. */}
+                            <NodeContainer>
+                                <ImBotNode imbot={bot} active={enabled} />
+                            </NodeContainer>
 
-                        <ArrowNode direction="forward" />
+                            <ArrowNode direction="forward" />
+                        </Box>
 
                         {/* Fork: one branch per reachable chat (mirrors the @tb/@cc
                             fork in RemoteControlGraph). */}
-                        {visibleChats.length === 0 ? (
+                        {visibleTargets.length === 0 ? (
                             <Typography variant="body2" sx={{color: 'text.disabled', py: 1, minWidth: 220}}>
                                 {!enabled
                                     ? t('notify.group.disabledBody', {defaultValue: 'Bot is off — enable it to see and send to its reachable chats.'})
@@ -351,36 +411,35 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
                                     display: 'flex',
                                     flexDirection: 'column',
                                     gap: 2,
-                                    borderLeft: '2px solid',
+                                    borderLeft: {xs: 0, md: '2px solid'},
                                     borderColor: 'divider',
-                                    pl: 2,
+                                    pl: {xs: 0, md: 2},
                                     py: 0.5,
+                                    width: {xs: '100%', md: 'auto'},
                                 }}
                             >
-                                {visibleChats.map((chat) => {
-                                    const running = (cap: ChatCapability) => probe.isRunning(chat.chat_id, cap);
+                                {visibleTargets.map((target) => {
+                                    const running = (cap: ChatCapability) => probe.isRunning(target.id, cap);
                                     const anyRunning = running('notify') || running('confirm');
                                     // One lookup per capability per render — reused by the
                                     // button colors and the verdict lines below.
                                     const results = (['notify', 'confirm'] as const)
-                                        .map((cap) => ({cap, result: probe.getResult(chat.chat_id, cap)}))
+                                        .map((cap) => ({cap, result: probe.getResult(target.id, cap)}))
                                         .filter((r): r is {cap: ChatCapability; result: ChatProbeResult} => Boolean(r.result));
                                     const resultFor = (cap: ChatCapability) => results.find((r) => r.cap === cap)?.result;
-                                    // The probe bench is only usable when the chain is live:
-                                    // bot on and chat not blocklisted (a disabled chat 404s).
-                                    const benchUsable = enabled && !chat.blocked && chat.can_notify;
+                                    const benchUsable = enabled && !target.blocked;
                                     return (
-                                        <Box key={chat.chat_id} sx={{display: 'flex', alignItems: 'flex-start', gap: 1.5}}>
+                                        <Box key={`${target.kind}:${target.id}`} sx={{display: 'flex', flexDirection: {xs: 'column', md: 'row'}, alignItems: 'flex-start', gap: 1}}>
                                             {/* The chat leaf. */}
-                                            <NodeContainer>
+                                            <NodeContainer sx={{width: {xs: '100%', md: 'auto'}, '& > *': {width: {xs: '100%', md: 220}}}}>
                                                 <ChatNode
-                                                    chatID={chat.chat_id}
-                                                    targetID={chat.id}
-                                                    isPaired={chat.is_paired}
-                                                    projectPath={chat.project_path}
-                                                    updatedAt={chat.updated_at}
+                                                    chatID={target.external_id}
+                                                    targetID={target.id}
+                                                    kind={target.kind}
+                                                    name={target.name}
+                                                    isPaired={target.is_paired}
                                                     active={enabled}
-                                                    blocked={chat.blocked}
+                                                    blocked={target.blocked}
                                                 />
                                             </NodeContainer>
 
@@ -388,15 +447,28 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
                                                 row — probe bench left, lifecycle icons pushed
                                                 right — with verdicts underneath. One row, two
                                                 zones: "use the chat" vs "manage the chat". */}
-                                            <Box sx={{display: 'flex', flexDirection: 'column', gap: 0.75, minWidth: 0, flex: 1, justifyContent: 'center', alignSelf: 'stretch'}}>
+                                            <Box sx={{display: 'flex', flexDirection: 'column', gap: 0.75, minWidth: 0, flex: 1, width: '100%', justifyContent: 'center', alignSelf: 'stretch'}}>
                                                 <Box sx={{display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap'}}>
                                                     {/* Probe bench — hidden for a disabled chat:
                                                         the backend 404s pushes to it, so the
                                                         buttons would only manufacture failures.
                                                         Gated (not-yet-wired) capabilities are
                                                         skipped, not rendered dead. */}
-                                                    {benchUsable && (<>
-                                                        {CHAT_CAPABILITIES.filter((cap) => !cap.gated).map((cap) => {
+                                                    {benchUsable && !target.can_notify && (
+                                                        <Button
+                                                            size="small"
+                                                            variant="contained"
+                                                            disabled={busyTarget === target.id || anyRunning}
+                                                            onClick={() => void handleAllowAndTest(target)}
+                                                            sx={{textTransform: 'none'}}
+                                                        >
+                                                            {busyTarget === target.id
+                                                                ? <CircularProgress size={14} color="inherit"/>
+                                                                : t('notify.group.allowAndTest', {defaultValue: 'Allow Notify & Test'})}
+                                                        </Button>
+                                                    )}
+                                                    {benchUsable && target.can_notify && (<>
+                                                        {CHAT_CAPABILITIES.filter((cap) => !cap.gated && (cap.capability !== 'confirm' || target.can_reply)).map((cap) => {
                                                             const capability = cap.capability as ChatCapability;
                                                             const isRunning = running(capability);
                                                             const result = resultFor(capability);
@@ -409,7 +481,7 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
                                                                             variant="outlined"
                                                                             color={v ? (v.severity === 'info' ? 'primary' : v.severity) : 'primary'}
                                                                             disabled={isRunning || anyRunning}
-                                                                            onClick={() => handleProbe(chat, capability)}
+                                                                            onClick={() => handleProbe(target, capability)}
                                                                             startIcon={isRunning ? <CircularProgress size={14} color="inherit" /> : cap.icon}
                                                                             sx={{textTransform: 'none'}}
                                                                         >
@@ -428,7 +500,7 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
                                                                 variant="outlined"
                                                                 color="primary"
                                                                 startIcon={<CustomIcon fontSize="small" />}
-                                                                onClick={() => openTest(chat.chat_id)}
+                                                                onClick={() => openTest(target.id)}
                                                                 sx={{textTransform: 'none'}}
                                                             >
                                                                 {t('notify.group.custom', {defaultValue: 'Custom'})}
@@ -440,20 +512,20 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
 
                                                     {/* Lifecycle zone: copy · disable · delete. */}
                                                     <Tooltip title={t('notify.group.copyChatId', {defaultValue: 'Copy internal target UUID'})}>
-                                                        <IconButton size="small" onClick={() => handleCopy(chat.id)}>
+                                                        <IconButton size="small" onClick={() => handleCopy(target.id)}>
                                                             <CopyIcon fontSize="small" />
                                                         </IconButton>
                                                     </Tooltip>
-                                                    <Tooltip title={chat.blocked
+                                                    <Tooltip title={target.blocked
                                                         ? t('notify.group.enableChat', {defaultValue: 'Enable — accept its messages again'})
                                                         : t('notify.group.disableChat', {defaultValue: 'Disable — silently drop its messages'})}>
                                                         <span>
                                                             <IconButton
                                                                 size="small"
-                                                                color={chat.blocked ? 'default' : 'warning'}
-                                                                disabled={busyChat === chat.chat_id}
-                                                                onClick={() => handleToggleDisabled(chat)}
-                                                                aria-label={chat.blocked
+                                                                color={target.blocked ? 'default' : 'warning'}
+                                                                disabled={busyTarget === target.id}
+                                                                onClick={() => handleToggleDisabled(target)}
+                                                                aria-label={target.blocked
                                                                     ? t('notify.group.enableChat', {defaultValue: 'Enable chat'})
                                                                     : t('notify.group.disableChat', {defaultValue: 'Disable chat'})}
                                                             >
@@ -461,26 +533,28 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
                                                             </IconButton>
                                                         </span>
                                                     </Tooltip>
-                                                    <Tooltip title={t('notify.group.deleteChat', {defaultValue: 'Delete this chat record'})}>
-                                                        <span>
-                                                            <IconButton
-                                                                size="small"
-                                                                color="error"
-                                                                disabled={busyChat === chat.chat_id}
-                                                                onClick={() => setDeleteTarget(chat.chat_id)}
-                                                                aria-label={t('notify.group.deleteChat', {defaultValue: 'Delete chat'})}
-                                                            >
-                                                                <DeleteIcon fontSize="small" />
-                                                            </IconButton>
-                                                        </span>
-                                                    </Tooltip>
+                                                    {target.kind === 'direct_chat' && (
+                                                        <Tooltip title={t('notify.group.deleteChat', {defaultValue: 'Delete this Direct Chat record'})}>
+                                                            <span>
+                                                                <IconButton
+                                                                    size="small"
+                                                                    color="error"
+                                                                    disabled={busyTarget === target.id}
+                                                                    onClick={() => setDeleteTarget(target.id)}
+                                                                    aria-label={t('notify.group.deleteChat', {defaultValue: 'Delete Direct Chat'})}
+                                                                >
+                                                                    <DeleteIcon fontSize="small" />
+                                                                </IconButton>
+                                                            </span>
+                                                        </Tooltip>
+                                                    )}
                                                 </Box>
 
                                                 {/* Inline probe results (one per active capability that has run). */}
                                                 {results.length > 0 && (
                                                     <Stack spacing={0.75}>
                                                         {results.map(({cap, result}) => (
-                                                            <ProbeResultLine key={cap} result={result} onDismiss={() => probe.clear(chat.chat_id, cap)} />
+                                                            <ProbeResultLine key={cap} result={result} onDismiss={() => probe.clear(target.id, cap)} />
                                                         ))}
                                                     </Stack>
                                                 )}
@@ -527,17 +601,17 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
                 }
                 confirmLabel={t('common.delete', {defaultValue: 'Delete'})}
                 confirmColor="error"
-                loading={busyChat !== null && busyChat === deleteTarget}
+                loading={busyTarget !== null && busyTarget === deleteTarget}
                 onClose={() => setDeleteTarget(null)}
                 onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
             />
 
             <NotifyTestDialog
-                open={testChatID !== null}
+                open={testTargetID !== null}
                 botUUID={bot.uuid!}
                 botName={bot.name || bot.platform}
-                chats={activeChats}
-                initialChatID={testChatID ?? undefined}
+                targets={activeTargets.filter(target => target.can_notify)}
+                initialTargetID={testTargetID ?? undefined}
                 onClose={closeTest}
             />
         </Box>

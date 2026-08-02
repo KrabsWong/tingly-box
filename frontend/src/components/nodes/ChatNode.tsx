@@ -21,6 +21,8 @@ const StyledChatNode = styled(StyledBotGraphNode, {
 
 export interface ChatNodeProps {
     chatID: string;
+    kind?: 'direct_chat' | 'group';
+    name?: string;
     targetID?: string;
     isPaired?: boolean;
     projectPath?: string;
@@ -31,7 +33,7 @@ export interface ChatNodeProps {
     blocked?: boolean;
 }
 
-const ChatNode: React.FC<ChatNodeProps> = ({chatID, targetID, isPaired, projectPath, updatedAt, active = true, blocked = false}) => {
+const ChatNode: React.FC<ChatNodeProps> = ({chatID, kind = 'direct_chat', name, targetID, isPaired, projectPath, updatedAt, active = true, blocked = false}) => {
     const {t} = useTranslation();
     return (
         <StyledChatNode active={active} blocked={blocked}>
@@ -41,7 +43,7 @@ const ChatNode: React.FC<ChatNodeProps> = ({chatID, targetID, isPaired, projectP
                 <NodeTooltip
                     title={
                         <>
-                            Chat ID: {chatID}
+                            {kind === 'group' ? 'Group ID' : 'Chat ID'}: {chatID}
                             {targetID && (<><br/>Target UUID: {targetID}</>)}
                             {projectPath && (<><br/>Project: {projectPath}</>)}
                             {updatedAt && (<><br/>Updated: {new Date(updatedAt).toLocaleString()}</>)}
@@ -60,7 +62,7 @@ const ChatNode: React.FC<ChatNodeProps> = ({chatID, targetID, isPaired, projectP
                             textDecoration: blocked ? 'line-through' : 'none',
                         }}
                     >
-                        {chatID}
+                        {name || chatID}
                     </Typography>
                 </NodeTooltip>
             </Box>
@@ -68,7 +70,7 @@ const ChatNode: React.FC<ChatNodeProps> = ({chatID, targetID, isPaired, projectP
             {/* Bottom layer — status chips. */}
             <Box sx={NODE_LAYER_STYLES.bottomLayer}>
                 <Chip
-                    label="Chat"
+                    label={kind === 'group' ? 'Group' : 'Direct'}
                     size="small"
                     color={active && !blocked ? 'info' : 'default'}
                     sx={{height: 24, fontSize: '0.7rem', fontWeight: 500}}

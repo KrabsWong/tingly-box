@@ -2,7 +2,7 @@ import {Send as SendIcon} from '@/components/icons';
 import {api} from '@/services/api';
 import {notify} from '@/utils/notify';
 import {fontMono} from '@/theme/fonts';
-import type {BotChat} from '@/types/bot';
+import type {NotifyTarget} from '@/types/bot';
 import {
     Autocomplete,
     Button,
@@ -36,19 +36,19 @@ export interface NotifyTestDialogProps {
     botName?: string;
     /** The bot's reachable chats — owned by the parent (BotNotifyGroup), so the
      *  dialog doesn't re-fetch what's already loaded one level up. */
-    chats: BotChat[];
-    /** Pre-fill the chat_id (e.g. when opened from a specific chat row). */
-    initialChatID?: string;
+    targets: NotifyTarget[];
+    /** Pre-fill the stable target UUID when opened from a specific row. */
+    initialTargetID?: string;
     onClose: () => void;
 }
 
 const LEVELS = ['info', 'warn', 'error'] as const;
 type Level = (typeof LEVELS)[number];
 
-const NotifyTestDialog: React.FC<NotifyTestDialogProps> = ({open, botUUID, botName, chats, initialChatID, onClose}) => {
+const NotifyTestDialog: React.FC<NotifyTestDialogProps> = ({open, botUUID, botName, targets, initialTargetID, onClose}) => {
     const {t} = useTranslation();
 
-    const [chatID, setChatID] = useState('');
+    const [targetID, setTargetID] = useState('');
     const [title, setTitle] = useState('');
     const [body, setBody] = useState('');
     const [level, setLevel] = useState<Level>('info');
@@ -58,24 +58,24 @@ const NotifyTestDialog: React.FC<NotifyTestDialogProps> = ({open, botUUID, botNa
     // parent, so there's no fetch here.
     useEffect(() => {
         if (!open) return;
-        setChatID(initialChatID ?? '');
+        setTargetID(initialTargetID ?? '');
         setTitle('');
         setBody('');
         setLevel('info');
-    }, [open, initialChatID]);
+    }, [open, initialTargetID]);
 
-    const canSend = chats.some((chat) => chat.chat_id === chatID) && body.trim() !== '' && !sending;
+    const canSend = targets.some((target) => target.id === targetID) && body.trim() !== '' && !sending;
 
     const handleSend = useCallback(async () => {
         setSending(true);
-        const selected = chats.find((chat) => chat.chat_id === chatID);
+        const selected = targets.find((target) => target.id === targetID);
         if (!selected) {
             setSending(false);
             notify.error(t('notify.test.pickKnownChat', {defaultValue: 'Select a discovered chat first'}));
             return;
         }
         const result = await api.notifyBot(botUUID, {
-            target: {kind: 'direct_chat', id: selected.id},
+            target: {kind: selected.kind, id: selected.id},
             title: title.trim() || undefined,
             body: body.trim(),
             level,
@@ -87,7 +87,7 @@ const NotifyTestDialog: React.FC<NotifyTestDialogProps> = ({open, botUUID, botNa
         }
         notify.success(t('notify.test.sent', {defaultValue: 'Notification sent'}));
         onClose();
-    }, [botUUID, chatID, title, body, level, onClose, t]);
+    }, [botUUID, targetID, title, body, level, onClose, t, targets]);
 
     return (
         <Dialog open={open} onClose={sending ? undefined : onClose} fullWidth maxWidth="sm">
@@ -101,20 +101,23 @@ const NotifyTestDialog: React.FC<NotifyTestDialogProps> = ({open, botUUID, botNa
                         internal DirectChat UUID selected from this list. */}
                     <Autocomplete
                         size="small"
-                        options={chats}
-                        getOptionLabel={(c) => c.chat_id}
-                        value={chats.find((c) => c.chat_id === chatID) ?? null}
-                        onChange={(_e, value) => setChatID(value?.chat_id ?? '')}
+                        options={targets}
+                        getOptionLabel={(target) => target.name || target.external_id}
+                        value={targets.find((target) => target.id === targetID) ?? null}
+                        onChange={(_e, value) => setTargetID(value?.id ?? '')}
                         renderOption={(props, option) => {
-                            const chat = option;
+                            const target = option;
                             const {key, ...optionProps} = props;
                             return (
-                                <li key={key ?? chat.id} {...optionProps}>
+                                <li key={key ?? target.id} {...optionProps}>
                                     <Stack direction="row" spacing={1} sx={{alignItems: 'center'}}>
                                         <Typography component="span" sx={{fontFamily: fontMono}}>
-                                            {chat.chat_id}
+                                            {target.external_id}
                                         </Typography>
-                                        {chat.is_paired && (
+                                        <Typography component="span" variant="caption" color="text.secondary">
+                                            {target.kind === 'group' ? t('notify.target.group', {defaultValue: 'Group'}) : t('notify.target.direct', {defaultValue: 'Direct'})}
+                                        </Typography>
+                                        {target.is_paired && (
                                             <Typography component="span" variant="caption" sx={{color: 'success.main'}}>
                                                 {t('notify.test.paired', {defaultValue: 'paired'})}
                                             </Typography>
@@ -126,9 +129,9 @@ const NotifyTestDialog: React.FC<NotifyTestDialogProps> = ({open, botUUID, botNa
                         renderInput={(params) => (
                             <TextField
                                 {...params}
-                                label={t('notify.test.chatId', {defaultValue: 'Chat ID'})}
-                                placeholder={chats.length === 0
-                                    ? t('notify.test.chatIdPlaceholder', {defaultValue: 'No discovered chats yet'})
+                                label={t('notify.test.target', {defaultValue: 'Target'})}
+                                placeholder={targets.length === 0
+                                    ? t('notify.test.targetPlaceholder', {defaultValue: 'No authorized targets yet'})
                                     : ''}
                             />
                         )}
