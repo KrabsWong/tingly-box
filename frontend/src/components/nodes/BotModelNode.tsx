@@ -1,37 +1,8 @@
-import { Box, Typography, styled, Divider, Chip } from '@mui/material';
+import { Box, Typography, Divider, Chip } from '@mui/material';
 import { Warning as WarningIcon } from '@/components/icons';
-import { NODE_LAYER_STYLES } from './styles';
+import { NODE_LAYER_STYLES, StyledBotGraphNode } from './styles';
 import NodeTooltip from './NodeTooltip';
 import { useCallback } from 'react';
-
-const StyledBotModelNode = styled(Box, { shouldForwardProp: (prop) => prop !== 'active' && prop !== 'clickable' && prop !== 'hasConfig' })<{
-    active: boolean;
-    clickable: boolean;
-    hasConfig: boolean;
-}>(({ active, clickable, hasConfig, theme }) => ({
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    borderRadius: theme.shape.borderRadius,
-    border: '1px solid',
-    borderColor: hasConfig ? (active ? 'warning.main' : 'divider') : 'warning.main',
-    backgroundColor: hasConfig ? (active ? 'warning.50' : 'background.paper') : 'warning.50',
-    textAlign: 'center',
-    width: 220,
-    height: 90,
-    boxShadow: theme.shadows[2],
-    transition: 'all 0.2s ease-in-out',
-    position: 'relative',
-    opacity: active ? 1 : 0.6,
-    cursor: clickable ? 'pointer' : 'default',
-    '&:hover': clickable ? {
-        borderColor: 'warning.main',
-        boxShadow: theme.shadows[4],
-        transform: 'translateY(-2px)',
-    } : {},
-}));
 
 interface BotModelNodeProps {
     provider?: string;
@@ -57,7 +28,7 @@ const BotModelNode: React.FC<BotModelNodeProps> = ({
     }, [onClick]);
 
     return (
-        <StyledBotModelNode active={active} clickable={clickable} hasConfig={hasConfig} onClick={handleClick}>
+        <StyledBotGraphNode active={active} clickable={clickable} warn={!hasConfig} onClick={handleClick}>
             {/* Top Layer - Provider name and model display (same as ProviderNode) */}
             <Box sx={NODE_LAYER_STYLES.topLayer}>
                 <NodeTooltip title={
@@ -120,7 +91,7 @@ const BotModelNode: React.FC<BotModelNodeProps> = ({
                     sx={{ height: 24, fontSize: '0.7rem', fontWeight: 500 }}
                 />
             </Box>
-        </StyledBotModelNode>
+        </StyledBotGraphNode>
     );
 };
 

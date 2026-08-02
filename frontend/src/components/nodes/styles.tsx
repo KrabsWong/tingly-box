@@ -19,6 +19,41 @@ export const getRouteGraphActiveBg = (theme: Theme) =>
 export const getRouteGraphBorderColor = (theme: Theme) =>
     alpha(getRouteGraphActiveColor(theme), theme.palette.mode === 'dark' ? 0.48 : 0.50);
 
+// Diagonal-hatch overlay for anything "deliberately not running" (off bot
+// card, unmounted purpose, blocklisted chat leaf) — distinct from dimmed =
+// "upstream is off". Host must be position: relative; pointer-transparent so
+// everything underneath stays interactive.
+/** @deprecated Use getInactiveHatchSx(theme) — this static variant is invisible in dark mode. */
+export const inactiveHatchSx = {
+    '&::before': {
+        content: '""',
+        position: 'absolute' as const,
+        inset: 0,
+        borderRadius: 'inherit',
+        zIndex: 2,
+        pointerEvents: 'none' as const,
+        backgroundImage:
+            'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.035) 10px, rgba(0,0,0,0.035) 20px)',
+    },
+} as const;
+
+// Theme-aware hatch: dark paper needs light stripes (the rgba-black variant
+// above disappears against it).
+export const getInactiveHatchSx = (theme: Theme) => ({
+    '&::before': {
+        content: '""',
+        position: 'absolute' as const,
+        inset: 0,
+        borderRadius: 'inherit',
+        zIndex: 2,
+        pointerEvents: 'none' as const,
+        backgroundImage:
+            theme.palette.mode === 'dark'
+                ? 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.055) 10px, rgba(255,255,255,0.055) 20px)'
+                : 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.035) 10px, rgba(0,0,0,0.035) 20px)',
+    },
+} as const);
+
 // Node dimensions constants
 export const MODEL_NODE_STYLES = {
     width: 220,
@@ -57,6 +92,22 @@ export const SMALL_NODE_STYLES = {
     width: 100,
     height: 72,
     padding: 5,
+} as const;
+
+// Remote/notify graph card nodes (ImBot, Agent, BotModel, CCProfile, Chat,
+// ApiEntry, CWD, RoutingMode) — same footprint as the route-graph model
+// nodes so all graphs read at one scale.
+export const BOT_NODE_STYLES = {
+    width: 220,
+    height: 76,
+    padding: 5,
+} as const;
+
+// AgentConfigNode — a deliberately smaller supplementary node.
+export const AGENT_CONFIG_NODE_STYLES = {
+    width: 180,
+    height: 60,
+    padding: 8,
 } as const;
 
 // Common styled components
@@ -108,6 +159,70 @@ export const graphNodeBaseHoverStyles = {
     boxShadow: 'none',
     transform: 'translateY(0)',
 } as const;
+
+// "Needs attention" border for bot-graph nodes (unconfigured model, missing
+// CC profile) — the warning signal in the new visual language: amber border,
+// no tint background.
+export const getBotGraphWarnBorderColor = (theme: Theme) =>
+    alpha(theme.palette.warning.main, theme.palette.mode === 'dark' ? 0.72 : 0.70);
+
+// Shared base for the remote/notify graph card family. Replaces the per-node
+// styled(Box) copies (shadows[2] + semantic tints) with the route-graph
+// language: neutral alpha border, paper background, no static shadow, hover
+// emphasis ring only when clickable, 0.6 opacity when inactive.
+export const StyledBotGraphNode = styled(Box, {
+    shouldForwardProp: (prop) =>
+        prop !== 'active' && prop !== 'clickable' && prop !== 'warn',
+})<{ active?: boolean; clickable?: boolean; warn?: boolean }>(
+    ({ active = true, clickable = false, warn = false, theme }) => ({
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: BOT_NODE_STYLES.padding,
+        borderRadius: theme.shape.borderRadius,
+        border: '1px solid',
+        borderColor: warn
+            ? getBotGraphWarnBorderColor(theme)
+            : getRouteGraphBorderColor(theme),
+        backgroundColor: theme.palette.background.paper,
+        textAlign: 'center',
+        width: BOT_NODE_STYLES.width,
+        height: BOT_NODE_STYLES.height,
+        transition:
+            'border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.18s ease, transform 0.18s ease',
+        position: 'relative',
+        opacity: active ? 1 : 0.6,
+        cursor: clickable ? 'pointer' : 'default',
+        ...graphNodeBaseHoverStyles,
+        ...(clickable && { '&:hover': graphNodeHoverStyles(theme) }),
+    }),
+);
+
+// Horizontal graph row with a thin, mode-aware scrollbar — shared by
+// RemoteControlGraph and the notify graph so both scroll surfaces match.
+export const graphRowStyles = (theme: Theme) => ({
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: theme.spacing(1.5),
+    flexWrap: 'nowrap' as const,
+    overflowX: 'auto' as const,
+    overflowY: 'visible' as const,
+    paddingBottom: theme.spacing(0.5),
+    scrollbarWidth: 'thin' as const,
+    scrollbarColor:
+        (theme.palette.mode === 'dark' ? '#555' : '#ccc') + ' transparent',
+    '&::-webkit-scrollbar': { height: 6 },
+    '&::-webkit-scrollbar-track': { background: 'transparent' },
+    '&::-webkit-scrollbar-thumb': {
+        backgroundColor: theme.palette.mode === 'dark' ? '#555' : '#ccc',
+        borderRadius: 3,
+        '&:hover': {
+            backgroundColor: theme.palette.mode === 'dark' ? '#777' : '#999',
+        },
+    },
+});
 
 // Spotlight: a primary-colored ring that briefly pulses to draw attention to a
 // node when guidance (Quick Start → "Select a Model") points the user at it.

@@ -1,5 +1,5 @@
-import { Box, Chip, Divider, Typography, styled } from '@mui/material';
-import { NODE_LAYER_STYLES } from './styles';
+import { Box, Chip, Divider, Typography } from '@mui/material';
+import { NODE_LAYER_STYLES, StyledBotGraphNode } from './styles';
 import NodeTooltip from './NodeTooltip';
 import { useTranslation } from 'react-i18next';
 
@@ -106,34 +106,6 @@ const AGENT_TYPE_CONFIG: Record<AgentType, {
     },
 };
 
-const StyledAgentNode = styled(Box, {
-    shouldForwardProp: (prop) => prop !== 'active' && prop !== 'clickable',
-})<{ active: boolean; clickable: boolean }>(({ active, clickable, theme }) => ({
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    borderRadius: theme.shape.borderRadius,
-    border: '1px solid',
-    borderColor: active ? 'primary.main' : 'divider',
-    backgroundColor: active ? 'primary.50' : 'background.paper',
-    textAlign: 'center',
-    width: 220,
-    height: 90,
-    boxShadow: theme.shadows[2],
-    transition: 'all 0.2s ease-in-out',
-    position: 'relative',
-    opacity: active ? 1 : 0.6,
-    cursor: clickable ? 'pointer' : 'default',
-    ...(clickable && {
-        '&:hover': {
-            boxShadow: theme.shadows[4],
-            transform: 'translateY(-2px)',
-        },
-    }),
-}));
-
 interface AgentNodeProps {
     agentType?: AgentType;
     active?: boolean;
@@ -185,7 +157,7 @@ const AgentNode: React.FC<AgentNodeProps> = ({
 
     return (
         <NodeTooltip title={tooltipContent} placement="top">
-            <StyledAgentNode active={active} clickable={clickable} onClick={onClick}>
+            <StyledBotGraphNode active={active} clickable={clickable} onClick={onClick}>
                 <Box sx={NODE_LAYER_STYLES.topLayer}>
                     <Typography variant="body2" sx={NODE_LAYER_STYLES.typography}>Agent</Typography>
                 </Box>
@@ -200,7 +172,7 @@ const AgentNode: React.FC<AgentNodeProps> = ({
                         sx={{ height: 24, fontSize: '0.75rem', fontWeight: 600 }}
                     />
                 </Box>
-            </StyledAgentNode>
+            </StyledBotGraphNode>
         </NodeTooltip>
     );
 };

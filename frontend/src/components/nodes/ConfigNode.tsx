@@ -1,32 +1,6 @@
-import { Box, Typography, styled, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Divider } from '@mui/material';
-import { NODE_LAYER_STYLES } from './styles';
+import { Box, Typography, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Divider } from '@mui/material';
+import { NODE_LAYER_STYLES, StyledBotGraphNode } from './styles';
 import { useState } from 'react';
-
-const StyledCWDNode = styled(Box, { shouldForwardProp: (prop) => prop !== 'disabled' })<{
-    disabled: boolean;
-}>(({ disabled, theme }) => ({
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    borderRadius: theme.shape.borderRadius,
-    border: '1px dashed',
-    borderColor: 'divider',
-    backgroundColor: disabled ? 'grey.100' : 'background.paper',
-    width: 220,
-    height: 90,
-    boxShadow: theme.shadows[2],
-    transition: 'all 0.2s ease-in-out',
-    opacity: disabled ? 0.6 : 1,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    '&:hover': disabled ? {} : {
-        borderColor: 'primary.main',
-        backgroundColor: 'action.hover',
-        boxShadow: theme.shadows[4],
-        transform: 'translateY(-2px)',
-    },
-}));
 
 interface CWDNodeProps {
     onPathChange?: (path: string) => void;
@@ -84,7 +58,7 @@ const CWDNode: React.FC<CWDNodeProps> = ({ onPathChange, disabled = false, curre
 
     return (
         <>
-            <StyledCWDNode disabled={disabled} onClick={handleClick}>
+            <StyledBotGraphNode active={!disabled} clickable={!disabled} onClick={handleClick}>
                 <Box sx={NODE_LAYER_STYLES.topLayer}>
                     <Typography variant="body2" sx={{
                         fontWeight: 600,
@@ -109,7 +83,7 @@ const CWDNode: React.FC<CWDNodeProps> = ({ onPathChange, disabled = false, curre
                         textTransform: 'uppercase',
                     }}>Default Path</Typography>
                 </Box>
-            </StyledCWDNode>
+            </StyledBotGraphNode>
             <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
                 <DialogTitle>Set Working Directory</DialogTitle>
                 <DialogContent>

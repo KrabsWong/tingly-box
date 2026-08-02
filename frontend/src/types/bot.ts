@@ -188,12 +188,16 @@ export interface NotifyRoute {
 // API requires in its request body — surfacing it here (and in BotTable) is
 // what makes those endpoints usable from the UI. Placeholder until codegen.
 export interface BotChat {
+    /** Stable internal DirectChat UUID used by control-plane mutations. */
+    id: string;
     chat_id: string;
     platform?: string;
     is_paired?: boolean;
     is_whitelisted?: boolean;
     project_path?: string;
     updated_at?: string;
+    blocked?: boolean;
+    can_notify?: boolean;
 }
 
 // notifyRoutes extracts a bot's outbound scenario bindings (every scenarios

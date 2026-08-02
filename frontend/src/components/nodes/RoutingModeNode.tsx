@@ -1,26 +1,9 @@
 import {
     Router as RouterIcon
 } from '@/components/icons';
-import { Box, Divider, styled, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
-import { NODE_LAYER_STYLES } from './styles';
+import { Box, Divider, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
+import { NODE_LAYER_STYLES, StyledBotGraphNode } from './styles';
 import NodeTooltip from './NodeTooltip';
-
-const StyledRoutingNode = styled(Box)(({ theme }) => ({
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    borderRadius: theme.shape.borderRadius,
-    border: '1px solid',
-    borderColor: 'info.main',
-    backgroundColor: 'info.50',
-    textAlign: 'center',
-    width: 220,
-    height: 90,
-    boxShadow: theme.shadows[2],
-    transition: 'all 0.2s ease-in-out',
-}));
 
 interface RoutingModeNodeProps {
     mode: 'direct' | 'smart_guide';
@@ -34,7 +17,7 @@ const RoutingModeNode: React.FC<RoutingModeNodeProps> = ({
     disabled = false,
 }) => {
     return (
-        <StyledRoutingNode>
+        <StyledBotGraphNode>
             {/* Top Layer - Icon and Title */}
             <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, width: '100%' }}>
                 <RouterIcon sx={{ fontSize: 24, color: 'info.main' }} />
@@ -111,7 +94,7 @@ const RoutingModeNode: React.FC<RoutingModeNodeProps> = ({
                     </NodeTooltip>
                 </ToggleButtonGroup>
             </Box>
-        </StyledRoutingNode>
+        </StyledBotGraphNode>
     );
 };
 

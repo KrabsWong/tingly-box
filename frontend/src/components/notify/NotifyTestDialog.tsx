@@ -28,11 +28,8 @@ import {useTranslation} from 'react-i18next';
 // verifiable from the UI. One-way only; interact (request→reply) is out of scope
 // for this pass.
 //
-// The chat_id picker is the live, channel-native id /notify needs (concept (b),
-// not the chat_id_lock inbound restriction and not the scenarios route target).
-// It's an Autocomplete over the chats the parent already loaded — one input that
-// both picks from the list and accepts a pasted id when no chat is registered
-// yet. See .design/bot-interaction-api.md and ux-principles #5/#11.
+// The picker displays the channel-native id users recognize, while submitting
+// the selected chat's stable internal UUID to /notify.
 export interface NotifyTestDialogProps {
     open: boolean;
     botUUID: string;
@@ -67,12 +64,18 @@ const NotifyTestDialog: React.FC<NotifyTestDialogProps> = ({open, botUUID, botNa
         setLevel('info');
     }, [open, initialChatID]);
 
-    const canSend = chatID.trim() !== '' && body.trim() !== '' && !sending;
+    const canSend = chats.some((chat) => chat.chat_id === chatID) && body.trim() !== '' && !sending;
 
     const handleSend = useCallback(async () => {
         setSending(true);
+        const selected = chats.find((chat) => chat.chat_id === chatID);
+        if (!selected) {
+            setSending(false);
+            notify.error(t('notify.test.pickKnownChat', {defaultValue: 'Select a discovered chat first'}));
+            return;
+        }
         const result = await api.notifyBot(botUUID, {
-            chat_id: chatID.trim(),
+            target: {kind: 'direct_chat', id: selected.id},
             title: title.trim() || undefined,
             body: body.trim(),
             level,
@@ -94,21 +97,19 @@ const NotifyTestDialog: React.FC<NotifyTestDialogProps> = ({open, botUUID, botNa
             </DialogTitle>
             <DialogContent>
                 <Stack spacing={2} sx={{mt: 0.5}}>
-                    {/* One chat_id control: pick from the list OR paste a value
-                        when no chat is registered yet (freeSolo). Avoids the
-                        two-controls-one-value trap. */}
+                    {/* Display the concrete platform id, but submit the stable
+                        internal DirectChat UUID selected from this list. */}
                     <Autocomplete
                         size="small"
-                        freeSolo
                         options={chats}
-                        getOptionLabel={(c) => (typeof c === 'string' ? c : c.chat_id)}
-                        value={chats.find((c) => c.chat_id === chatID) ?? (chatID ? chatID : null)}
-                        onChange={(_e, value) => setChatID(typeof value === 'string' ? value : (value?.chat_id ?? ''))}
-                        onInputChange={(_e, value) => setChatID(value)}
+                        getOptionLabel={(c) => c.chat_id}
+                        value={chats.find((c) => c.chat_id === chatID) ?? null}
+                        onChange={(_e, value) => setChatID(value?.chat_id ?? '')}
                         renderOption={(props, option) => {
-                            const chat = typeof option === 'string' ? {chat_id: option} : option;
+                            const chat = option;
+                            const {key, ...optionProps} = props;
                             return (
-                                <li {...props} key={chat.chat_id}>
+                                <li key={key ?? chat.id} {...optionProps}>
                                     <Stack direction="row" spacing={1} sx={{alignItems: 'center'}}>
                                         <Typography component="span" sx={{fontFamily: fontMono}}>
                                             {chat.chat_id}
@@ -127,7 +128,7 @@ const NotifyTestDialog: React.FC<NotifyTestDialogProps> = ({open, botUUID, botNa
                                 {...params}
                                 label={t('notify.test.chatId', {defaultValue: 'Chat ID'})}
                                 placeholder={chats.length === 0
-                                    ? t('notify.test.chatIdPlaceholder', {defaultValue: 'No chats yet — paste a Chat ID'})
+                                    ? t('notify.test.chatIdPlaceholder', {defaultValue: 'No discovered chats yet'})
                                     : ''}
                             />
                         )}

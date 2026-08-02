@@ -3,39 +3,11 @@ import type { BotSettings } from '@/types/bot.ts';
 import { ccProfileIdFromDefaultAgent } from '@/types/bot.ts';
 import type { Provider } from '@/types/provider.ts';
 import type { ProfileInfo } from '@/contexts/ProfileContext';
-import { ArrowNode, NodeContainer } from '../nodes';
-import ImBotNode from '../nodes/ImBotNode.tsx';
+import { ArrowNode, NodeContainer, PlatformNode, graphRowStyles } from '../nodes';
 import BotModelNode from '../nodes/BotModelNode.tsx';
 import AgentNode from '../nodes/AgentNode.tsx';
 import AtNode from '../nodes/AtNode.tsx';
 import CCProfileNode from '../nodes/CCProfileNode.tsx';
-
-const graphRowStyles = (theme: any) => ({
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    gap: theme.spacing(1.5),
-    flexWrap: 'nowrap',
-    overflowX: 'auto',
-    overflowY: 'visible',
-    paddingBottom: theme.spacing(0.5),
-    // Custom scrollbar styling
-    scrollbarWidth: 'thin',
-    scrollbarColor: (theme.palette.mode === 'dark' ? '#555' : '#ccc') + ' transparent',
-    '&::-webkit-scrollbar': {
-        height: 6,
-    },
-    '&::-webkit-scrollbar-track': {
-        background: 'transparent',
-    },
-    '&::-webkit-scrollbar-thumb': {
-        backgroundColor: theme.palette.mode === 'dark' ? '#555' : '#ccc',
-        borderRadius: 3,
-        '&:hover': {
-            backgroundColor: theme.palette.mode === 'dark' ? '#777' : '#999',
-        },
-    },
-});
 
 export interface RemoteControlGraphProps {
     imbot: BotSettings;
@@ -77,7 +49,10 @@ const RemoteControlGraph: React.FC<RemoteControlGraphProps> = ({
         <Box sx={graphRowStyles}>
             {/* Bot node */}
             <NodeContainer>
-                <ImBotNode imbot={imbot} active={isBotEnabled} onClick={readOnly ? undefined : onBotClick} />
+                {/* Entry: the platform the chat traffic comes from. Which bot
+                    serves it is the card header's job — the node only marks
+                    the source platform and whether the hop is live. */}
+                <PlatformNode platform={imbot.platform} botUUID={imbot.uuid} active={isBotEnabled} onClick={readOnly ? undefined : onBotClick} />
             </NodeContainer>
 
             <ArrowNode direction="forward" />

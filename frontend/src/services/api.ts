@@ -1543,6 +1543,10 @@ export const api = {
         botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/chats/${encodeURIComponent(chatID)}/blocked`, {
             method: 'PUT', body: JSON.stringify({blocked}),
         }),
+    deleteBotDirectChat: (botUUID: string, chatID: string) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/chats/${encodeURIComponent(chatID)}`, {
+            method: 'DELETE',
+        }),
     setBotDirectChatPermission: (botUUID: string, chatID: string, capability: string, action: string, effect: 'allow' | 'deny') =>
         botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/chats/${encodeURIComponent(chatID)}/permissions/${capability}/${action}`, {
             method: 'PUT', body: JSON.stringify({effect}),
@@ -1585,6 +1589,10 @@ export const api = {
                     platform: item.chat?.platform,
                     is_paired: Boolean(item.chat?.peer_actor_id),
                     blocked: item.chat?.blocked,
+                    can_notify: (item.permissions || []).some((permission: any) =>
+                        permission.capability === 'notify' &&
+                        permission.action === 'notify.receive' &&
+                        permission.effect === 'allow'),
                 })),
                 running: true,
             };
@@ -1596,10 +1604,10 @@ export const api = {
     // Send a one-way notification to a running bot's chat
     // (POST /api/v1/bots/:bot/notify). Placeholder until codegen regenerates
     // the client SDK — calls the raw path directly. Field names mirror the
-    // backend notifyRequest: chat_id + body required, title/level optional.
+    // backend notifyRequest: stable internal target + body required.
     notifyBot: async (
         botUUID: string,
-        body: {chat_id: string; title?: string; body: string; level?: string},
+        body: {target: {kind: 'direct_chat' | 'group'; id: string}; title?: string; body: string; level?: string},
     ): Promise<{ok?: boolean; error?: string}> => {
         try {
             const base = await getApiBaseUrl();
@@ -1622,12 +1630,12 @@ export const api = {
     // Start an interactive prompt on a running bot's chat
     // (POST /api/v1/bots/:bot/interact). Placeholder until codegen regenerates
     // the client SDK. Returns request_id + wait_url + expires_at, or {error}.
-    // Field names mirror backend interactRequest: chat_id/kind/title required,
+    // Field names mirror backend interactRequest: target/kind/title required,
     // options required for confirm/choose, timeout_seconds optional (≤30m).
     interactBot: async (
         botUUID: string,
         body: {
-            chat_id: string;
+            target: {kind: 'direct_chat' | 'group'; id: string};
             kind: 'confirm' | 'choose' | 'ask';
             title: string;
             body?: string;
