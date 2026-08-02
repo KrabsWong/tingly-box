@@ -151,19 +151,19 @@
         }
       }
     },
-    "/api/v1/bots/{bot}/chats": {
+    "/api/v1/bots/{bot}/capabilities": {
       "get": {
         "tags": [
-          "bot-interaction"
+          "bot-access"
         ],
-        "summary": "List the chats a running bot can reach. Use the returned chat_id as the chat_id field in POST /bots/:bot/notify and /interact. Pass include_disabled=true to also list blocklisted chats. A bot that isn't running returns an empty list with running:false rather than an error.",
-        "description": "List the chats a running bot can reach. Use the returned chat_id as the chat_id field in POST /bots/:bot/notify and /interact. Pass include_disabled=true to also list blocklisted chats. A bot that isn't running returns an empty list with running:false rather than an error.",
-        "operationId": "apiV1BotsBotChatsGet",
+        "summary": "List explicit product capabilities for a bot.",
+        "description": "List explicit product capabilities for a bot.",
+        "operationId": "apiV1BotsBotCapabilitiesGet",
         "parameters": [
           {
             "name": "bot",
             "in": "path",
-            "description": "Target bot UUID",
+            "description": "Bot UUID",
             "required": true,
             "schema": {
               "type": "string"
@@ -176,17 +176,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BotChatsResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Chat listing unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CapabilityListResponse"
                 }
               }
             }
@@ -194,100 +184,28 @@
         }
       }
     },
-    "/api/v1/bots/{bot}/chats/{chat_id}": {
-      "delete": {
-        "tags": [
-          "bot-interaction"
-        ],
-        "summary": "Hard-delete a chat record: pairing, whitelist, and project binding are removed. If the chat messages the bot again it re-registers as a brand-new chat (re-pair required when pairing is enforced). Session history is untouched.",
-        "description": "Hard-delete a chat record: pairing, whitelist, and project binding are removed. If the chat messages the bot again it re-registers as a brand-new chat (re-pair required when pairing is enforced). Session history is untouched.",
-        "operationId": "apiV1BotsBotChatsChat_idDelete",
-        "parameters": [
-          {
-            "name": "bot",
-            "in": "path",
-            "description": "Target bot UUID",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "chat_id",
-            "in": "path",
-            "description": "Channel-native chat id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BotChatOKResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Chat not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Chat is the bot's chat-id lock",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Chat management unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/bots/{bot}/chats/{chat_id}/disabled": {
+    "/api/v1/bots/{bot}/capabilities/{capability}": {
       "put": {
         "tags": [
-          "bot-interaction"
+          "bot-access"
         ],
-        "summary": "Toggle a chat's inbound blocklist flag. A disabled chat's messages are silently dropped (including /bind — it cannot re-enable itself), and the chat is excluded from the reachable list, notify, and interact until re-enabled.",
-        "description": "Toggle a chat's inbound blocklist flag. A disabled chat's messages are silently dropped (including /bind — it cannot re-enable itself), and the chat is excluded from the reachable list, notify, and interact until re-enabled.",
-        "operationId": "apiV1BotsBotChatsChat_idDisabledPut",
+        "summary": "Enable or disable one bot capability and return the derived runtime state.",
+        "description": "Enable or disable one bot capability and return the derived runtime state.",
+        "operationId": "apiV1BotsBotCapabilitiesCapabilityPut",
         "parameters": [
           {
             "name": "bot",
             "in": "path",
-            "description": "Target bot UUID",
+            "description": "Bot UUID",
             "required": true,
             "schema": {
               "type": "string"
             }
           },
           {
-            "name": "chat_id",
+            "name": "capability",
             "in": "path",
-            "description": "Channel-native chat id",
+            "description": "notify or remote_control",
             "required": true,
             "schema": {
               "type": "string"
@@ -300,7 +218,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/BotChatSetDisabledRequest"
+                "$ref": "#/components/schemas/CapabilityUpdateRequest"
               }
             }
           }
@@ -311,13 +229,556 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BotChatOKResponse"
+                  "$ref": "#/components/schemas/CapabilityUpdateResponse"
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/chats": {
+      "get": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "List Direct Chats only; Groups are a separate resource.",
+        "description": "List Direct Chats only; Groups are a separate resource.",
+        "operationId": "apiV1BotsBotChatsGet",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Bot UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectChatListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/chats/{chat}": {
+      "get": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Get Direct Chat identity and concrete permissions.",
+        "description": "Get Direct Chat identity and concrete permissions.",
+        "operationId": "apiV1BotsBotChatsChatGet",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Bot UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           },
-          "400": {
-            "description": "Invalid request body",
+          {
+            "name": "chat",
+            "in": "path",
+            "description": "Direct Chat UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectChatDetailResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Delete a Direct Chat after dependency checks.",
+        "description": "Delete a Direct Chat after dependency checks.",
+        "operationId": "apiV1BotsBotChatsChatDelete",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chat",
+            "in": "path",
+            "description": "Path parameter 'chat'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OKResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/chats/{chat}/authorize-check": {
+      "post": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Evaluate the production authorization path without executing the action.",
+        "description": "Evaluate the production authorization path without executing the action.",
+        "operationId": "apiV1BotsBotChatsChatAuthorize-checkPost",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chat",
+            "in": "path",
+            "description": "Path parameter 'chat'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Request body",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorizeCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizeCheckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/chats/{chat}/blocked": {
+      "put": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Set the reversible hard block for a Direct Chat.",
+        "description": "Set the reversible hard block for a Direct Chat.",
+        "operationId": "apiV1BotsBotChatsChatBlockedPut",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chat",
+            "in": "path",
+            "description": "Path parameter 'chat'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Request body",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockedUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OKResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/chats/{chat}/permissions/{capability}/{action}": {
+      "put": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Set one explicit Direct Chat capability/action permission.",
+        "description": "Set one explicit Direct Chat capability/action permission.",
+        "operationId": "apiV1BotsBotChatsChatPermissionsCapabilityActionPut",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chat",
+            "in": "path",
+            "description": "Path parameter 'chat'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "path",
+            "description": "Path parameter 'capability'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "description": "Path parameter 'action'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Request body",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermissionUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OKResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/chats/{chat}/unpair": {
+      "post": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Remove peer trust and Remote Control permissions without deleting the Direct Chat.",
+        "description": "Remove peer trust and Remote Control permissions without deleting the Direct Chat.",
+        "operationId": "apiV1BotsBotChatsChatUnpairPost",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chat",
+            "in": "path",
+            "description": "Path parameter 'chat'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OKResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/groups": {
+      "get": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "List Groups only; Direct Chats are a separate resource.",
+        "description": "List Groups only; Direct Chats are a separate resource.",
+        "operationId": "apiV1BotsBotGroupsGet",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/groups/{group}": {
+      "get": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Get Group capability access and authorized actors.",
+        "description": "Get Group capability access and authorized actors.",
+        "operationId": "apiV1BotsBotGroupsGroupGet",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "description": "Path parameter 'group'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupDetailResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Delete a Group after dependency checks.",
+        "description": "Delete a Group after dependency checks.",
+        "operationId": "apiV1BotsBotGroupsGroupDelete",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "description": "Path parameter 'group'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OKResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/groups/{group}/actors": {
+      "get": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "List observed and explicitly authorized Group Actors.",
+        "description": "List observed and explicitly authorized Group Actors.",
+        "operationId": "apiV1BotsBotGroupsGroupActorsGet",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "description": "Path parameter 'group'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupActorsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/groups/{group}/actors/{actor}": {
+      "put": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Add or update a Group Actor controller binding.",
+        "description": "Add or update a Group Actor controller binding.",
+        "operationId": "apiV1BotsBotGroupsGroupActorsActorPut",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "description": "Path parameter 'group'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "path",
+            "description": "Path parameter 'actor'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Request body",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupActorPutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
             "content": {
               "application/json": {
                 "schema": {
@@ -325,23 +786,300 @@
                 }
               }
             }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Remove a Group Actor binding and its permissions.",
+        "description": "Remove a Group Actor binding and its permissions.",
+        "operationId": "apiV1BotsBotGroupsGroupActorsActorDelete",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           },
-          "404": {
-            "description": "Chat not found",
+          {
+            "name": "group",
+            "in": "path",
+            "description": "Path parameter 'group'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "path",
+            "description": "Path parameter 'actor'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/OKResponse"
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/groups/{group}/actors/{actor}/permissions/{capability}/{action}": {
+      "put": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Set one concrete Group Actor permission.",
+        "description": "Set one concrete Group Actor permission.",
+        "operationId": "apiV1BotsBotGroupsGroupActorsActorPermissionsCapabilityActionPut",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           },
-          "503": {
-            "description": "Chat management unavailable",
+          {
+            "name": "group",
+            "in": "path",
+            "description": "Path parameter 'group'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "path",
+            "description": "Path parameter 'actor'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "path",
+            "description": "Path parameter 'capability'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "description": "Path parameter 'action'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Request body",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermissionUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/OKResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/groups/{group}/authorize-check": {
+      "post": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Evaluate the production authorization path without executing the action.",
+        "description": "Evaluate the production authorization path without executing the action.",
+        "operationId": "apiV1BotsBotGroupsGroupAuthorize-checkPost",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "description": "Path parameter 'group'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Request body",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorizeCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizeCheckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/groups/{group}/blocked": {
+      "put": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Set the reversible hard block for a Group.",
+        "description": "Set the reversible hard block for a Group.",
+        "operationId": "apiV1BotsBotGroupsGroupBlockedPut",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "description": "Path parameter 'group'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Request body",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockedUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OKResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/groups/{group}/capabilities/{capability}": {
+      "put": {
+        "tags": [
+          "bot-access"
+        ],
+        "summary": "Set Group access for one capability; this never grants an Actor permission.",
+        "description": "Set Group access for one capability; this never grants an Actor permission.",
+        "operationId": "apiV1BotsBotGroupsGroupCapabilitiesCapabilityPut",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "path",
+            "description": "Path parameter 'group'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "capability",
+            "in": "path",
+            "description": "Path parameter 'capability'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Request body",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermissionUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OKResponse"
                 }
               }
             }
@@ -552,6 +1290,214 @@
               "application/json": {
                 "schema": {
                   "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/routes": {
+      "get": {
+        "tags": [
+          "bot-routes"
+        ],
+        "summary": "List Notify routes independently from bot capabilities.",
+        "description": "List Notify routes independently from bot capabilities.",
+        "operationId": "apiV1BotsBotRoutesGet",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "bot-routes"
+        ],
+        "summary": "Create a Notify route to one internal Direct Chat or Group UUID.",
+        "description": "Create a Notify route to one internal Direct Chat or Group UUID.",
+        "operationId": "apiV1BotsBotRoutesPost",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Request body",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bots/{bot}/routes/{route}": {
+      "get": {
+        "tags": [
+          "bot-routes"
+        ],
+        "summary": "Get one Notify route.",
+        "description": "Get one Notify route.",
+        "operationId": "apiV1BotsBotRoutesRouteGet",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "route",
+            "in": "path",
+            "description": "Path parameter 'route'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "bot-routes"
+        ],
+        "summary": "Replace one Notify route while preserving its stable identity.",
+        "description": "Replace one Notify route while preserving its stable identity.",
+        "operationId": "apiV1BotsBotRoutesRoutePut",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "route",
+            "in": "path",
+            "description": "Path parameter 'route'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Request body",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "bot-routes"
+        ],
+        "summary": "Delete one Notify route.",
+        "description": "Delete one Notify route.",
+        "operationId": "apiV1BotsBotRoutesRouteDelete",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Path parameter 'bot'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "route",
+            "in": "path",
+            "description": "Path parameter 'route'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OKResponse"
                 }
               }
             }
@@ -6105,6 +7051,54 @@
           }
         }
       },
+      "Actor": {
+        "type": "object",
+        "properties": {
+          "bot_uuid": {
+            "type": "string",
+            "description": "Field bot_uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field created_at"
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Field display_name"
+          },
+          "external_actor_id": {
+            "type": "string",
+            "description": "Field external_actor_id"
+          },
+          "id": {
+            "type": "string",
+            "description": "Field id"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field last_seen_at"
+          },
+          "platform": {
+            "type": "string",
+            "description": "Field platform"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field updated_at"
+          }
+        },
+        "required": [
+          "id",
+          "bot_uuid",
+          "platform",
+          "external_actor_id",
+          "created_at",
+          "updated_at"
+        ]
+      },
       "AddSkillLocationRequest": {
         "type": "object",
         "properties": {
@@ -6201,11 +7195,17 @@
             "description": "Field avg_output_tokens",
             "example": 164.2
           },
-          "cache_input_tokens": {
+          "cache_read_tokens": {
             "type": "integer",
             "format": "int64",
-            "description": "Field cache_input_tokens",
+            "description": "Field cache_read_tokens",
             "example": 500000
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Field cache_write_tokens",
+            "example": 75000
           },
           "error_count": {
             "type": "integer",
@@ -6299,7 +7299,8 @@
           "error_rate",
           "streamed_count",
           "streamed_rate",
-          "cache_input_tokens"
+          "cache_read_tokens",
+          "cache_write_tokens"
         ]
       },
       "ApplyClaudeConfigRequest": {
@@ -6484,6 +7485,71 @@
           "message"
         ]
       },
+      "AuthorizationDecision": {
+        "type": "object",
+        "properties": {
+          "allowed": {
+            "type": "boolean",
+            "description": "Field allowed"
+          },
+          "facts": {
+            "$ref": "#/components/schemas/DecisionFacts"
+          },
+          "failed_gate": {
+            "type": "string",
+            "description": "Field failed_gate"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Field reason"
+          }
+        },
+        "required": [
+          "allowed",
+          "reason",
+          "facts"
+        ]
+      },
+      "AuthorizeCheckRequest": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Field action"
+          },
+          "actor_id": {
+            "type": "string",
+            "description": "Field actor_id"
+          },
+          "capability": {
+            "type": "string",
+            "description": "Field capability"
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Field request_id"
+          },
+          "route_id": {
+            "type": "string",
+            "description": "Field route_id"
+          }
+        },
+        "required": [
+          "capability",
+          "action"
+        ]
+      },
+      "AuthorizeCheckResponse": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/AuthorizationDecision"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
       "AvailableModelEntry": {
         "type": "object",
         "properties": {
@@ -6524,99 +7590,54 @@
           "data"
         ]
       },
-      "BotChatOKResponse": {
+      "BlockedUpdateRequest": {
         "type": "object",
         "properties": {
-          "ok": {
+          "blocked": {
             "type": "boolean",
-            "description": "Field ok",
-            "example": true
+            "description": "Field blocked"
           }
         },
         "required": [
-          "ok"
+          "blocked"
         ]
       },
-      "BotChatSetDisabledRequest": {
+      "BotCapability": {
         "type": "object",
         "properties": {
-          "disabled": {
-            "type": "boolean",
-            "description": "Field disabled",
-            "example": true
-          }
-        },
-        "required": [
-          "disabled"
-        ]
-      },
-      "BotChatSummary": {
-        "type": "object",
-        "properties": {
-          "chat_id": {
+          "bot_uuid": {
             "type": "string",
-            "description": "Field chat_id",
-            "example": "telegram:123456789"
+            "description": "Field bot_uuid"
           },
-          "disabled": {
-            "type": "boolean",
-            "description": "Field disabled",
-            "example": false
-          },
-          "disabled_at": {
+          "capability": {
             "type": "string",
-            "description": "Field disabled_at",
-            "example": "2026-07-28T12:00:00Z"
+            "description": "Field capability"
           },
-          "is_paired": {
-            "type": "boolean",
-            "description": "Field is_paired",
-            "example": true
+          "config": {
+            "description": "Field config"
           },
-          "is_whitelisted": {
-            "type": "boolean",
-            "description": "Field is_whitelisted",
-            "example": false
-          },
-          "platform": {
+          "created_at": {
             "type": "string",
-            "description": "Field platform",
-            "example": "telegram"
+            "format": "date-time",
+            "description": "Field created_at"
           },
-          "project_path": {
-            "type": "string",
-            "description": "Field project_path",
-            "example": "/home/user/proj"
+          "enabled": {
+            "type": "boolean",
+            "description": "Field enabled"
           },
           "updated_at": {
             "type": "string",
-            "description": "Field updated_at",
-            "example": "2026-07-25T12:00:00Z"
+            "format": "date-time",
+            "description": "Field updated_at"
           }
         },
         "required": [
-          "chat_id"
-        ]
-      },
-      "BotChatsResponse": {
-        "type": "object",
-        "properties": {
-          "chats": {
-            "type": "array",
-            "description": "Field chats",
-            "items": {
-              "$ref": "#/components/schemas/BotChatSummary"
-            }
-          },
-          "running": {
-            "type": "boolean",
-            "description": "Field running",
-            "example": true
-          }
-        },
-        "required": [
-          "chats",
-          "running"
+          "bot_uuid",
+          "capability",
+          "enabled",
+          "config",
+          "created_at",
+          "updated_at"
         ]
       },
       "BotInteractOption": {
@@ -6651,11 +7672,6 @@
             "description": "Field body",
             "example": "commit a1b2c3"
           },
-          "chat_id": {
-            "type": "string",
-            "description": "Field chat_id",
-            "example": "dm:ops"
-          },
           "kind": {
             "type": "string",
             "description": "Field kind",
@@ -6667,6 +7683,9 @@
             "items": {
               "$ref": "#/components/schemas/BotInteractOption"
             }
+          },
+          "target": {
+            "$ref": "#/components/schemas/TargetRef"
           },
           "timeout_seconds": {
             "type": "integer",
@@ -6681,7 +7700,7 @@
           }
         },
         "required": [
-          "chat_id",
+          "target",
           "kind",
           "title"
         ]
@@ -6694,15 +7713,13 @@
             "description": "Field body",
             "example": "main branch is red"
           },
-          "chat_id": {
-            "type": "string",
-            "description": "Field chat_id",
-            "example": "dm:ops"
-          },
           "level": {
             "type": "string",
             "description": "Field level",
             "example": "info"
+          },
+          "target": {
+            "$ref": "#/components/schemas/TargetRef"
           },
           "title": {
             "type": "string",
@@ -6711,8 +7728,63 @@
           }
         },
         "required": [
-          "chat_id",
+          "target",
           "body"
+        ]
+      },
+      "CapabilityListResponse": {
+        "type": "object",
+        "properties": {
+          "bot_running": {
+            "type": "boolean",
+            "description": "Field bot_running"
+          },
+          "capabilities": {
+            "type": "array",
+            "description": "Field capabilities",
+            "items": {
+              "$ref": "#/components/schemas/BotCapability"
+            }
+          }
+        },
+        "required": [
+          "capabilities",
+          "bot_running"
+        ]
+      },
+      "CapabilityUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "config": {
+            "description": "Field config"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Field enabled"
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
+      "CapabilityUpdateResponse": {
+        "type": "object",
+        "properties": {
+          "bot_running": {
+            "type": "boolean",
+            "description": "Field bot_running"
+          },
+          "capability": {
+            "$ref": "#/components/schemas/BotCapability"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Field reason"
+          }
+        },
+        "required": [
+          "capability",
+          "bot_running"
         ]
       },
       "ClaudeCodePrefs": {
@@ -7236,6 +8308,13 @@
               "type": "string"
             }
           },
+          "capabilities": {
+            "type": "object",
+            "description": "Field capabilities",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CapabilityUpdateRequest"
+            }
+          },
           "chat_id_lock": {
             "type": "string",
             "description": "Field chat_id_lock"
@@ -7263,10 +8342,6 @@
           "proxy_url": {
             "type": "string",
             "description": "Field proxy_url"
-          },
-          "remote_agent": {
-            "type": "boolean",
-            "description": "Field remote_agent"
           },
           "require_pairing": {
             "type": "boolean",
@@ -7358,6 +8433,82 @@
           "lb_tactic",
           "active",
           "smart_enabled"
+        ]
+      },
+      "DecisionFacts": {
+        "type": "object",
+        "properties": {
+          "actor_action": {
+            "type": "string",
+            "description": "Field actor_action"
+          },
+          "actor_registered": {
+            "type": "boolean",
+            "description": "Field actor_registered"
+          },
+          "bot_enabled": {
+            "type": "boolean",
+            "description": "Field bot_enabled"
+          },
+          "capability_enabled": {
+            "type": "boolean",
+            "description": "Field capability_enabled"
+          },
+          "peer_actor_id": {
+            "type": "string",
+            "description": "Field peer_actor_id"
+          },
+          "pending_request_found": {
+            "type": "boolean",
+            "description": "Field pending_request_found"
+          },
+          "pending_request_target": {
+            "$ref": "#/components/schemas/TargetRef"
+          },
+          "route_enabled": {
+            "type": "boolean",
+            "description": "Field route_enabled"
+          },
+          "route_found": {
+            "type": "boolean",
+            "description": "Field route_found"
+          },
+          "route_target": {
+            "$ref": "#/components/schemas/TargetRef"
+          },
+          "target_action": {
+            "type": "string",
+            "description": "Field target_action"
+          },
+          "target_blocked": {
+            "type": "boolean",
+            "description": "Field target_blocked"
+          },
+          "target_capability": {
+            "type": "string",
+            "description": "Field target_capability"
+          },
+          "target_found": {
+            "type": "boolean",
+            "description": "Field target_found"
+          },
+          "transport_status": {
+            "type": "string",
+            "description": "Field transport_status"
+          },
+          "transport_supports": {
+            "type": "boolean",
+            "description": "Field transport_supports"
+          }
+        },
+        "required": [
+          "bot_enabled",
+          "capability_enabled",
+          "transport_status",
+          "transport_supports",
+          "target_found",
+          "target_blocked",
+          "target_capability"
         ]
       },
       "DeleteOldRecordsRequest": {
@@ -7456,6 +8607,109 @@
           "message"
         ]
       },
+      "DirectChat": {
+        "type": "object",
+        "properties": {
+          "bash_cwd": {
+            "type": "string",
+            "description": "Field bash_cwd"
+          },
+          "blocked": {
+            "type": "boolean",
+            "description": "Field blocked"
+          },
+          "bot_uuid": {
+            "type": "string",
+            "description": "Field bot_uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field created_at"
+          },
+          "current_agent": {
+            "type": "string",
+            "description": "Field current_agent"
+          },
+          "external_chat_id": {
+            "type": "string",
+            "description": "Field external_chat_id"
+          },
+          "id": {
+            "type": "string",
+            "description": "Field id"
+          },
+          "paired_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field paired_at"
+          },
+          "peer_actor_id": {
+            "type": "string",
+            "description": "Field peer_actor_id"
+          },
+          "platform": {
+            "type": "string",
+            "description": "Field platform"
+          },
+          "project_path": {
+            "type": "string",
+            "description": "Field project_path"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field updated_at"
+          },
+          "verbose": {
+            "type": "boolean",
+            "description": "Field verbose"
+          }
+        },
+        "required": [
+          "id",
+          "bot_uuid",
+          "platform",
+          "external_chat_id",
+          "blocked",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "DirectChatDetailResponse": {
+        "type": "object",
+        "properties": {
+          "chat": {
+            "$ref": "#/components/schemas/DirectChat"
+          },
+          "permissions": {
+            "type": "array",
+            "description": "Field permissions",
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            }
+          }
+        },
+        "required": [
+          "chat",
+          "permissions"
+        ]
+      },
+      "DirectChatListResponse": {
+        "type": "object",
+        "properties": {
+          "chats": {
+            "type": "array",
+            "description": "Field chats",
+            "items": {
+              "$ref": "#/components/schemas/DirectChatDetailResponse"
+            }
+          }
+        },
+        "required": [
+          "chats"
+        ]
+      },
       "DiscoverIdesResponse": {
         "type": "object",
         "properties": {
@@ -7521,6 +8775,11 @@
           "direct": {
             "type": "boolean",
             "description": "Field direct"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Field endpoint",
+            "example": "responses"
           },
           "message": {
             "type": "string",
@@ -8063,6 +9322,187 @@
         },
         "required": [
           "client_id"
+        ]
+      },
+      "Group": {
+        "type": "object",
+        "properties": {
+          "bash_cwd": {
+            "type": "string",
+            "description": "Field bash_cwd"
+          },
+          "blocked": {
+            "type": "boolean",
+            "description": "Field blocked"
+          },
+          "bot_uuid": {
+            "type": "string",
+            "description": "Field bot_uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field created_at"
+          },
+          "current_agent": {
+            "type": "string",
+            "description": "Field current_agent"
+          },
+          "external_group_id": {
+            "type": "string",
+            "description": "Field external_group_id"
+          },
+          "id": {
+            "type": "string",
+            "description": "Field id"
+          },
+          "name": {
+            "type": "string",
+            "description": "Field name"
+          },
+          "platform": {
+            "type": "string",
+            "description": "Field platform"
+          },
+          "project_path": {
+            "type": "string",
+            "description": "Field project_path"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field updated_at"
+          },
+          "verbose": {
+            "type": "boolean",
+            "description": "Field verbose"
+          }
+        },
+        "required": [
+          "id",
+          "bot_uuid",
+          "platform",
+          "external_group_id",
+          "blocked",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "GroupActor": {
+        "type": "object",
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field created_at"
+          },
+          "group_id": {
+            "type": "string",
+            "description": "Field group_id"
+          },
+          "label": {
+            "type": "string",
+            "description": "Field label"
+          },
+          "permissions": {
+            "type": "array",
+            "description": "Field permissions",
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            }
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field updated_at"
+          }
+        },
+        "required": [
+          "group_id",
+          "actor",
+          "permissions",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "GroupActorPutRequest": {
+        "type": "object",
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "Field display_name"
+          },
+          "external_actor_id": {
+            "type": "string",
+            "description": "Field external_actor_id"
+          },
+          "label": {
+            "type": "string",
+            "description": "Field label"
+          }
+        },
+        "required": [
+          "external_actor_id"
+        ]
+      },
+      "GroupActorsResponse": {
+        "type": "object",
+        "properties": {
+          "actors": {
+            "type": "array",
+            "description": "Field actors",
+            "items": {
+              "$ref": "#/components/schemas/GroupActor"
+            }
+          }
+        },
+        "required": [
+          "actors"
+        ]
+      },
+      "GroupDetailResponse": {
+        "type": "object",
+        "properties": {
+          "actors": {
+            "type": "array",
+            "description": "Field actors",
+            "items": {
+              "$ref": "#/components/schemas/GroupActor"
+            }
+          },
+          "capabilities": {
+            "type": "object",
+            "description": "Field capabilities",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "group": {
+            "$ref": "#/components/schemas/Group"
+          }
+        },
+        "required": [
+          "group",
+          "capabilities",
+          "actors"
+        ]
+      },
+      "GroupListResponse": {
+        "type": "object",
+        "properties": {
+          "groups": {
+            "type": "array",
+            "description": "Field groups",
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            }
+          }
+        },
+        "required": [
+          "groups"
         ]
       },
       "GroupingStrategy": {
@@ -9827,6 +11267,18 @@
           "message"
         ]
       },
+      "OKResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Field ok"
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
       "OpenCodeConfigPreviewResponse": {
         "type": "object",
         "properties": {
@@ -9885,6 +11337,46 @@
         "required": [
           "success",
           "active"
+        ]
+      },
+      "Permission": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Field action"
+          },
+          "capability": {
+            "type": "string",
+            "description": "Field capability"
+          },
+          "effect": {
+            "type": "string",
+            "description": "Field effect"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field updated_at"
+          }
+        },
+        "required": [
+          "capability",
+          "action",
+          "effect",
+          "updated_at"
+        ]
+      },
+      "PermissionUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "effect": {
+            "type": "string",
+            "description": "Field effect"
+          }
+        },
+        "required": [
+          "effect"
         ]
       },
       "PlatformConfig": {
@@ -10982,6 +12474,146 @@
           "message"
         ]
       },
+      "Route": {
+        "type": "object",
+        "properties": {
+          "bot_uuid": {
+            "type": "string",
+            "description": "Field bot_uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field created_at"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Field enabled"
+          },
+          "event_filter": {
+            "description": "Field event_filter"
+          },
+          "id": {
+            "type": "string",
+            "description": "Field id"
+          },
+          "name": {
+            "type": "string",
+            "description": "Field name"
+          },
+          "options": {
+            "description": "Field options"
+          },
+          "source": {
+            "type": "string",
+            "description": "Field source"
+          },
+          "target": {
+            "$ref": "#/components/schemas/TargetRef"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Field updated_at"
+          }
+        },
+        "required": [
+          "id",
+          "bot_uuid",
+          "name",
+          "source",
+          "event_filter",
+          "target",
+          "enabled",
+          "options",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "RouteListResponse": {
+        "type": "object",
+        "properties": {
+          "routes": {
+            "type": "array",
+            "description": "Field routes",
+            "items": {
+              "$ref": "#/components/schemas/Route"
+            }
+          }
+        },
+        "required": [
+          "routes"
+        ]
+      },
+      "RouteResponse": {
+        "type": "object",
+        "properties": {
+          "route": {
+            "$ref": "#/components/schemas/Route"
+          }
+        },
+        "required": [
+          "route"
+        ]
+      },
+      "RouteTargetRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Field id"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Field kind"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ]
+      },
+      "RouteWriteRequest": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Field enabled"
+          },
+          "events": {
+            "type": "array",
+            "description": "Field events",
+            "items": {
+              "type": "string"
+            }
+          },
+          "grant_notify": {
+            "type": "boolean",
+            "description": "Field grant_notify"
+          },
+          "name": {
+            "type": "string",
+            "description": "Field name"
+          },
+          "options": {
+            "description": "Field options"
+          },
+          "source": {
+            "type": "string",
+            "description": "Field source"
+          },
+          "target": {
+            "$ref": "#/components/schemas/RouteTargetRequest"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "events",
+          "target",
+          "enabled"
+        ]
+      },
       "Rule": {
         "type": "object",
         "properties": {
@@ -11056,6 +12688,10 @@
           "claude_code_compat": {
             "type": "boolean",
             "description": "Field claude_code_compat"
+          },
+          "claude_org_id": {
+            "type": "string",
+            "description": "Field claude_org_id"
           },
           "clean_header": {
             "type": "boolean",
@@ -12049,6 +13685,23 @@
           "params"
         ]
       },
+      "TargetRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Field id"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Field kind"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ]
+      },
       "TemplateResponse": {
         "type": "object",
         "properties": {
@@ -12085,11 +13738,17 @@
             "description": "Field avg_latency_ms",
             "example": 1100
           },
-          "cache_input_tokens": {
+          "cache_read_tokens": {
             "type": "integer",
             "format": "int64",
-            "description": "Field cache_input_tokens",
+            "description": "Field cache_read_tokens",
             "example": 10000
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Field cache_write_tokens",
+            "example": 1500
           },
           "error_count": {
             "type": "integer",
@@ -12133,7 +13792,8 @@
           "total_tokens",
           "input_tokens",
           "output_tokens",
-          "cache_input_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
           "error_count",
           "avg_latency_ms"
         ]
@@ -12574,10 +14234,6 @@
             "type": "string",
             "description": "Field proxy_url"
           },
-          "remote_agent": {
-            "type": "boolean",
-            "description": "Field remote_agent"
-          },
           "require_pairing": {
             "type": "boolean",
             "description": "Field require_pairing"
@@ -12855,11 +14511,17 @@
       "UsageRecordResponse": {
         "type": "object",
         "properties": {
-          "cache_input_tokens": {
+          "cache_read_tokens": {
             "type": "integer",
             "format": "int64",
-            "description": "Field cache_input_tokens",
+            "description": "Field cache_read_tokens",
             "example": 2000
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Field cache_write_tokens",
+            "example": 300
           },
           "error_code": {
             "type": "string",
@@ -12962,7 +14624,8 @@
           "input_tokens",
           "output_tokens",
           "total_tokens",
-          "cache_input_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
           "status",
           "latency_ms",
           "ttft_ms",
@@ -13082,6 +14745,10 @@
             "type": "string",
             "description": "Field key"
           },
+          "kind": {
+            "type": "string",
+            "description": "Field kind"
+          },
           "label": {
             "type": "string",
             "description": "Field label"
@@ -13100,11 +14767,6 @@
             "format": "date-time",
             "description": "Field resets_at"
           },
-          "tier": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Field tier"
-          },
           "type": {
             "type": "string",
             "description": "Field type"
@@ -13112,6 +14774,14 @@
           "unit": {
             "type": "string",
             "description": "Field unit"
+          },
+          "unknown": {
+            "type": "boolean",
+            "description": "Field unknown"
+          },
+          "unlimited": {
+            "type": "boolean",
+            "description": "Field unlimited"
           },
           "used": {
             "type": "number",
@@ -14040,8 +15710,16 @@
       "description": "Operations related to auth"
     },
     {
+      "name": "bot-access",
+      "description": "Operations related to bot-access"
+    },
+    {
       "name": "bot-interaction",
       "description": "Operations related to bot-interaction"
+    },
+    {
+      "name": "bot-routes",
+      "description": "Operations related to bot-routes"
     },
     {
       "name": "codex",
