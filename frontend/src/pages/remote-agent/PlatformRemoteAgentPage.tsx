@@ -1,8 +1,8 @@
 import { BotConfigDialog, RemoteAgentBotCard, useBotModelDialog } from '@/components/bot';
 import CCProfileDialog from '@/components/bot/CCProfileDialog';
 import EmptyState from '@/components/EmptyState';
+import GuideAction from '@/components/GuideAction';
 import { PageLayout } from '@/components/PageLayout';
-import GuideDrawer from '@/components/remote-control/GuideDrawer';
 import UnifiedCard from '@/components/UnifiedCard';
 import { api } from '@/services/api';
 import { usePlatformGuide } from '@/constants/platformGuides';
@@ -10,7 +10,7 @@ import { useProfileContext } from '@/contexts/ProfileContext';
 import type { BotSettings } from '@/types/bot';
 import { defaultAgentForCCProfile } from '@/types/bot';
 import type { Provider } from '@/types/provider';
-import { Add, HelpOutline } from '@/components/icons';
+import { Add } from '@/components/icons';
 import { Alert, Box, Button, CircularProgress, Snackbar } from '@mui/material';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -36,7 +36,6 @@ const PlatformRemoteAgentPage = ({ platformId, platformName, platformPicker }: P
     // Bots section. mode 'add' from the Add button / empty state; mode 'edit'
     // from a card's edit action while the Bots nav section is hidden.
     const [dialogOpen, setDialogOpen] = useState(false);
-    const [guideOpen, setGuideOpen] = useState(false);
     const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
     const [dialogEditUuid, setDialogEditUuid] = useState<string | null>(null);
     const openAddDialog = useCallback(() => {
@@ -237,15 +236,22 @@ const PlatformRemoteAgentPage = ({ platformId, platformName, platformPicker }: P
                 size="full"
                 sx={{ mb: 2 }}
                 rightAction={guideConfig?.guide ? (
-                    <Button
-                        variant="outlined"
-                        size="small"
-                        startIcon={<HelpOutline />}
-                        onClick={() => setGuideOpen(true)}
-                        sx={{ whiteSpace: 'nowrap' }}
+                    <GuideAction
+                        label={t('remoteControl.guide.action', { defaultValue: 'Setup guide' })}
+                        title={t('remoteControl.guide.title', {
+                            defaultValue: '{{platform}} Setup Guide',
+                            platform: platformName,
+                        })}
+                        description={t('remoteControl.guide.drawerHint', {
+                            defaultValue: 'Connection steps, credentials, and examples',
+                        })}
+                        primaryAction={{
+                            label: t('remoteControl.bots.addBot', { defaultValue: 'Connect a bot' }),
+                            onClick: openAddDialog,
+                        }}
                     >
-                        {t('remoteControl.guide.action', { defaultValue: 'Setup guide' })}
-                    </Button>
+                        {guideConfig.guide}
+                    </GuideAction>
                 ) : undefined}
             >
                 {loading ? (
@@ -283,23 +289,6 @@ const PlatformRemoteAgentPage = ({ platformId, platformName, platformPicker }: P
                     </Box>
                 )}
             </UnifiedCard>
-            {guideConfig?.guide && (
-                <GuideDrawer
-                    open={guideOpen}
-                    title={t('remoteControl.guide.title', {
-                        defaultValue: '{{platform}} Setup Guide',
-                        platform: platformName,
-                    })}
-                    description={t('remoteControl.guide.drawerHint', {
-                        defaultValue: 'Connection steps, credentials, and examples',
-                    })}
-                    onClose={() => setGuideOpen(false)}
-                    actionLabel={t('remoteControl.bots.addBot', { defaultValue: 'Connect a bot' })}
-                    onAction={openAddDialog}
-                >
-                    {guideConfig.guide}
-                </GuideDrawer>
-            )}
             {/* Shared bot-resource dialog: add/edit a bot without leaving this page */}
             <BotConfigDialog
                 open={dialogOpen}

@@ -1,17 +1,17 @@
 import EmptyState from '@/components/EmptyState';
+import GuideAction from '@/components/GuideAction';
 import { PageLayout } from '@/components/PageLayout';
 import UnifiedCard from '@/components/UnifiedCard';
-import GuideDrawer from '@/components/remote-control/GuideDrawer';
 import NotifyGuide from '@/components/notify/NotifyGuide';
 import BotNotifyGroup from '@/components/notify/BotNotifyGroup';
 import { PlatformPicker } from '@/components/bot';
-import { HelpOutline, ListAlt } from '@/components/icons';
+import { ListAlt } from '@/components/icons';
 import { BOT_PLATFORM_IDS, PLATFORM_BRAND_ICONS, platformDisplayName } from '@/constants/platformGuides';
 import { api } from '@/services/api';
 import type { BotSettings } from '@/types/bot';
 import { capabilityEnabled, countBotsByPlatform } from '@/types/bot';
 import { notify } from '@/utils/notify';
-import { Button, Stack } from '@mui/material';
+import { Stack } from '@mui/material';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -34,7 +34,6 @@ const NotifyPage = () => {
     const [bots, setBots] = useState<BotSettings[]>([]);
     const [loading, setLoading] = useState(true);
     const [toggling, setToggling] = useState<string | null>(null);
-    const [guideOpen, setGuideOpen] = useState(false);
 
     const loadBots = useCallback(async () => {
         try {
@@ -143,15 +142,15 @@ const NotifyPage = () => {
                 sx={{ mb: 2 }}
                 titleHeadingLevel={2}
                 rightAction={(
-                    <Button
-                        variant="outlined"
-                        size="small"
-                        startIcon={<HelpOutline />}
-                        onClick={() => setGuideOpen(true)}
-                        sx={{ whiteSpace: 'nowrap' }}
+                    <GuideAction
+                        label={t('notify.guide.action', { defaultValue: 'API guide' })}
+                        title={t('notify.guide.title', { defaultValue: 'IM Notify API Guide' })}
+                        description={t('notify.guide.description', {
+                            defaultValue: 'Authentication, request examples, and target IDs',
+                        })}
                     >
-                        {t('notify.guide.action', { defaultValue: 'API guide' })}
-                    </Button>
+                        <NotifyGuide />
+                    </GuideAction>
                 )}
             >
                 {filteredBots.length === 0 ? (
@@ -182,16 +181,6 @@ const NotifyPage = () => {
                     </Stack>
                 )}
             </UnifiedCard>
-            <GuideDrawer
-                open={guideOpen}
-                title={t('notify.guide.title', { defaultValue: 'IM Notify API Guide' })}
-                description={t('notify.guide.description', {
-                    defaultValue: 'Authentication, request examples, and target IDs',
-                })}
-                onClose={() => setGuideOpen(false)}
-            >
-                <NotifyGuide />
-            </GuideDrawer>
         </PageLayout>
     );
 };
