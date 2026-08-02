@@ -32,7 +32,23 @@ export type BotSettings = Omit<Settings, 'chat_id'> & {
     // Retained as an alias while codegen still emits it; new code should use
     // chat_id_lock. Removed once codegen drops chat_id.
     chat_id?: string;
+	capabilities?: BotCapability[];
 };
+
+export type CapabilityName = 'notify' | 'remote_control';
+export type AccessEffect = 'allow' | 'deny';
+export interface BotCapability { bot_uuid: string; capability: CapabilityName; enabled: boolean; config?: Record<string, unknown>; }
+export interface AccessPermission { capability: CapabilityName; action: string; effect: AccessEffect; }
+export interface DirectChat { id: string; bot_uuid: string; platform: string; external_chat_id: string; peer_actor_id?: string; blocked: boolean; paired_at?: string; }
+export interface DirectChatDetail { chat: DirectChat; permissions: AccessPermission[]; }
+export interface GroupActor { actor: {id:string; external_actor_id:string; display_name?:string}; label?:string; permissions:AccessPermission[]; }
+export interface BotGroup { id:string; bot_uuid:string; platform:string; external_group_id:string; name?:string; blocked:boolean; }
+export interface BotGroupDetail { group:BotGroup; capabilities:Partial<Record<CapabilityName,AccessEffect>>; actors:GroupActor[]; }
+export interface AuthorizationDecision { allowed:boolean; reason:string; failed_gate?:string; facts:Record<string,unknown>; }
+
+export function capabilityEnabled(bot: BotSettings, name: CapabilityName): boolean {
+    return bot.capabilities?.find((capability) => capability.capability === name)?.enabled === true;
+}
 
 // BotPlatformConfig is an alias for PlatformConfig from codegen
 export type BotPlatformConfig = PlatformConfig;

@@ -74,7 +74,8 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
         try {
             const data = await api.getImBotSettingsList();
             if (data?.success && Array.isArray(data.settings)) {
-                setBots(data.settings);
+				const enriched=await Promise.all(data.settings.map(async(bot:BotSettings)=>{try{const result=await api.listBotCapabilities(bot.uuid!);return {...bot,capabilities:result.capabilities||[]}}catch{return {...bot,capabilities:[]}}}));
+				setBots(enriched);
             } else if (data?.success === false) {
                 showNotification(data.error || t('remoteControl.notify.loadFailed', { defaultValue: 'Failed to load bot settings' }), 'error');
             }
@@ -98,13 +99,12 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
         loadProviders();
     }, [loadBots, loadProviders]);
 
-    // Toggle the remote_agent mount. Turning it on cascades the bot's Enabled
-    // flag server-side, so one flip lights the bot up.
+    // Toggle the explicit Remote Control capability.
     const handleMountToggle = useCallback(async (uuid: string, mounted: boolean) => {
         setTogglingBotUuid(uuid);
         try {
-            const result = await api.updateImBotSetting(uuid, { remote_agent: mounted });
-            if (result?.success) {
+			const result = await api.setBotCapability(uuid, 'remote_control', mounted);
+			if (result?.capability) {
                 showNotification(
                     mounted
                         ? t('remoteControl.notify.remoteAgentOn', { defaultValue: 'Remote Control mounted' })
@@ -116,7 +116,7 @@ const PlatformRemoteAgentPage = ({ platformId, platformName }: PlatformRemoteAge
                 showNotification(result?.error || t('remoteControl.notify.toggleFailedGeneric', { defaultValue: 'Failed to toggle bot' }), 'error');
             }
         } catch (err) {
-            console.error('Failed to toggle remote_agent mount:', err);
+			console.error('Failed to toggle Remote Control capability:', err);
             showNotification(t('remoteControl.notify.toggleFailedGeneric', { defaultValue: 'Failed to toggle bot' }), 'error');
         } finally {
             setTogglingBotUuid(null);

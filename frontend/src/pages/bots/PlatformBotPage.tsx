@@ -1,4 +1,4 @@
-import { BotTable, BotConfigDialog } from '@/components/bot';
+import { BotTable, BotConfigDialog, BotAccessDialog } from '@/components/bot';
 import EmptyState from '@/components/EmptyState';
 import { PageLayout } from '@/components/PageLayout';
 import CollapsibleGuide from '@/components/remote-control/CollapsibleGuide';
@@ -24,6 +24,7 @@ const PlatformBotPage = ({ platformId, platformName, platformGuide }: PlatformBo
 
     // Bot settings state - filtered by platform
     const [bots, setBots] = useState<BotSettings[]>([]);
+	const [accessBot,setAccessBot]=useState<BotSettings|null>(null);
 
     // Add/Edit dialog state — the dialog itself is the shared BotConfigDialog.
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -64,7 +65,8 @@ const PlatformBotPage = ({ platformId, platformName, platformGuide }: PlatformBo
             setBotLoading(true);
             const data = await api.getImBotSettingsList();
             if (data?.success && Array.isArray(data.settings)) {
-                setBots(data.settings);
+				const enriched=await Promise.all(data.settings.map(async(bot:BotSettings)=>{try{const result=await api.listBotCapabilities(bot.uuid!);return {...bot,capabilities:result.capabilities||[]}}catch{return {...bot,capabilities:[]}}}));
+				setBots(enriched);
             } else if (data?.success === false) {
                 showNotification(data.error || t('remoteControl.notify.loadFailed', { defaultValue: 'Failed to load bot settings' }), 'error');
             }
@@ -195,6 +197,7 @@ const PlatformBotPage = ({ platformId, platformName, platformGuide }: PlatformBo
                         onRestart={(uuid) => handleBotRestart(uuid)}
                         isToggling={isToggling}
                         isRestarting={(uuid) => restartingBotUuid === uuid}
+						onManageAccess={(bot)=>setAccessBot(bot)}
                     />
                 )}
             </UnifiedCard>
@@ -209,6 +212,7 @@ const PlatformBotPage = ({ platformId, platformName, platformGuide }: PlatformBo
                 onSaved={loadBotSettings}
                 notify={showNotification}
             />
+			<BotAccessDialog open={Boolean(accessBot)} bot={accessBot} onClose={()=>setAccessBot(null)} onChanged={loadBotSettings}/>
             {/* Snackbar for notifications */}
             <Snackbar
                 open={snackbar.open}

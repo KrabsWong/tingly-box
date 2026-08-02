@@ -1,7 +1,7 @@
 import {ContentCopy as CopyIcon, Edit as CustomIcon, Close as CloseIcon, Code as CodeIcon, Refresh as RefreshIcon} from '@/components/icons';
 import {api} from '@/services/api';
 import {notify} from '@/utils/notify';
-import {isPairingRequired} from '@/types/bot';
+import {capabilityEnabled, isPairingRequired} from '@/types/bot';
 import type {BotChat, BotSettings} from '@/types/bot';
 import {fontMono} from '@/theme/fonts';
 import NotifyTestDialog from '@/components/notify/NotifyTestDialog';
@@ -39,7 +39,7 @@ import {useTranslation} from 'react-i18next';
 // the disabled body instead.
 export interface BotNotifyGroupProps {
     bot: BotSettings;
-    onToggle: (uuid: string) => void;
+    onToggle: (uuid: string, enabled:boolean) => void;
     isToggling?: boolean;
 }
 
@@ -111,7 +111,8 @@ const ProbeResultLine: React.FC<{result: ChatProbeResult; onDismiss: () => void}
 
 const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isToggling}) => {
     const {t} = useTranslation();
-    const enabled = bot.enabled ?? true;
+    const enabled = (bot.enabled ?? true) && capabilityEnabled(bot,'notify');
+	const capabilityOn=capabilityEnabled(bot,'notify');
 
     const [chats, setChats] = useState<BotChat[]>([]);
     const [loading, setLoading] = useState(false);
@@ -232,9 +233,9 @@ const BotNotifyGroup: React.FC<BotNotifyGroupProps> = ({bot, onToggle, isTogglin
                         <Switch
                             size="small"
                             color="success"
-                            checked={enabled}
+							checked={capabilityOn}
                             disabled={isToggling}
-                            onChange={() => onToggle(bot.uuid!)}
+							onChange={() => onToggle(bot.uuid!,!capabilityOn)}
                         />
                         {isToggling ? (
                             <CircularProgress size={14} />

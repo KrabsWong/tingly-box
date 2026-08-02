@@ -24,7 +24,7 @@ import {
 import {styled} from '@mui/material/styles';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import type {BotSettings} from '@/types/bot';
-import {isRemoteAgentMounted} from '@/types/bot';
+import {capabilityEnabled} from '@/types/bot';
 import type {Provider} from '@/types/provider';
 import type {ProfileInfo} from '@/contexts/ProfileContext';
 import {botCardSx, statusChipSx} from './botCardStyles';
@@ -83,7 +83,7 @@ const RemoteAgentBotCard: React.FC<RemoteAgentBotCardProps> = ({
     isRestarting = false,
 }) => {
     const {t} = useTranslation();
-    const isMounted = isRemoteAgentMounted(bot.scenarios);
+    const isMounted = capabilityEnabled(bot,'remote_control');
     const isEnabled = bot.enabled ?? true;
     const hasModel = Boolean(bot.smartguide_provider && bot.smartguide_model);
 

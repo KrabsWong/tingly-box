@@ -1,8 +1,8 @@
-import {ContentCopy as CopyIcon, Delete as DeleteIcon, Edit as EditIcon, RestartAlt as RestartIcon} from '@/components/icons';
+import {ContentCopy as CopyIcon, Delete as DeleteIcon, Edit as EditIcon, RestartAlt as RestartIcon, Security} from '@/components/icons';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import PairingCodePanel from './PairingCodePanel';
 import BotChatsButton from './BotChatsButton';
-import {isRemoteAgentMounted, isNotifyMounted, isPairingRequired} from '@/types/bot';
+import {capabilityEnabled, isPairingRequired} from '@/types/bot';
 import type {BotSettings} from '@/types/bot';
 import {notify} from '@/utils/notify';
 import {
@@ -21,7 +21,6 @@ import {
     Typography,
 } from '@mui/material';
 import {useCallback, useState} from 'react';
-import {useNavigate} from 'react-router-dom';
 import {useTranslation} from 'react-i18next';
 
 // BotTable is the RESOURCE table for connected bots — the table counterpart
@@ -44,6 +43,7 @@ interface BotTableProps {
     onRestart: (uuid: string) => void;
     isToggling?: (uuid: string) => boolean;
     isRestarting?: (uuid: string) => boolean;
+	onManageAccess?:(bot:BotSettings)=>void;
 }
 
 // Status chip sizing — matches ApiKeyTable's Status cell so On/Off reads the
@@ -67,9 +67,9 @@ const BotTable: React.FC<BotTableProps> = ({
     onRestart,
     isToggling,
     isRestarting,
+	onManageAccess,
 }) => {
     const {t} = useTranslation();
-    const navigate = useNavigate();
 
     const [deleteModal, setDeleteModal] = useState<{open: boolean; bot: BotSettings | null}>({
         open: false,
@@ -117,8 +117,8 @@ const BotTable: React.FC<BotTableProps> = ({
                     <TableBody>
                         {bots.map((bot) => {
                             const isActive = bot.enabled ?? true;
-                            const isMounted = isRemoteAgentMounted(bot.scenarios);
-                            const isNotified = isNotifyMounted(bot.scenarios);
+                            const isMounted = capabilityEnabled(bot,'remote_control');
+                            const isNotified = capabilityEnabled(bot,'notify');
                             const toggling = isToggling?.(bot.uuid!) ?? false;
                             const restarting = isRestarting?.(bot.uuid!) ?? false;
                             const pairingNeeded = isPairingRequired(bot);
@@ -214,7 +214,7 @@ const BotTable: React.FC<BotTableProps> = ({
                                                     size="small"
                                                     variant={isMounted ? 'filled' : 'outlined'}
                                                     color={isMounted ? 'primary' : 'default'}
-                                                    onClick={() => navigate(`/remote-agent/${bot.platform}`)}
+											onClick={() => onManageAccess?.(bot)}
                                                 />
                                             </Tooltip>
                                             <Tooltip title={t('bots.card.notifyChipHint', {defaultValue: 'Configure on the IM Notify page'})}>
@@ -223,7 +223,7 @@ const BotTable: React.FC<BotTableProps> = ({
                                                     size="small"
                                                     variant={isNotified ? 'filled' : 'outlined'}
                                                     color={isNotified ? 'primary' : 'default'}
-                                                    onClick={() => navigate('/notify')}
+											onClick={() => onManageAccess?.(bot)}
                                                 />
                                             </Tooltip>
                                         </Box>
@@ -241,6 +241,7 @@ const BotTable: React.FC<BotTableProps> = ({
                                     {/* Actions */}
                                     <TableCell align="right">
                                         <Stack direction="row" spacing={0.5} sx={{alignItems: 'center', justifyContent: 'flex-end'}}>
+											{onManageAccess&&<Tooltip title={t('bots.table.manageAccess',{defaultValue:'Manage capabilities and access'})}><IconButton aria-label={t('bots.table.manageAccess',{defaultValue:'Manage capabilities and access'})} size="small" color="primary" onClick={()=>onManageAccess(bot)}><Security fontSize="small"/></IconButton></Tooltip>}
                                             {/* Reachable chats — surfaces the chat_id the notify/interact API
                                                 needs in its body, copyable. Kept in Actions (rather than its
                                                 own column) because it is reference data the operator copies

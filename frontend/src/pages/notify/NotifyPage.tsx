@@ -4,7 +4,6 @@ import UnifiedCard from '@/components/UnifiedCard';
 import CollapsibleGuide from '@/components/remote-control/CollapsibleGuide';
 import NotifyGuide from '@/components/notify/NotifyGuide';
 import BotNotifyGroup from '@/components/notify/BotNotifyGroup';
-import { useBotToggle } from '@/hooks/useBotToggle';
 import { api } from '@/services/api';
 import type { BotSettings } from '@/types/bot';
 import { Stack } from '@mui/material';
@@ -26,13 +25,15 @@ const NotifyPage = () => {
     const { t } = useTranslation();
     const [bots, setBots] = useState<BotSettings[]>([]);
     const [loading, setLoading] = useState(true);
+	const [toggling,setToggling]=useState<string|null>(null);
 
     const loadBots = useCallback(async () => {
         try {
             setLoading(true);
             const data = await api.getImBotSettingsList();
             if (data?.success && Array.isArray(data.settings)) {
-                setBots(data.settings);
+				const enriched=await Promise.all(data.settings.map(async(bot:BotSettings)=>{try{const result=await api.listBotCapabilities(bot.uuid!);return {...bot,capabilities:result.capabilities||[]}}catch{return {...bot,capabilities:[]}}}));
+				setBots(enriched);
             }
         } catch (err) {
             console.error('Failed to load bot settings:', err);
@@ -50,13 +51,7 @@ const NotifyPage = () => {
     // can reach it. On success we patch only the toggled bot in state rather
     // than re-fetching the whole list, so sibling panels aren't churned. The
     // hook owns the toast + in-flight UUID and is shared with the Bots pages.
-    const {toggle, isToggling} = useBotToggle({
-        onDone: (uuid) => setBots((prev) => prev.map((b) => (b.uuid === uuid ? {...b, enabled: !b.enabled} : b))),
-    });
-
-    const handleToggle = useCallback((uuid: string, enabled: boolean) => {
-        void toggle(uuid, enabled);
-    }, [toggle]);
+	const handleToggle=useCallback(async(uuid:string,enabled:boolean)=>{setToggling(uuid);try{await api.setBotCapability(uuid,'notify',enabled);await loadBots()}finally{setToggling(null)}},[loadBots]);
 
     return (
         <PageLayout loading={loading}>
@@ -87,8 +82,8 @@ const NotifyPage = () => {
                             <BotNotifyGroup
                                 key={bot.uuid}
                                 bot={bot}
-                                onToggle={(uuid) => handleToggle(uuid, !(bot.enabled ?? true))}
-                                isToggling={isToggling(bot.uuid!)}
+								onToggle={(uuid,enabled) => handleToggle(uuid,enabled)}
+								isToggling={toggling===bot.uuid}
                             />
                         ))}
                     </Stack>

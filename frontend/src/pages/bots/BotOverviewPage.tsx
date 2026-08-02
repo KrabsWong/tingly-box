@@ -1,4 +1,4 @@
-import { BotTable, BotConfigDialog, PlatformPicker } from '@/components/bot';
+import { BotTable, BotConfigDialog, PlatformPicker, BotAccessDialog } from '@/components/bot';
 import EmptyState from '@/components/EmptyState';
 import { PageLayout } from '@/components/PageLayout';
 import UnifiedCard from '@/components/UnifiedCard';
@@ -34,6 +34,7 @@ const BotOverviewPage = () => {
     const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
     const [dialogEditUuid, setDialogEditUuid] = useState<string | null>(null);
     const [dialogPlatformId, setDialogPlatformId] = useState('telegram');
+	const [accessBot,setAccessBot]=useState<BotSettings|null>(null);
 
     const [botLoading, setBotLoading] = useState(true);
     const [restartingBotUuid, setRestartingBotUuid] = useState<string | null>(null);
@@ -53,7 +54,10 @@ const BotOverviewPage = () => {
             setBotLoading(true);
             const data = await api.getImBotSettingsList();
             if (data?.success && Array.isArray(data.settings)) {
-                setBots(data.settings);
+				const enriched=await Promise.all(data.settings.map(async(bot:BotSettings)=>{
+					try{const result=await api.listBotCapabilities(bot.uuid!);return {...bot,capabilities:result.capabilities||[]}}catch{return {...bot,capabilities:[]}}
+				}));
+				setBots(enriched);
             } else if (data?.success === false) {
                 showNotification(data.error || t('remoteControl.notify.loadFailed', { defaultValue: 'Failed to load bot settings' }), 'error');
             }
@@ -224,6 +228,7 @@ const BotOverviewPage = () => {
                         onRestart={(uuid) => handleBotRestart(uuid)}
                         isToggling={isToggling}
                         isRestarting={(uuid) => restartingBotUuid === uuid}
+						onManageAccess={(bot)=>setAccessBot(bot)}
                     />
                 )}
             </UnifiedCard>
@@ -241,6 +246,7 @@ const BotOverviewPage = () => {
                 onSaved={loadBotSettings}
                 notify={showNotification}
             />
+			<BotAccessDialog open={Boolean(accessBot)} bot={accessBot} onClose={()=>setAccessBot(null)} onChanged={loadBotSettings}/>
             <Snackbar
                 open={snackbar.open}
                 autoHideDuration={snackbar.severity === 'error' ? null : 4000}

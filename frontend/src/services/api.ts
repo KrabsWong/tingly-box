@@ -73,6 +73,20 @@ async function modelAPI(url: string, options: RequestInit = {}): Promise<any> {
     }
 }
 
+// Temporary raw control-plane call for the Bot Access endpoints. The backend
+// models are already in Swagger; this helper can be removed after SDK codegen.
+async function botAccessAPI(path: string, options: RequestInit = {}): Promise<any> {
+    const base = await getApiBaseUrl();
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${base}${path}`, {
+        ...options,
+        headers: {...headers, 'Content-Type': 'application/json', ...(options.headers || {})},
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `request failed (${response.status})`);
+    return data;
+}
+
 export const api = {
     // Initialize API client
     initialize: async (): Promise<void> => {
@@ -1517,6 +1531,39 @@ export const api = {
         }
     },
 
+    listBotCapabilities: (botUUID: string) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/capabilities`),
+    setBotCapability: (botUUID: string, capability: 'notify' | 'remote_control', enabled: boolean) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/capabilities/${capability}`, {
+            method: 'PUT', body: JSON.stringify({enabled, config: {}}),
+        }),
+    listBotDirectChats: (botUUID: string) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/chats`),
+    setBotDirectChatBlocked: (botUUID: string, chatID: string, blocked: boolean) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/chats/${encodeURIComponent(chatID)}/blocked`, {
+            method: 'PUT', body: JSON.stringify({blocked}),
+        }),
+    setBotDirectChatPermission: (botUUID: string, chatID: string, capability: string, action: string, effect: 'allow' | 'deny') =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/chats/${encodeURIComponent(chatID)}/permissions/${capability}/${action}`, {
+            method: 'PUT', body: JSON.stringify({effect}),
+        }),
+    listBotGroups: (botUUID: string) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/groups`),
+    getBotGroup: (botUUID: string, groupID: string) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/groups/${encodeURIComponent(groupID)}`),
+    setBotGroupBlocked: (botUUID: string, groupID: string, blocked: boolean) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/groups/${encodeURIComponent(groupID)}/blocked`, {
+            method: 'PUT', body: JSON.stringify({blocked}),
+        }),
+    setBotGroupCapability: (botUUID: string, groupID: string, capability: string, effect: 'allow' | 'deny') =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/groups/${encodeURIComponent(groupID)}/capabilities/${capability}`, {
+            method: 'PUT', body: JSON.stringify({effect}),
+        }),
+    addBotGroupActor: (botUUID: string, groupID: string, actorID: string, externalActorID: string, displayName?: string) =>
+        botAccessAPI(`/api/v1/bots/${encodeURIComponent(botUUID)}/groups/${encodeURIComponent(groupID)}/actors/${encodeURIComponent(actorID)}`, {
+            method: 'PUT', body: JSON.stringify({external_actor_id: externalActorID, display_name: displayName, label: 'Controller'}),
+        }),
+
     // List the chats a bot can reach (GET /api/v1/bots/:bot/chats).
     // Placeholder until codegen regenerates the client SDK for the new
     // bot-interaction endpoint — calls the raw path directly.
@@ -1530,7 +1577,17 @@ export const api = {
             if (!response.ok) {
                 return {error: `failed to list chats (${response.status})`};
             }
-            return await response.json();
+            const payload = await response.json();
+            return {
+                chats: (payload.chats || []).map((item: any) => ({
+                    chat_id: item.chat?.external_chat_id,
+                    id: item.chat?.id,
+                    platform: item.chat?.platform,
+                    is_paired: Boolean(item.chat?.peer_actor_id),
+                    blocked: item.chat?.blocked,
+                })),
+                running: true,
+            };
         } catch (error: any) {
             return {error: error.message};
         }
