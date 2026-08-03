@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-
-	"github.com/tingly-dev/tingly-box/pkg/fs"
 )
 
 // Transcript stores a session's message history as one append-only JSONL file
@@ -54,14 +52,14 @@ func NewTranscript(dir string) (*Transcript, error) {
 
 // Path returns the on-disk transcript file for a session.
 //
-// The id goes through fs.SafeFileKey because it is not always ours:
+// The id goes through safeFileKey because it is not always ours:
 // Manager.CreateWithID binds a session to a Claude session id supplied by the
 // user through /resume, so "../../etc/x" must not escape the directory.
 func (t *Transcript) Path(sessionID string) string {
 	if t == nil {
 		return ""
 	}
-	return filepath.Join(t.dir, fs.SafeFileKey(sessionID)+".jsonl")
+	return filepath.Join(t.dir, safeFileKey(sessionID)+".jsonl")
 }
 
 // Append writes one message to the end of a session's transcript.

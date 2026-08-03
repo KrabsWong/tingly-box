@@ -22,7 +22,7 @@ imbot 模块化抹平了**连接层**的平台差异，但没抹平**交互层**
 
 ## 1. 问题
 
-`internal/remote_control` 在 imbot 独立之后，仍然扮演"渲染器 + 能力判官"这两个本该
+`remote/control` 在 imbot 独立之后，仍然扮演"渲染器 + 能力判官"这两个本该
 属于 imbot 的角色。平台字面量散布在 19 个非测试文件里，按性质归类为六类：
 
 | # | 类别 | 站点数 | 性质 |
@@ -322,7 +322,7 @@ Seam 2 则有个未决的设计选择（见下），且只影响本仓无法测�
 
 ### 7.1 Feishu/Lark 上内联按钮全部丢失（2a 已修）
 
-`remote_control` 恒定传 `models.InlineKeyboardMarkup`，而 feishu 的
+`control` 恒定传 `models.InlineKeyboardMarkup`，而 feishu 的
 `buildInteractiveCard` 类型开关只认 `interaction.InlineKeyboardMarkup` 和
 `map[string]interface{}` → `buttons` 为空 → 发出**只有文本、没有任何按钮**的卡片。
 Clear / CD / Project、目录浏览、`/resume` 选择器对 Feishu 用户全部不可见。
@@ -443,7 +443,7 @@ import cycles with imbot/platform packages"——不成立，它只需要 `inter
 
 ## 9. 验收标准
 
-1. **`internal/remote_control` 里不再有*隐式*平台分支。** 判据不是"平台字面量归零"
+1. **`remote/control` 里不再有*隐式*平台分支。** 判据不是"平台字面量归零"
    ——那会连带禁掉合理的产品特化。每一处残留必须属于：显式产品特化（带
    `WithPlatforms` / `Fallback`）、Tier 3 逃生舱调用、或注释与日志文案。
    **基础设施类**分支必须归零：`buildAuthConfig` / `hasValidAuth` / 菜单 switch /
@@ -452,12 +452,12 @@ import cycles with imbot/platform packages"——不成立，它只需要 `inter
 2. Feishu/Lark 上 Clear / CD / Project 可见且可点。（2a ✅）
 3. Feishu 上点完按钮旧键盘被撤除。（Seam 4 ✅）
 4. `handler_verbose.go` 的能力判定恢复启用。（Seam 3 ✅）
-5. 在 imbot 新增一个假想平台，`remote_control` **零改动**即可跑通
+5. 在 imbot 新增一个假想平台，`control` **零改动**即可跑通
    `manager_channel_test.go` 的 notify 全链路。
 6. 回调载荷的长度约束不再泄漏到调用方：64 字节作为**生效的约束**只存在于
    `imbot/platform/telegram/callback_codec.go`；`interaction` 与
-   `internal/remote_control` 里仅剩解释历史的注释。（2b ✅）
-7. `internal/remote_control` 与 `remote/channel` 里不再有 `FormatCallbackData` /
+   `remote/control` 里仅剩解释历史的注释。（2b ✅）
+7. `remote/control` 与 `remote/channel` 里不再有 `FormatCallbackData` /
    `CallbackButton` / `FormatDirPath` 调用——按钮一律用 `ActionButton` /
    `NewPayload` 声明 segment。（2b ✅）
 8. Feishu 卡片按钮点击有入站路径，且与其它平台走同一套 dispatch。（2b ✅，
@@ -490,7 +490,7 @@ import cycles with imbot/platform packages"——不成立，它只需要 `inter
 - `imbot/platform/feishu/card_callback_test.go` — button value 携带 segment 往返、
   含 `:` 的路径、legacy 扁平串仍可解、JSON 化后的 `[]interface{}` 形状，以及
   `getReceiveIdType` 的前缀映射（§7.7）。
-- `../internal/remote_control/feature/telegram_dir_browser_test.go` — 目录按钮携带**路径**
+- `../remote/control/feature/telegram_dir_browser_test.go` — 目录按钮携带**路径**
   而非索引、含 `:` 的目录名可导航、create 确认按钮携带原始路径。
 - `imbot/platform/tingly/tingly_test.go` — 新契约（`Actions`）与兼容期
   （legacy metadata）各一。原 `TestBot_SendWithTelegramKeyboard` 已删除：它断言的

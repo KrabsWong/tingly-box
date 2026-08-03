@@ -38,7 +38,7 @@ Remote 的状态散落在四种载体上，只有 bot 设置进了主库：
 ### P0-1 多实例并发写整文件 → 静默丢数据
 
 `runBotWithSettings` 里每个 bot 各自 `NewChatStoreJSON(dataPath)`
-（`internal/remote_control/bot/manager.go:32`），而 `dataPath` 是全局共享的
+（`remote/control/bot/manager.go:32`），而 `dataPath` 是全局共享的
 `bot_chats.json`（`internal/server/module/imbot/manager.go:123`）。
 `Manager.ChatStore()`（`manager.go:281`）给 CLI 又开一个。
 
@@ -71,7 +71,7 @@ Remote 的状态散落在四种载体上，只有 bot 设置进了主库：
 ### P0-3 chatID 直接拼进文件名
 
 `smart_guide.SessionStore.path()` = `filepath.Join(s.dir, chatID+"-smartguide.json")`
-（`internal/remote_control/smart_guide/session_store.go:37`），chatID 直接来自平台。
+（`remote/control/smart_guide/session_store.go:37`），chatID 直接来自平台。
 Telegram 是纯数字，但飞书 `open_chat_id`、WhatsApp JID 含 `@`、部分平台含 `/`。
 没有任何 sanitize → 路径穿越 + 文件名冲突。同一目录还是 0644（其他状态文件是 0600）。
 
@@ -108,10 +108,10 @@ append 一条消息要重新 marshal 整个 sessions 文件 → 消息数增长�
 
 `imbot_settings.scenarios` 存一整个 binding 列表的 JSON 文本。
 后果是 `remote/binding/binding.go` 里要手写 `rawBinding map[string]json.RawMessage`
-解析器（`binding.go:194`）来保住未知字段，`SetScenarioEnabled` 要在原始
-`[]map[string]json.RawMessage` 上做读-改-写（`binding.go:161`）才不丢字段，
+解析器（`binding.go:207`）来保住未知字段，`SetScenarioEnabled` 要在原始
+`[]map[string]json.RawMessage` 上做读-改-写（`binding.go:174`）才不丢字段，
 `Resolver.Resolve` 要遍历所有 bot、逐个 parse blob 才能匹配一个
-(scenario, event)（`binding.go:124`）。查询、约束、部分更新全都做不了。
+(scenario, event)（`binding.go:136`）。查询、约束、部分更新全都做不了。
 
 ### P2-1 审计不落盘 —— 已解决：删掉，不是修
 
@@ -253,17 +253,29 @@ remote_bindings                   -- 取代 imbot_settings.scenarios JSON 列
 
 ## 5. 抽象与依赖方向
 
-- `remote/store`（新包）只定义领域接口：`ChatStore` / `SessionStore` /
-  `AgentStateStore` / `BindingStore` / `AuditStore`。
+落地后的形态（2026-08 remote 子服务独立化后）：
+
+- 领域接口与领域类型**留在各自的包里**，没有抽到单独的 `remote/store`：
+  `bot.ChatStoreInterface` + `bot.Chat` 在 `remote/control/bot`，
+  `session.SessionStore` + `session.Session` 在 `remote/session`，
+  `bot.SettingsStore` + `bot.BotSetting` 也在 `remote/control/bot`。
+  评审时设想过 `remote/store` 中立包，最终没必要 —— 接口归领域、实现归 db
+  本身就够干净，多一层包反而把「Chat 的接口」和「Chat 的类型」拆到两处。
 - 实现落在 `internal/data/db`，由 `StoreManager` 统一初始化并注入。
-- **`remote/*` 不 import gorm，也不再接受文件路径参数** —— 现在
-  `NewChatStoreJSON(filePath)` / `NewSessionStoreJSON(filePath)` 这种签名
-  把存储介质泄漏给了调用方，是「per-bot 各开一个实例」的根因。
-- 删掉 `manager.go` 里的 `*SessionStoreJSON` 类型断言：写入即事务提交，
-  `ForceSave` 这个概念消失。
-- `bot.BotSetting` 与 `db.Settings` 合并成一个类型，消除手工同步。
-- 现有 `ChatStoreInterface`（`chat_store.go:135`）方法签名基本可以原样保留，
-  这让 P1 能做到「换实现不改调用方」。
+  `db.RemoteChatStore` / `db.RemoteSessionStore` 直接实现 remote 的接口，
+  返回 remote 的领域类型（`*bot.Chat` / `*session.Session`）——
+  **依赖方向是 `db → remote`，单向无环**。
+- **`remote/*` 运行时代码不 import `internal/`**：库叶子
+  （access/interaction/channel/scenario/session/binding）零 `internal/` 依赖；
+  宿主胶水（`remote/control/{bot,remoteagent}`）运行时代码零 `internal/data/db`
+  类型引用。host↔主模块的唯一胶水是 `remote/control/adapter/`
+  （`settings.go` 把 `db.Settings` 映射成 `bot.BotSetting`，
+  `persistence.go` 把 `db.Settings` 映射成 `binding.BotInfo`）。
+- `NewChatStoreJSON(filePath)` / `NewSessionStoreJSON(filePath)` 这类
+  把存储介质泄漏给调用方的签名已随 JSON 存储一起删除。
+- `bot.BotSetting` 与 `db.Settings` 仍是两个结构体（`adapter.BotSettingFromRecord`
+  是唯一转换点），合并留作后续；接口面已经不泄漏 `db.Settings`。
+- 现有 `ChatStoreInterface` 方法签名原样保留，这让存储换实现时调用方不动。
 
 ## 6. 数据迁移
 
@@ -347,13 +359,6 @@ CLI 的 `remote run`（`internal/command/remote.go` 的 standalone 路径，单�
 - `scenarios` JSON blob → `remote_bindings` 表。这个值得拆，
   因为 `Resolver.Resolve` 真的要按 (scenario, event) 跨 bot 查询。
 - `BotSetting` 与 `db.Settings` 合并（消除已漂移的重复结构体）
-- **`Chat` 移到中立包（评审提出的最深一条）。** 现在 `Chat` 住在 `db` 里、
-  `bot.Chat` 是别名，纯粹为了破环。而 session 那半边做对了：`session.Session`
-  留在 `remote/session`，由 `db` import 它 —— 实现依赖领域。chat 之所以反了，
-  只因为 `bot` 已经 import `db`，而那个 import 又只是为了 `db.Settings`
-  的类型断言（正是上面这条要消灭的东西）。代价已经具体：`DefaultChatAgent`
-  与 `PushProjectHistory` 这些领域逻辑住进了存储包。
-  正解是本文档 §5 说的 `remote/store` 中立包，与 `remote/session` 对称。
 
 **明确不做**（按第 3 节的分界线，这些留在原地是对的，不是待办）：
 - `ProjectHistory` 拆表 —— 只整体读写、上限 20 条，JSON 列足够
@@ -366,8 +371,17 @@ CLI 的 `remote run`（`internal/command/remote.go` 的 standalone 路径，单�
   （安全事件走常规日志页，不是独立的 audit 出口 —— 见 P2-1）
 
 **已解决，不再是待办**：
+- **`Chat` 移到中立包（评审提出的最深一条）。** 这条已落地（2026-08
+  的 remote 子服务独立化）。现在 `Chat` 住在 `remote/control/bot`，
+  `db.RemoteChatStore` 直接实现 `bot.ChatStoreInterface` 返回 `*bot.Chat`
+  —— 与 session 那半边对称：`session.Session` 留在 `remote/session`，由
+  `db` import 它，实现依赖领域。依赖方向是 `db → remote`，单向无环。
+  作为副作用，`DefaultChatAgent` 仍在 `db`（agent 身份事实，db 自身用），
+  但 `PushProjectHistory` 跟着 `Chat` 进了 `bot`（变成 `(*Chat)` 方法），
+  不再是存储包里的领域逻辑。host↔主模块的唯一胶水是
+  `remote/control/adapter/`（settings/persistence 桥）。
 - **`/clear` 的语义统一。** @cc/@mock 的 `/clear`
-  （`internal/remote_control/bot/bot_command.go:handleClearCommand`）本来就是
+  （`remote/control/bot/bot_command.go:handleClearCommand`）本来就是
   软删除：`sessionMgr.Close` 把旧 session 标 `closed` 后持久化、逐出内存，
   transcript 文件不动，下一条消息 lazily 建一个新 session（新 UUID）——
   「关闭旧的、不是抹掉」的语义已经成立。@tb（SmartGuide）不是：

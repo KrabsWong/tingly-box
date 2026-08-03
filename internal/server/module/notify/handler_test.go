@@ -12,7 +12,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/tingly-dev/tingly-box/internal/data/db"
 	"github.com/tingly-dev/tingly-box/remote/binding"
 	"github.com/tingly-dev/tingly-box/remote/channel"
 	"github.com/tingly-dev/tingly-box/remote/channel/autochannel"
@@ -22,9 +21,9 @@ import (
 )
 
 // fakeStore satisfies binding.Store with an in-memory list.
-type fakeStore struct{ settings []db.Settings }
+type fakeStore struct{ settings []binding.BotInfo }
 
-func (f *fakeStore) ListEnabledSettings() ([]db.Settings, error) { return f.settings, nil }
+func (f *fakeStore) ListEnabledBindings() ([]binding.BotInfo, error) { return f.settings, nil }
 
 // fakeChannel implements channel.Channel and lets the test drive the
 // reply manually via SubmitReply, which mirrors a user clicking a
@@ -78,10 +77,9 @@ func (c *fakeChannel) SubmitReply(id string, reply interaction.Reply) {
 func TestNotifyAndWait_PreToolUseAllow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	store := &fakeStore{settings: []db.Settings{{
+	store := &fakeStore{settings: []binding.BotInfo{{
 		UUID:      "bot-1",
 		Platform:  "telegram",
-		Enabled:   true,
 		Scenarios: `[{"name":"claude_code","chat_id":"chat-1","permission_policy":{"on_timeout":"deny","total_budget_seconds":120}}]`,
 	}}}
 	resolver := binding.NewResolver(store)
@@ -228,10 +226,9 @@ func TestNotifyPushFallsBackToDesktopWhenUnregistered(t *testing.T) {
 func TestNotifyAndWait_AutoChannelHeadless(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	store := &fakeStore{settings: []db.Settings{{
+	store := &fakeStore{settings: []binding.BotInfo{{
 		UUID:      "auto",
 		Platform:  "auto",
-		Enabled:   true,
 		Scenarios: `[{"name":"claude_code","chat_id":"headless"}]`,
 	}}}
 	resolver := binding.NewResolver(store)

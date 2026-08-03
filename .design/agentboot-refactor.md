@@ -102,10 +102,10 @@ Production registers **only** the Claude agent. No mock agent is registered
 
 | Consumer | Path | Uses |
 |---|---|---|
-| Claude bot executor | `internal/remote_control/bot/agent_claude_code.go` | **new** engine: `AgentBoot.GetDefaultAgent()` + `agent.Execute` + manual `handle.Events()` loop |
-| Stream writer | `internal/remote_control/bot/bot_stream.go` | **legacy** `MessageStreamer`+`CompletionCallback`; `OnMessage(any)` |
-| Smart-guide executor | `internal/remote_control/bot/agent_smart_guide.go` | **legacy** `CompositeHandler` via `agent.ExecuteWithHandler` |
-| Smart-guide agent | `internal/remote_control/smart_guide/agent.go` | takes `agentboot.MessageHandler` — but runs a **tingly-agentscope** ReAct agent, NOT agentboot's pipeline |
+| Claude bot executor | `remote/control/bot/agent_claude_code.go` | **new** engine: `AgentBoot.GetDefaultAgent()` + `agent.Execute` + manual `handle.Events()` loop |
+| Stream writer | `remote/control/bot/bot_stream.go` | **legacy** `MessageStreamer`+`CompletionCallback`; `OnMessage(any)` |
+| Smart-guide executor | `remote/control/bot/agent_smart_guide.go` | **legacy** `CompositeHandler` via `agent.ExecuteWithHandler` |
+| Smart-guide agent | `remote/control/smart_guide/agent.go` | takes `agentboot.MessageHandler` — but runs a **tingly-agentscope** ReAct agent, NOT agentboot's pipeline |
 | IM prompter | `remote/channel/imchannel/imprompter.go` | implements `Prompter` (OnApproval/OnAsk); natively uses `ask.Request`/`ask.Result` |
 | Session manager | `remote/session/manager.go` | implements `agentsession.Store` (passed via `ExecutionOptions.Store`) |
 | Boot wiring | `internal/server/module/imbot/manager.go`, `internal/command/remote.go` | `agentboot.New` + `RegisterAgent` |
@@ -299,7 +299,7 @@ Done in this branch (~3,660 LoC removed). What shipped:
    paradigm with zero new-paradigm coverage.
 
 Verified: `go build ./...` + `go test ./...` green in both the `agentboot`
-module and the root module (`internal/remote_control/...`, `remote/...`).
+module and the root module (`remote/control/...`, `remote/...`).
 
 ### P1 — make `AgentService` the real façade — DONE (this PR)
 
@@ -451,7 +451,7 @@ missing terminal result, structured result errors, and encoder-close behavior.
 ### Verification per phase
 
 - Module: `cd agentboot && go build ./... && go test ./...`
-- Root: `go build ./... && go test ./internal/remote_control/... ./remote/...`
+- Root: `go build ./... && go test ./remote/control/... ./remote/...`
 - Manual smoke: `@cc` execution (stream + a permission prompt) and `@tb`
   smart-guide reply, since those exercise both consumers.
 

@@ -11,17 +11,18 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/feature"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/remoteagent"
+	"github.com/tingly-dev/tingly-box/remote/control"
+	"github.com/tingly-dev/tingly-box/remote/control/adapter"
+	bot "github.com/tingly-dev/tingly-box/remote/control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/feature"
+	"github.com/tingly-dev/tingly-box/remote/control/remoteagent"
 
 	"github.com/tingly-dev/tingly-box/agentboot"
-	"github.com/tingly-dev/tingly-box/agentboot/claude"
 	"github.com/tingly-dev/tingly-box/imbot"
 	imbotfeishu "github.com/tingly-dev/tingly-box/imbot/platform/feishu"
 	imbottelegram "github.com/tingly-dev/tingly-box/imbot/platform/telegram"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
 	builtinserver "github.com/tingly-dev/tingly-box/internal/mcp/builtin_server"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
 	"github.com/tingly-dev/tingly-box/internal/tbclient"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/remote/session"
@@ -338,27 +339,17 @@ func runStandaloneBot(ctx context.Context, appManager *AppManager, setting db.Se
 		return fmt.Errorf("failed to open store manager: %w", err)
 	}
 	defer sm.Close()
-	msgStore := sm.RemoteSessions()
-
-	sessionMgr := session.NewManager(session.Config{
-		Timeout:          30 * time.Minute,
-		MessageRetention: 7 * 24 * time.Hour,
-	}, msgStore)
-
-	// Compose the Claude Code agent with its historical session reader.
-	agentBootConfig := agentboot.DefaultConfig()
-	agentBootConfig.DefaultExecutionTimeout = 30 * time.Minute
-	agentService, err := claude.NewService(agentBootConfig)
+	core, err := control.NewCore(sm.RemoteSessions())
 	if err != nil {
-		return fmt.Errorf("create agent service: %w", err)
+		return err
 	}
 
 	// Run the bot
-	return runBotWithSettingsInternal(ctx, appManager, botSetting, sm.RemoteChats(), sessionMgr, agentService)
+	return runBotWithSettingsInternal(ctx, appManager, botSetting, sm.RemoteChats(), core.Session, core.Agent)
 }
 
 func standaloneBotSetting(setting db.Settings, provider, model string) bot.BotSetting {
-	s := bot.SettingFromRecord(setting)
+	s := adapter.BotSettingFromRecord(setting)
 	s.SmartGuideProvider = provider
 	s.SmartGuideModel = model
 	return s

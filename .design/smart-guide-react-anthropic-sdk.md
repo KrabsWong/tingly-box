@@ -42,7 +42,7 @@ We are anthropic-first, so **skip all provider-compat layers**:
 
 ## Constraints / invariants (do not change)
 
-- Public surface of `internal/remote_control/smart_guide/` stays compatible:
+- Public surface of `remote/control/smart_guide/` stays compatible:
   `NewTinglyBoxAgentWithSession`, `ExecuteWithHandler`, `GetExecutor`,
   `SetWorkingDirectory`, and `handler.go` (`StreamHandler`, `Approver`,
   `CompletionResult`).

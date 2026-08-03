@@ -1205,13 +1205,13 @@ Verified platform context
 目标包结构：
 
 ```text
-internal/remote_control/bot/
+remote/control/bot/
   supervisor.go                 Bot lifecycle + shouldRun
   capability.go                 Capability interface + registry
   authorization.go              Authorizer orchestration
   capability_notify.go
 
-internal/remote_control/remoteagent/
+remote/control/remoteagent/
   capability.go                 Remote Control Capability implementation
   ...
 
