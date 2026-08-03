@@ -11,8 +11,9 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/feature"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/remoteagent"
+	bot2 "github.com/tingly-dev/tingly-box/remote/control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/feature"
+	"github.com/tingly-dev/tingly-box/remote/control/remoteagent"
 
 	"github.com/tingly-dev/tingly-box/agentboot"
 	"github.com/tingly-dev/tingly-box/agentboot/claude"
@@ -21,7 +22,6 @@ import (
 	imbottelegram "github.com/tingly-dev/tingly-box/imbot/platform/telegram"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
 	builtinserver "github.com/tingly-dev/tingly-box/internal/mcp/builtin_server"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
 	"github.com/tingly-dev/tingly-box/internal/tbclient"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/remote/session"
@@ -357,15 +357,15 @@ func runStandaloneBot(ctx context.Context, appManager *AppManager, setting db.Se
 	return runBotWithSettingsInternal(ctx, appManager, botSetting, sm.RemoteChats(), sessionMgr, agentService)
 }
 
-func standaloneBotSetting(setting db.Settings, provider, model string) bot.BotSetting {
-	s := bot.SettingFromRecord(setting)
+func standaloneBotSetting(setting db.Settings, provider, model string) bot2.BotSetting {
+	s := bot2.SettingFromRecord(setting)
 	s.SmartGuideProvider = provider
 	s.SmartGuideModel = model
 	return s
 }
 
 // runBotWithSettingsInternal is an internal wrapper that calls the bot runner
-func runBotWithSettingsInternal(ctx context.Context, appManager *AppManager, setting bot.BotSetting, chatStore *db.RemoteChatStore, sessionMgr *session.Manager, agentService *agentboot.AgentService) error {
+func runBotWithSettingsInternal(ctx context.Context, appManager *AppManager, setting bot2.BotSetting, chatStore *db.RemoteChatStore, sessionMgr *session.Manager, agentService *agentboot.AgentService) error {
 	// Create platform-specific auth config
 	authConfig := buildAuthConfigInternal(setting)
 	platform := imbot.Platform(setting.Platform)
@@ -424,7 +424,7 @@ func runBotWithSettingsInternal(ctx context.Context, appManager *AppManager, set
 
 	// Standalone bots get their own PairingManager so that /bind works the
 	// same way as in server mode.
-	pairing := bot.NewPairingManager(bot.NewLogAuditor())
+	pairing := bot2.NewPairingManager(bot2.NewLogAuditor())
 
 	// Register unified message handler
 	// Pass nil as SettingsStore - standalone bots don't have dynamic config updates
@@ -484,7 +484,7 @@ func runBotWithSettingsInternal(ctx context.Context, appManager *AppManager, set
 }
 
 // buildAuthConfigInternal creates auth config based on platform
-func buildAuthConfigInternal(setting bot.BotSetting) imbot.AuthConfig {
+func buildAuthConfigInternal(setting bot2.BotSetting) imbot.AuthConfig {
 	platform := setting.Platform
 	auth := setting.Auth
 

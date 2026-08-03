@@ -7,19 +7,19 @@ import (
 
 	"github.com/tingly-dev/tingly-box/agentboot"
 	"github.com/tingly-dev/tingly-box/imbot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/feature"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/smart_guide"
 	"github.com/tingly-dev/tingly-box/internal/tbclient"
 	"github.com/tingly-dev/tingly-box/remote/channel/imchannel"
+	bot2 "github.com/tingly-dev/tingly-box/remote/control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/feature"
+	smart_guide2 "github.com/tingly-dev/tingly-box/remote/control/smart_guide"
 	"github.com/tingly-dev/tingly-box/remote/session"
 )
 
 // BotHandler encapsulates all bot message handling logic and dependencies
 type BotHandler struct {
 	ctx              context.Context
-	botSetting       bot.BotSetting
-	chatStore        bot.ChatStoreInterface // Use interface for flexibility
+	botSetting       bot2.BotSetting
+	chatStore        bot2.ChatStoreInterface // Use interface for flexibility
 	sessionMgr       *session.Manager
 	agentService     *agentboot.AgentService
 	directoryBrowser *feature.DirectoryBrowser
@@ -32,10 +32,10 @@ type BotHandler struct {
 	agentRouter *AgentRouter
 
 	// Handoff manager for agent switching
-	handoffManager *smart_guide.HandoffManager
+	handoffManager *smart_guide2.HandoffManager
 
 	// SmartGuide session store for conversation history
-	tbSessionStore *smart_guide.SessionStore
+	tbSessionStore *smart_guide2.SessionStore
 
 	// executions tracks the one running execution per chat; shared with the
 	// AgentRouter (duplicate-run guard) and the /stop paths (cancel).
@@ -54,7 +54,7 @@ type BotHandler struct {
 	commandAdapter BotHandlerAdapter
 
 	// pairing handles TOFU pairing-code verification for direct messages.
-	pairing *bot.PairingManager
+	pairing *bot2.PairingManager
 }
 
 // HandlerContext contains per-message context data

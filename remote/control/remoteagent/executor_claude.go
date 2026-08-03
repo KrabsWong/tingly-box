@@ -7,13 +7,12 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-
-	"github.com/tingly-dev/tingly-box/internal/remote_control/feature"
+	bot2 "github.com/tingly-dev/tingly-box/remote/control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/feature"
 
 	"github.com/tingly-dev/tingly-box/agentboot"
 	"github.com/tingly-dev/tingly-box/agentboot/claude"
 	"github.com/tingly-dev/tingly-box/imbot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/remote/session"
 )
@@ -224,7 +223,7 @@ func (e *ClaudeCodeExecutor) Execute(ctx context.Context, req PreparedRequest) e
 // ccProfileID extracts the Claude Code profile ID from a bot's DefaultAgent
 // setting. Returns "" for the main claude_code scenario (unset, "claude_code",
 // or a value whose base scenario isn't claude_code).
-func ccProfileID(s bot.BotSetting) string {
+func ccProfileID(s bot2.BotSetting) string {
 	raw := strings.TrimSpace(s.DefaultAgent)
 	if raw == "" {
 		return ""
@@ -262,7 +261,7 @@ func sendTaskDoneCard(hCtx HandlerContext, meta *ResponseMeta) {
 		Text:    IconDone + " " + MsgTaskDone + ". " + MsgContinueOrHelp + BuildFooter(meta.AgentType, meta.ProjectPath),
 		Actions: kb.BuildActions(),
 	}
-	bot.ForwardReplyContext(opts, hCtx.Message)
+	bot2.ForwardReplyContext(opts, hCtx.Message)
 	if _, err := hCtx.Bot.SendMessage(context.Background(), hCtx.ChatID, opts); err != nil {
 		logrus.WithError(err).Warn("Failed to send Task done card")
 	}

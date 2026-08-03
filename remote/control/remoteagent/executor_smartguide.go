@@ -8,12 +8,12 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
+	smart_guide2 "github.com/tingly-dev/tingly-box/remote/control/smart_guide"
 
 	"github.com/tingly-dev/tingly-box/afk"
 	"github.com/tingly-dev/tingly-box/agentboot"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/smart_guide"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 
@@ -76,7 +76,7 @@ func (e *SmartGuideExecutor) Execute(ctx context.Context, req PreparedRequest) e
 
 	// 3. Create agent config
 	hCtx := req.HCtx
-	toolCtx := &smart_guide.ToolContext{
+	toolCtx := &smart_guide2.ToolContext{
 		ChatID:      hCtx.ChatID,
 		ProjectPath: projectPath,
 		SessionID:   req.SessionID,
@@ -92,7 +92,7 @@ func (e *SmartGuideExecutor) Execute(ctx context.Context, req PreparedRequest) e
 			}
 			permReq := agentboot.ApprovalRequestEvent{
 				ID:        uuid.New().String(),
-				AgentType: smart_guide.AgentTypeTinglyBox,
+				AgentType: smart_guide2.AgentTypeTinglyBox,
 				ToolName:  "send_file",
 				Input: map[string]interface{}{
 					"prompt": prompt,
@@ -111,8 +111,8 @@ func (e *SmartGuideExecutor) Execute(ctx context.Context, req PreparedRequest) e
 		},
 	}
 
-	agentConfig := &smart_guide.AgentConfig{
-		SmartGuideConfig: smart_guide.LoadSmartGuideConfig(),
+	agentConfig := &smart_guide2.AgentConfig{
+		SmartGuideConfig: smart_guide2.LoadSmartGuideConfig(),
 		BaseURL:          baseURL,
 		APIKey:           apiKey,
 		Model:            botSetting.UUID, // use bot uuid as model (rule)
@@ -122,14 +122,14 @@ func (e *SmartGuideExecutor) Execute(ctx context.Context, req PreparedRequest) e
 		BotUUID:          botSetting.UUID,
 		ToolCtx:          toolCtx,
 		SessionLog:       sessionLog,
-		GetStatusFunc: func(chatID string) (*smart_guide.StatusInfo, error) {
+		GetStatusFunc: func(chatID string) (*smart_guide2.StatusInfo, error) {
 			projectPath, _, _ := e.deps.ChatStore.GetProjectPath(chatID)
 			workingDir, hasWD, _ := e.deps.ChatStore.GetBashCwd(chatID)
 			if !hasWD {
 				workingDir = projectPath
 			}
 
-			return &smart_guide.StatusInfo{
+			return &smart_guide2.StatusInfo{
 				CurrentAgent:   AgentNameTinglyBox,
 				SessionID:      chatID,
 				ProjectPath:    projectPath,
@@ -155,7 +155,7 @@ func (e *SmartGuideExecutor) Execute(ctx context.Context, req PreparedRequest) e
 	}
 
 	// 4. Create agent with history
-	agent, err := smart_guide.NewTinglyBoxAgentWithSession(agentConfig, messages)
+	agent, err := smart_guide2.NewTinglyBoxAgentWithSession(agentConfig, messages)
 	if err != nil {
 		e.deps.SendText(req.HCtx, "⚠️ Smart Guide (@tb) is currently unavailable due to configuration issues.\n"+
 			"Reason: "+err.Error()+"\n"+

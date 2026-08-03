@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/smart_guide"
 
 	"github.com/tingly-dev/tingly-box/imbot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/smart_guide"
 )
 
 func (h *BotHandler) HandleMessage(msg imbot.Message, platform imbot.Platform, botUUID string) {

@@ -4,12 +4,11 @@ import (
 	"context"
 
 	"github.com/sirupsen/logrus"
-
-	"github.com/tingly-dev/tingly-box/internal/remote_control/feature"
+	bot2 "github.com/tingly-dev/tingly-box/remote/control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/feature"
 
 	"github.com/tingly-dev/tingly-box/agentboot"
 	"github.com/tingly-dev/tingly-box/imbot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
 	"github.com/tingly-dev/tingly-box/internal/tbclient"
 	"github.com/tingly-dev/tingly-box/remote/binding"
 	"github.com/tingly-dev/tingly-box/remote/channel/imchannel"
@@ -26,7 +25,7 @@ type consumer struct {
 	sessionMgr   *session.Manager
 	agentService *agentboot.AgentService
 	tbClient     tbclient.TBClient
-	store        bot.SettingsStore
+	store        bot2.SettingsStore
 }
 
 // NewConsumer builds the consumer that binds a bot to the remote-agent
@@ -36,8 +35,8 @@ func NewConsumer(
 	sessionMgr *session.Manager,
 	agentService *agentboot.AgentService,
 	tbClient tbclient.TBClient,
-	store bot.SettingsStore,
-) bot.Consumer {
+	store bot2.SettingsStore,
+) bot2.Consumer {
 	return &consumer{
 		sessionMgr:   sessionMgr,
 		agentService: agentService,
@@ -51,7 +50,7 @@ func (c *consumer) Name() string { return binding.RemoteAgentScenario }
 
 // Mounted reports whether the remote_agent mount is on for this bot (absent
 // binding counts as on — legacy default, see binding.ScenarioMounted).
-func (c *consumer) Mounted(setting bot.BotSetting) bool {
+func (c *consumer) Mounted(setting bot2.BotSetting) bool {
 	return binding.ScenarioMounted(setting.Scenarios, binding.RemoteAgentScenario)
 }
 
@@ -59,12 +58,12 @@ func (c *consumer) Mounted(setting bot.BotSetting) bool {
 // returns its inbound wiring.
 func (c *consumer) Attach(
 	ctx context.Context,
-	setting bot.BotSetting,
+	setting bot2.BotSetting,
 	mgr *imbot.Manager,
 	prompter *imchannel.IMPrompter,
-	chatStore bot.ChatStoreInterface,
-	pairing *bot.PairingManager,
-) (*bot.Attached, error) {
+	chatStore bot2.ChatStoreInterface,
+	pairing *bot2.PairingManager,
+) (*bot2.Attached, error) {
 	directoryBrowser := feature.NewDirectoryBrowser()
 
 	handler := NewBotHandler(
@@ -81,7 +80,7 @@ func (c *consumer) Attach(
 		c.store,
 	)
 
-	attached := &bot.Attached{
+	attached := &bot2.Attached{
 		// The remote agent is the catch-all consumer: every message that
 		// reaches it is considered handled, so it must sit last in the
 		// dispatch order.

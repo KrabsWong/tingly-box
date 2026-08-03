@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 
 	"github.com/tingly-dev/tingly-box/imbot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
 )
 
 func (h *BotHandler) SendText(hCtx HandlerContext, text string) {

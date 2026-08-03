@@ -5,13 +5,12 @@ import (
 	"path/filepath"
 
 	"github.com/sirupsen/logrus"
-
-	"github.com/tingly-dev/tingly-box/internal/remote_control/feature"
+	bot2 "github.com/tingly-dev/tingly-box/remote/control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/feature"
+	smart_guide2 "github.com/tingly-dev/tingly-box/remote/control/smart_guide"
 
 	"github.com/tingly-dev/tingly-box/agentboot"
 	"github.com/tingly-dev/tingly-box/imbot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/smart_guide"
 	"github.com/tingly-dev/tingly-box/internal/tbclient"
 	"github.com/tingly-dev/tingly-box/remote/channel/imchannel"
 	"github.com/tingly-dev/tingly-box/remote/session"
@@ -19,16 +18,16 @@ import (
 
 func NewBotHandler(
 	ctx context.Context,
-	botSetting bot.BotSetting,
-	chatStore bot.ChatStoreInterface,
+	botSetting bot2.BotSetting,
+	chatStore bot2.ChatStoreInterface,
 	sessionMgr *session.Manager,
 	agentService *agentboot.AgentService,
 	directoryBrowser *feature.DirectoryBrowser,
 	manager *imbot.Manager,
 	prompter *imchannel.IMPrompter,
 	tbClient tbclient.TBClient,
-	pairing *bot.PairingManager,
-	store bot.SettingsStore,
+	pairing *bot2.PairingManager,
+	store bot2.SettingsStore,
 ) *BotHandler {
 	// The bot's channel prompter for permission/ask requests. In the managed
 	// path the host supplies the bot's shared prompter (and routes replies to
@@ -52,7 +51,7 @@ func NewBotHandler(
 	}
 
 	// Initialize handoff manager
-	handoffMgr := smart_guide.NewHandoffManager()
+	handoffMgr := smart_guide2.NewHandoffManager()
 
 	// Initialize SmartGuide rule if configured
 	if tbClient != nil && botSetting.SmartGuideProvider != "" && botSetting.SmartGuideModel != "" {
@@ -76,12 +75,12 @@ func NewBotHandler(
 	}
 
 	// Create SmartGuide session store using data directory from tbClient
-	var tbSessionStore *smart_guide.SessionStore
+	var tbSessionStore *smart_guide2.SessionStore
 	if tbClient != nil {
 		dataDir := tbClient.GetDataDir()
 		if dataDir != "" {
 			sessionsDir := filepath.Join(dataDir, "sessions")
-			tbSessionStore, err = smart_guide.NewSessionStore(sessionsDir)
+			tbSessionStore, err = smart_guide2.NewSessionStore(sessionsDir)
 			if err != nil {
 				logrus.WithError(err).WithField("sessionsDir", sessionsDir).Warn("Failed to create SmartGuide session store")
 			} else {
@@ -126,7 +125,7 @@ func NewBotHandler(
 		},
 		NewStreamingMessageHandler: handler.newStreamingMessageHandler,
 		// GetBotSetting dynamically fetches the current bot settings from the store
-		GetBotSetting: func() (bot.BotSetting, error) {
+		GetBotSetting: func() (bot2.BotSetting, error) {
 			if store == nil {
 				return botSetting, nil
 			}
@@ -134,7 +133,7 @@ func NewBotHandler(
 			if err != nil {
 				return botSetting, err
 			}
-			return bot.SettingFromRecord(record), nil
+			return bot2.SettingFromRecord(record), nil
 		},
 	}
 	handler.agentRouter = NewAgentRouter(deps)

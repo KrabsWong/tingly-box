@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/remoteagent"
+	bot2 "github.com/tingly-dev/tingly-box/remote/control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/remoteagent"
 
 	"github.com/tingly-dev/tingly-box/agentboot"
 	"github.com/tingly-dev/tingly-box/imbot/core"
 	"github.com/tingly-dev/tingly-box/imbot/platform/tingly"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
 	"github.com/tingly-dev/tingly-box/remote/channel"
 	"github.com/tingly-dev/tingly-box/remote/interaction"
 	"github.com/tingly-dev/tingly-box/remote/session"
@@ -23,7 +23,7 @@ import (
 // consumer plus remote_agent (inbound catch-all, last), and a channel
 // registry for /tingly/:scenario routing. The channel itself — registry
 // entry, shared prompter, reply routing — is bot-host infrastructure.
-func newChannelTestManager(t *testing.T, uuid, scenarios string) (*bot.Manager, *fakeSettingsStore, *channel.Registry, *tingly.InProcessTransport) {
+func newChannelTestManager(t *testing.T, uuid, scenarios string) (*bot2.Manager, *fakeSettingsStore, *channel.Registry, *tingly.InProcessTransport) {
 	t.Helper()
 
 	tr := tingly.NewInProcessTransport()
@@ -52,8 +52,8 @@ func newChannelTestManager(t *testing.T, uuid, scenarios string) (*bot.Manager, 
 	require.NoError(t, err)
 
 	registry := channel.NewRegistry()
-	m := bot.NewManager(store,
-		bot.NewNotifyConsumer(),
+	m := bot2.NewManager(store,
+		bot2.NewNotifyConsumer(),
 		remoteagent.NewConsumer(sessionMgr, svc, nil, store))
 	sm, err := db.NewStoreManager(t.TempDir())
 	if err != nil {

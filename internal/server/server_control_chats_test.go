@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/tingly-dev/tingly-box/internal/data/db"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
 	notifymodule "github.com/tingly-dev/tingly-box/internal/server/module/notify"
 	"github.com/tingly-dev/tingly-box/remote/channel"
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 	"github.com/tingly-dev/tingly-box/remote/interaction"
 )
 

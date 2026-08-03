@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
+	smart_guide2 "github.com/tingly-dev/tingly-box/remote/control/smart_guide"
 
 	"github.com/tingly-dev/tingly-box/agentboot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/smart_guide"
 )
 
 // SmartGuideCompletionCallback handles completion events for SmartGuide agent
@@ -17,8 +17,8 @@ import (
 type SmartGuideCompletionCallback struct {
 	hCtx           HandlerContext
 	chatStore      bot.ChatStoreInterface
-	tbSessionStore *smart_guide.SessionStore
-	agent          *smart_guide.TinglyBoxAgent
+	tbSessionStore *smart_guide2.SessionStore
+	agent          *smart_guide2.TinglyBoxAgent
 	meta           *ResponseMeta
 	sendText       func(hCtx HandlerContext, text string)
 	messagesSent   int // Track number of messages sent via hooks (for fallback)
@@ -49,7 +49,7 @@ func (w *messageTrackingWrapper) OnError(err error) {
 }
 
 // OnComplete forwards to the completion callback.
-func (w *messageTrackingWrapper) OnComplete(result *smart_guide.CompletionResult) {
+func (w *messageTrackingWrapper) OnComplete(result *smart_guide2.CompletionResult) {
 	// Drain any trailing tool renders the stream buffered. The smart-guide loop
 	// never emits a `result` frame to trigger handleMapMessage's flush, so
 	// without this the last tool activity would be dropped before the banner.
@@ -58,7 +58,7 @@ func (w *messageTrackingWrapper) OnComplete(result *smart_guide.CompletionResult
 }
 
 // OnComplete handles the smart-guide completion signal.
-func (c *SmartGuideCompletionCallback) OnComplete(result *smart_guide.CompletionResult) {
+func (c *SmartGuideCompletionCallback) OnComplete(result *smart_guide2.CompletionResult) {
 	// Capture the final assistant text from the agent's history.
 	responseText := ""
 	if result.Success {
@@ -224,7 +224,7 @@ func (h *BotHandler) handleHandoff(hCtx HandlerContext, toAgent agentboot.AgentT
 	projectPath, _, _ := h.chatStore.GetProjectPath(hCtx.ChatID)
 
 	// Create handoff state (no sessionID needed - sessions are managed per-agent)
-	handoffState := &smart_guide.HandoffState{
+	handoffState := &smart_guide2.HandoffState{
 		FromAgent:   string(fromAgent),
 		ToAgent:     string(toAgent),
 		Timestamp:   time.Now(),
@@ -266,7 +266,7 @@ func (h *BotHandler) handleHandoff(hCtx HandlerContext, toAgent agentboot.AgentT
 // routeToAgent routes a message to the appropriate agent based on current_agent
 func (h *BotHandler) routeToAgent(hCtx HandlerContext, text string) error {
 	// Check for handoff commands first (supports "@cc help me" format)
-	if toAgent, isHandoff, remainingText := smart_guide.DetectHandoffCommand(text); isHandoff {
+	if toAgent, isHandoff, remainingText := smart_guide2.DetectHandoffCommand(text); isHandoff {
 		// smart_guide names the handoff targets with the same identity strings
 		// this package routes on, so a typed conversion plus a validity check
 		// replaces the old value-by-value re-mapping.

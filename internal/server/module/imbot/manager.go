@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/remoteagent"
+	bot2 "github.com/tingly-dev/tingly-box/remote/control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/remoteagent"
 
 	"github.com/tingly-dev/tingly-box/remote/channel"
 	"github.com/tingly-dev/tingly-box/remote/session"
@@ -15,7 +16,6 @@ import (
 	"github.com/tingly-dev/tingly-box/agentboot"
 	"github.com/tingly-dev/tingly-box/agentboot/claude"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/tbclient"
 )
@@ -25,7 +25,7 @@ import (
 // for the imbotsettings module to control bot lifecycle.
 type BotManager struct {
 	mu           sync.RWMutex
-	manager      *bot.Manager // Internal bot manager from remote_control/bot
+	manager      *bot2.Manager // Internal bot manager from remote_control/bot
 	store        *db.ImBotSettingsStore
 	sessionMgr   *session.Manager
 	agentService *agentboot.AgentService
@@ -102,11 +102,11 @@ func NewBotManager(ctx context.Context, cfg *config.Config, channelRegistry *cha
 	//    traffic (the channel itself is bot-host infrastructure);
 	//  - remote_agent owns the agent/SmartGuide machinery and is the
 	//    inbound catch-all, so it goes last.
-	notifyConsumer := bot.NewNotifyConsumer()
+	notifyConsumer := bot2.NewNotifyConsumer()
 	remoteAgentConsumer := remoteagent.NewConsumer(sessionMgr, agentService, tbClient, store)
 
 	// Create internal bot manager
-	internalMgr := bot.NewManager(store, notifyConsumer, remoteAgentConsumer)
+	internalMgr := bot2.NewManager(store, notifyConsumer, remoteAgentConsumer)
 	internalMgr.SetChatStore(chatStore)
 	internalMgr.SetAccessStore(sm.BotAccess())
 	// Wire the channel registry BEFORE periodicBotSync's goroutine gets a
@@ -412,7 +412,7 @@ func (bm *BotManager) GetTBClient() tbclient.TBClient {
 
 // PairingManager returns the underlying TOFU pairing manager for HTTP/CLI handlers
 // that need to mint, read, or rotate pairing codes.
-func (bm *BotManager) PairingManager() *bot.PairingManager {
+func (bm *BotManager) PairingManager() *bot2.PairingManager {
 	if bm == nil || bm.manager == nil {
 		return nil
 	}
@@ -426,7 +426,7 @@ func (bm *BotManager) PairingManager() *bot.PairingManager {
 // the GET /bots/:bot/chats API to list the chats a bot can reach (so callers
 // of /notify and /interact can discover the channel-native chat_id those
 // endpoints require).
-func (bm *BotManager) ChatStore() (bot.ChatStoreInterface, error) {
+func (bm *BotManager) ChatStore() (bot2.ChatStoreInterface, error) {
 	if bm == nil || bm.manager == nil {
 		return nil, fmt.Errorf("bot manager not initialized")
 	}

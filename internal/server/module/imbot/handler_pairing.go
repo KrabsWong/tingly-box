@@ -5,10 +5,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	bot2 "github.com/tingly-dev/tingly-box/remote/control/bot"
 
 	"github.com/tingly-dev/tingly-box/internal/constant"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
 )
 
 // resolveRequirePairing applies the same tri-state logic as
@@ -18,7 +18,7 @@ func resolveRequirePairing(s db.Settings) bool {
 	if s.RequirePairing != nil {
 		return *s.RequirePairing
 	}
-	return bot.PlatformDefaultsRequirePairing(s.Platform)
+	return bot2.PlatformDefaultsRequirePairing(s.Platform)
 }
 
 // logPairAudit records a web-UI pairing event through the same
@@ -26,7 +26,7 @@ func resolveRequirePairing(s db.Settings) bool {
 // bot.NewLogAuditor), so the imbot.pair.* action family stays consistent
 // whether the event came from a chat command or the web UI.
 func logPairAudit(c *gin.Context, action, uuid, message string) {
-	bot.NewLogAuditor().Info(action, c.GetString(constant.CtxKeyUserID), c.ClientIP(), message, map[string]interface{}{
+	bot2.NewLogAuditor().Info(action, c.GetString(constant.CtxKeyUserID), c.ClientIP(), message, map[string]interface{}{
 		"bot_uuid": uuid,
 		"by":       "web",
 	})

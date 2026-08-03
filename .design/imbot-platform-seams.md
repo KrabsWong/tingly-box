@@ -322,7 +322,7 @@ Seam 2 则有个未决的设计选择（见下），且只影响本仓无法测�
 
 ### 7.1 Feishu/Lark 上内联按钮全部丢失（2a 已修）
 
-`remote_control` 恒定传 `models.InlineKeyboardMarkup`，而 feishu 的
+`control` 恒定传 `models.InlineKeyboardMarkup`，而 feishu 的
 `buildInteractiveCard` 类型开关只认 `interaction.InlineKeyboardMarkup` 和
 `map[string]interface{}` → `buttons` 为空 → 发出**只有文本、没有任何按钮**的卡片。
 Clear / CD / Project、目录浏览、`/resume` 选择器对 Feishu 用户全部不可见。
@@ -452,7 +452,7 @@ import cycles with imbot/platform packages"——不成立，它只需要 `inter
 2. Feishu/Lark 上 Clear / CD / Project 可见且可点。（2a ✅）
 3. Feishu 上点完按钮旧键盘被撤除。（Seam 4 ✅）
 4. `handler_verbose.go` 的能力判定恢复启用。（Seam 3 ✅）
-5. 在 imbot 新增一个假想平台，`remote_control` **零改动**即可跑通
+5. 在 imbot 新增一个假想平台，`control` **零改动**即可跑通
    `manager_channel_test.go` 的 notify 全链路。
 6. 回调载荷的长度约束不再泄漏到调用方：64 字节作为**生效的约束**只存在于
    `imbot/platform/telegram/callback_codec.go`；`interaction` 与

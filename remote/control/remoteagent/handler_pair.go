@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 )
 
 // isBindCommand reports whether text is a (well-formed-enough) /bind invocation.

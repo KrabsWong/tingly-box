@@ -8,8 +8,7 @@ package remoteagent
 
 import (
 	"github.com/tingly-dev/tingly-box/agentboot"
-
-	"github.com/tingly-dev/tingly-box/internal/remote_control/smart_guide"
+	"github.com/tingly-dev/tingly-box/remote/control/smart_guide"
 )
 
 // Agent routing constants. The identity strings are owned elsewhere —

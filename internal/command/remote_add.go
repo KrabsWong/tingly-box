@@ -10,7 +10,7 @@ import (
 
 	imbotweixin "github.com/tingly-dev/tingly-box/imbot/platform/weixin"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 )
 
 // runRemoteAddInteractive runs the interactive flow for adding a new bot

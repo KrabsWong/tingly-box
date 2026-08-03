@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 
 	imbot "github.com/tingly-dev/tingly-box/imbot/core"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
 )
 
 // imageExtensionsForSend is the set of extensions sent as "image" type.

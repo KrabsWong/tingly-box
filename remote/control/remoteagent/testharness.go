@@ -11,8 +11,8 @@ import (
 	"github.com/tingly-dev/tingly-box/agentboot/claude/fixture"
 	"github.com/tingly-dev/tingly-box/imbot"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
-	"github.com/tingly-dev/tingly-box/internal/remote_control/feature"
+	bot2 "github.com/tingly-dev/tingly-box/remote/control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/feature"
 	"github.com/tingly-dev/tingly-box/remote/session"
 )
 
@@ -34,12 +34,12 @@ import (
 //
 // Tests then drive the bot through the testenv chat helpers.
 type TestHarness struct {
-	Setting      bot.BotSetting
+	Setting      bot2.BotSetting
 	Handler      *BotHandler
-	ChatStore    bot.ChatStoreInterface
+	ChatStore    bot2.ChatStoreInterface
 	SessionMgr   *session.Manager
 	AgentService *agentboot.AgentService
-	Pairing      *bot.PairingManager
+	Pairing      *bot2.PairingManager
 	DataDir      string
 	Manager      *imbot.Manager
 
@@ -69,7 +69,7 @@ type TestBootOptions struct {
 // The harness registers the BotHandler.HandleMessage callback on the
 // Manager. Callers must Start the Manager themselves — keeping that step
 // in the test makes it explicit when inbound messages start flowing.
-func BootForTest(t *testing.T, manager *imbot.Manager, setting bot.BotSetting, opts ...TestBootOptions) *TestHarness {
+func BootForTest(t *testing.T, manager *imbot.Manager, setting bot2.BotSetting, opts ...TestBootOptions) *TestHarness {
 	t.Helper()
 
 	var opt TestBootOptions
@@ -112,7 +112,7 @@ func BootForTest(t *testing.T, manager *imbot.Manager, setting bot.BotSetting, o
 		}
 	}
 
-	pairing := bot.NewPairingManager(bot.NewLogAuditor())
+	pairing := bot2.NewPairingManager(bot2.NewLogAuditor())
 	dirBrowser := feature.NewDirectoryBrowser()
 
 	ctx := t.Context()
