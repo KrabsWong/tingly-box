@@ -12,6 +12,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/tingly-dev/tingly-box/remote/control"
+	"github.com/tingly-dev/tingly-box/remote/control/adapter"
 	bot "github.com/tingly-dev/tingly-box/remote/control/bot"
 	"github.com/tingly-dev/tingly-box/remote/control/feature"
 	"github.com/tingly-dev/tingly-box/remote/control/remoteagent"
@@ -348,7 +349,7 @@ func runStandaloneBot(ctx context.Context, appManager *AppManager, setting db.Se
 }
 
 func standaloneBotSetting(setting db.Settings, provider, model string) bot.BotSetting {
-	s := bot.SettingFromRecord(setting)
+	s := adapter.BotSettingFromRecord(setting)
 	s.SmartGuideProvider = provider
 	s.SmartGuideModel = model
 	return s

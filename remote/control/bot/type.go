@@ -1,18 +1,15 @@
 package bot
 
-import (
-	"context"
-
-	"github.com/tingly-dev/tingly-box/internal/data/db"
-)
+import "context"
 
 // SettingsStore is the read surface the bot lifecycle needs from the settings
-// store. db.ImBotSettingsStore satisfies it directly.
+// store. It returns remote-owned BotSetting values; the host bridges its own
+// persistence type onto this interface (see remote/control/adapter).
 type SettingsStore interface {
 	// GetSettingsByUUID returns the settings record for a bot.
-	GetSettingsByUUID(uuid string) (db.Settings, error)
+	GetSettingsByUUID(uuid string) (BotSetting, error)
 	// ListEnabledSettings returns all enabled settings records.
-	ListEnabledSettings() ([]db.Settings, error)
+	ListEnabledSettings() ([]BotSetting, error)
 }
 
 // runningBot tracks a running bot instance

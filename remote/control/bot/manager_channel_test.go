@@ -31,7 +31,7 @@ func newChannelTestManager(t *testing.T, uuid, scenarios string) (*bot2.Manager,
 	t.Cleanup(func() { tingly.Unregister(uuid) })
 
 	store := &fakeSettingsStore{
-		settings: map[string]db.Settings{
+		settings: map[string]bot2.BotSetting{
 			uuid: {
 				UUID:      uuid,
 				Name:      "channel-test",

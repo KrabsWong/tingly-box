@@ -23,23 +23,23 @@ import (
 // touches are implemented.
 type fakeSettingsStore struct {
 	mu       sync.Mutex
-	settings map[string]db.Settings
+	settings map[string]bot.BotSetting
 }
 
-func (s *fakeSettingsStore) GetSettingsByUUID(uuid string) (db.Settings, error) {
+func (s *fakeSettingsStore) GetSettingsByUUID(uuid string) (bot.BotSetting, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, ok := s.settings[uuid]
 	if !ok {
-		return db.Settings{}, fmt.Errorf("settings not found: %s", uuid)
+		return bot.BotSetting{}, fmt.Errorf("settings not found: %s", uuid)
 	}
 	return rec, nil
 }
 
-func (s *fakeSettingsStore) ListEnabledSettings() ([]db.Settings, error) {
+func (s *fakeSettingsStore) ListEnabledSettings() ([]bot.BotSetting, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]db.Settings, 0, len(s.settings))
+	out := make([]bot.BotSetting, 0, len(s.settings))
 	for _, rec := range s.settings {
 		if rec.Enabled {
 			out = append(out, rec)
@@ -72,7 +72,7 @@ func newLifecycleManager(t *testing.T) (*bot.Manager, string, *tingly.InProcessT
 	t.Cleanup(func() { tingly.Unregister(uuid) })
 
 	store := &fakeSettingsStore{
-		settings: map[string]db.Settings{
+		settings: map[string]bot.BotSetting{
 			uuid: {
 				UUID:     uuid,
 				Name:     "lifecycle-test",
@@ -169,7 +169,7 @@ func TestManager_StopOneBotDoesNotAffectOthers(t *testing.T) {
 	})
 
 	store := &fakeSettingsStore{
-		settings: map[string]db.Settings{
+		settings: map[string]bot.BotSetting{
 			uuidA: {UUID: uuidA, Name: "A", Platform: "tingly", AuthType: "none", Auth: map[string]string{}, Enabled: true},
 			uuidB: {UUID: uuidB, Name: "B", Platform: "tingly", AuthType: "none", Auth: map[string]string{}, Enabled: true},
 		},
@@ -230,7 +230,7 @@ func TestManager_MountGate_Tingly(t *testing.T) {
 	t.Cleanup(func() { tingly.Unregister(uuid) })
 
 	store := &fakeSettingsStore{
-		settings: map[string]db.Settings{
+		settings: map[string]bot.BotSetting{
 			uuid: {
 				UUID:      uuid,
 				Name:      "mount-test",

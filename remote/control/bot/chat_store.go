@@ -44,29 +44,6 @@ type BotSetting struct {
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
-// SettingFromRecord converts a stored db.Settings row into the BotSetting the
-// bot runtime consumes. This is the ONE conversion point — the lifecycle and
-// the dynamic per-message settings refresh both go through it.
-func SettingFromRecord(record db.Settings) BotSetting {
-	return BotSetting{
-		UUID:               record.UUID,
-		Name:               record.Name,
-		Platform:           record.Platform,
-		AuthType:           record.AuthType,
-		Auth:               record.Auth,
-		ProxyURL:           record.ProxyURL,
-		ChatIDLock:         record.ChatIDLock,
-		BashAllowlist:      record.BashAllowlist,
-		DefaultCwd:         record.DefaultCwd,
-		DefaultAgent:       record.DefaultAgent,
-		Enabled:            record.Enabled,
-		Scenarios:          record.Scenarios,
-		SmartGuideProvider: record.SmartGuideProvider,
-		SmartGuideModel:    record.SmartGuideModel,
-		RequirePairing:     record.RequirePairing,
-	}
-}
-
 // IsRequirePairing reports whether this bot requires per-chat pairing.
 // When RequirePairing is nil, the answer depends on Platform: token-DM
 // platforms default to enforced; OAuth/QR platforms default to off.

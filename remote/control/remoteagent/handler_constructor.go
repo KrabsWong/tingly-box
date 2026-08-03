@@ -129,11 +129,7 @@ func NewBotHandler(
 			if store == nil {
 				return botSetting, nil
 			}
-			record, err := store.GetSettingsByUUID(botSetting.UUID)
-			if err != nil {
-				return botSetting, err
-			}
-			return bot2.SettingFromRecord(record), nil
+			return store.GetSettingsByUUID(botSetting.UUID)
 		},
 	}
 	handler.agentRouter = NewAgentRouter(deps)

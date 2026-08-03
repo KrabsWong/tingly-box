@@ -8,6 +8,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/tingly-dev/tingly-box/remote/control"
+	"github.com/tingly-dev/tingly-box/remote/control/adapter"
 	"github.com/tingly-dev/tingly-box/remote/control/bot"
 	"github.com/tingly-dev/tingly-box/remote/control/remoteagent"
 
@@ -97,10 +98,15 @@ func NewBotManager(ctx context.Context, cfg *config.Config, channelRegistry *cha
 	//  - remote_agent owns the agent/SmartGuide machinery and is the
 	//    inbound catch-all, so it goes last.
 	notifyConsumer := bot.NewNotifyConsumer()
-	remoteAgentConsumer := remoteagent.NewConsumer(sessionMgr, agentService, tbClient, store)
+	// settingsStore adapts the db-backed store to bot.SettingsStore,
+	// mapping db.Settings → bot.BotSetting at the boundary (see
+	// remote/control/adapter). The raw *db.ImBotSettingsStore is kept for
+	// host-side reads that still want db.Settings.
+	settingsStore := adapter.NewSettingsStore(store)
+	remoteAgentConsumer := remoteagent.NewConsumer(sessionMgr, agentService, tbClient, settingsStore)
 
 	// Create internal bot manager
-	internalMgr := bot.NewManager(store, notifyConsumer, remoteAgentConsumer)
+	internalMgr := bot.NewManager(settingsStore, notifyConsumer, remoteAgentConsumer)
 	internalMgr.SetChatStore(chatStore)
 	internalMgr.SetAccessStore(sm.BotAccess())
 	// Wire the channel registry BEFORE periodicBotSync's goroutine gets a

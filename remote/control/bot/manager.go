@@ -356,11 +356,10 @@ func (m *Manager) Start(parentCtx context.Context, uuid string) error {
 		return nil
 	}
 
-	record, err := m.store.GetSettingsByUUID(uuid)
+	s, err := m.store.GetSettingsByUUID(uuid)
 	if err != nil {
 		return err
 	}
-	s := SettingFromRecord(record)
 
 	platform := s.Platform
 	auth := s.Auth
@@ -559,7 +558,7 @@ func (m *Manager) Sync(ctx context.Context) error {
 	// turned off), the stop pass below takes it down.
 	shouldRun := make(map[string]bool)
 	for _, setting := range settings {
-		if setting.UUID != "" && len(m.mountedConsumers(BotSetting{Platform: setting.Platform, Scenarios: setting.Scenarios})) > 0 {
+		if setting.UUID != "" && len(m.mountedConsumers(setting)) > 0 {
 			shouldRun[setting.UUID] = true
 		}
 	}
