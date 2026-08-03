@@ -6,13 +6,14 @@ go 1.25.6
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
-	github.com/go-telegram/bot v1.20.0
-	github.com/larksuite/oapi-sdk-go/v3 v3.9.7
+	github.com/go-telegram/bot v1.23.0
+	github.com/larksuite/oapi-sdk-go/v3 v3.9.10
 	github.com/open-dingtalk/dingtalk-stream-sdk-go v0.9.1
-	github.com/slack-go/slack v0.19.0
+	github.com/sirupsen/logrus v1.9.4
+	github.com/slack-go/slack v0.27.0
 	github.com/stretchr/testify v1.11.1
-	github.com/tingly-dev/weixin v0.2.0
-	github.com/yuin/goldmark v1.7.16
+	github.com/tingly-dev/weixin v0.4.6
+	github.com/yuin/goldmark v1.8.5
 	golang.org/x/net v0.56.0
 )
 
