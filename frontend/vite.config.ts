@@ -61,6 +61,24 @@ export default defineConfig(({ mode }) => {
         build: {
             rollupOptions: {
                 output: {
+                    // Routes are lazy-loaded (see App.tsx), so Rollup already splits each
+                    // page into its own chunk at the import() boundary, and shares code
+                    // between pages automatically where they overlap.
+                    //
+                    // Only MUI is forced into its own vendor chunk here: it's imported
+                    // eagerly by Layout/App (not just lazy pages), so it belongs in the
+                    // always-loaded set and benefits from a stable, cacheable chunk name.
+                    //
+                    // recharts/d3 deliberately have NO manual rule. They're only used by
+                    // two lazy pages (Dashboard, UserUsage) and are never imported eagerly
+                    // — but forcing them into a named "recharts-vendor" chunk previously
+                    // made the bundler treat that chunk as always-needed and preload it
+                    // from index.html on every page load (~850KB, unused outside those two
+                    // routes). Leaving them unnamed lets Rollup fold them into a
+                    // dynamic-import-only shared chunk that's fetched solely when one of
+                    // those two pages is actually visited. Verify with `pnpm build` +
+                    // check dist/index.html's <link rel="modulepreload"> list before
+                    // re-adding a manual grouping for either of these.
                     manualChunks: (id) => {
                         if (id.includes('node_modules')) {
                             // MUI packages
@@ -70,26 +88,6 @@ export default defineConfig(({ mode }) => {
                             if (id.includes('@mui/icons-material')) {
                                 return 'mui-icons-vendor';
                             }
-                            // Recharts + d3
-                            if (id.includes('recharts') || id.includes('d3-') || id.includes('victory-')) {
-                                return 'recharts-vendor';
-                            }
-                        }
-                        // App pages chunked by feature area
-                        if (id.includes('/pages/remote-control/') || id.includes('/pages/remote-coder/')) {
-                            return 'pages-remote';
-                        }
-                        if (id.includes('/pages/scenario/')) {
-                            return 'pages-scenario';
-                        }
-                        if (id.includes('/pages/prompt/')) {
-                            return 'pages-prompt';
-                        }
-                        if (id.includes('/pages/guardrails/')) {
-                            return 'pages-guardrails';
-                        }
-                        if (id.includes('/pages/system/')) {
-                            return 'pages-system';
                         }
                         return undefined;
                     },
