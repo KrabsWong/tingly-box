@@ -1,17 +1,13 @@
 package binding
 
-import (
-	"testing"
-
-	"github.com/tingly-dev/tingly-box/internal/data/db"
-)
+import "testing"
 
 type fakeStore struct {
-	settings []db.Settings
+	settings []BotInfo
 	err      error
 }
 
-func (s *fakeStore) ListEnabledSettings() ([]db.Settings, error) {
+func (s *fakeStore) ListEnabledBindings() ([]BotInfo, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -27,7 +23,7 @@ func TestResolveNoStore(t *testing.T) {
 }
 
 func TestResolveNoMatch(t *testing.T) {
-	r := NewResolver(&fakeStore{settings: []db.Settings{{
+	r := NewResolver(&fakeStore{settings: []BotInfo{{
 		UUID:      "bot-1",
 		Platform:  "telegram",
 		Scenarios: `[{"name":"other","chat_id":"c","events":["Stop"]}]`,
@@ -42,7 +38,7 @@ func TestResolveNoMatch(t *testing.T) {
 }
 
 func TestResolveFirstMatchWins(t *testing.T) {
-	r := NewResolver(&fakeStore{settings: []db.Settings{
+	r := NewResolver(&fakeStore{settings: []BotInfo{
 		{UUID: "bot-1", Platform: "telegram", Scenarios: `[{"name":"claude_code","chat_id":"c1"}]`},
 		{UUID: "bot-2", Platform: "feishu", Scenarios: `[{"name":"claude_code","chat_id":"c2"}]`},
 	}})
@@ -56,7 +52,7 @@ func TestResolveFirstMatchWins(t *testing.T) {
 }
 
 func TestResolveEventFilter(t *testing.T) {
-	r := NewResolver(&fakeStore{settings: []db.Settings{{
+	r := NewResolver(&fakeStore{settings: []BotInfo{{
 		UUID:      "bot-1",
 		Platform:  "telegram",
 		Scenarios: `[{"name":"claude_code","chat_id":"c","events":["Stop"]}]`,
@@ -72,7 +68,7 @@ func TestResolveEventFilter(t *testing.T) {
 }
 
 func TestResolveSkipsMalformed(t *testing.T) {
-	r := NewResolver(&fakeStore{settings: []db.Settings{
+	r := NewResolver(&fakeStore{settings: []BotInfo{
 		{UUID: "bad", Platform: "telegram", Scenarios: `not json`},
 		{UUID: "ok", Platform: "telegram", Scenarios: `[{"name":"claude_code","chat_id":"c"}]`},
 	}})
@@ -86,7 +82,7 @@ func TestResolveSkipsMalformed(t *testing.T) {
 }
 
 func TestResolveOptionsPreserved(t *testing.T) {
-	r := NewResolver(&fakeStore{settings: []db.Settings{{
+	r := NewResolver(&fakeStore{settings: []BotInfo{{
 		UUID:      "bot-1",
 		Platform:  "telegram",
 		Scenarios: `[{"name":"claude_code","chat_id":"c","permission_policy":{"on_timeout":"deny","total_budget_seconds":120}}]`,

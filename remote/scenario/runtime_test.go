@@ -4,16 +4,15 @@ import (
 	"context"
 	"testing"
 
-	"github.com/tingly-dev/tingly-box/internal/data/db"
 	"github.com/tingly-dev/tingly-box/remote/access"
 	"github.com/tingly-dev/tingly-box/remote/binding"
 	channel2 "github.com/tingly-dev/tingly-box/remote/channel"
 	"github.com/tingly-dev/tingly-box/remote/interaction"
 )
 
-type fakeStore struct{ settings []db.Settings }
+type fakeStore struct{ settings []binding.BotInfo }
 
-func (f *fakeStore) ListEnabledSettings() ([]db.Settings, error) { return f.settings, nil }
+func (f *fakeStore) ListEnabledBindings() ([]binding.BotInfo, error) { return f.settings, nil }
 
 type fakeRouteResolver struct{ resolved *access.ResolvedRoute }
 
@@ -47,7 +46,7 @@ func (c *recordingChannel) Prompt(ctx context.Context, t channel2.Target, ix int
 }
 
 func TestRuntimeResolveBoundChannel(t *testing.T) {
-	store := &fakeStore{settings: []db.Settings{{
+	store := &fakeStore{settings: []binding.BotInfo{{
 		UUID: "bot-1", Platform: "test",
 		Scenarios: `[{"name":"s1","chat_id":"chat-1","permission_policy":{"on_timeout":"deny"}}]`,
 	}}}
@@ -94,7 +93,7 @@ func TestRuntimeResolveNoBinding(t *testing.T) {
 }
 
 func TestRuntimeResolveBoundButNotRunning(t *testing.T) {
-	store := &fakeStore{settings: []db.Settings{{
+	store := &fakeStore{settings: []binding.BotInfo{{
 		UUID: "bot-1", Scenarios: `[{"name":"s1","chat_id":"c"}]`,
 	}}}
 	rt := NewDefaultRuntime(channel2.NewRegistry(), binding.NewResolver(store), nil)

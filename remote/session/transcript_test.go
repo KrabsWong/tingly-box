@@ -153,8 +153,9 @@ func TestTranscriptContainsTraversal(t *testing.T) {
 	}
 }
 
-// Note: the id-to-filename mapping itself is fs.SafeFileKey, tested in
-// pkg/fs. What matters here is that the transcript routes through it.
+// Note: the id-to-filename mapping itself is safeFileKey, defined in this
+// package (safefile.go). What matters here is that the transcript routes
+// through it.
 
 // TestTranscriptFileIsOwnerOnly: transcripts hold the user's conversation.
 func TestTranscriptFileIsOwnerOnly(t *testing.T) {

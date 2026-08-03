@@ -1,6 +1,8 @@
 // Package binding describes which channel a scenario should use for a
-// given event. Bindings live alongside bot settings (see
-// internal/data/db.Settings.Scenarios) as a JSON-encoded list per bot.
+// given event. Bindings live alongside bot settings (the host persists them
+// as a JSON-encoded Scenarios list per bot) and are resolved purely from
+// the small BotInfo record the host hands the resolver — binding itself
+// depends on no host type.
 //
 // The binding type is generic across scenarios — fields beyond Name /
 // ChatID / Events are stored as a free-form Options map so new
@@ -12,8 +14,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/tingly-dev/tingly-box/internal/data/db"
 )
 
 // RemoteAgentScenario is the mount name for the remote-agent purpose
@@ -104,10 +104,21 @@ type Resolved struct {
 	BotName  string
 }
 
+// BotInfo is the subset of a bot's settings the resolver needs. The host
+// maps its own settings record onto this so the binding package stays free
+// of any host-side type dependency.
+type BotInfo struct {
+	UUID      string
+	Platform  string
+	Name      string
+	Scenarios string // raw JSON-encoded binding list, parsed by binding
+}
+
 // Store is the subset of the imbot settings store the resolver needs.
-// Defining it as an interface keeps the resolver testable.
+// Defining it as an interface keeps the resolver testable and lets the
+// host bridge its own persistence type without leaking it in here.
 type Store interface {
-	ListEnabledSettings() ([]db.Settings, error)
+	ListEnabledBindings() ([]BotInfo, error)
 }
 
 // Resolver matches (scenario, event) to a single bot binding by
@@ -126,7 +137,7 @@ func (r *Resolver) Resolve(scenario, event string) (*Resolved, error) {
 	if r == nil || r.store == nil || scenario == "" {
 		return nil, nil
 	}
-	settings, err := r.store.ListEnabledSettings()
+	settings, err := r.store.ListEnabledBindings()
 	if err != nil {
 		return nil, fmt.Errorf("list enabled settings: %w", err)
 	}
