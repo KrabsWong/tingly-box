@@ -8,7 +8,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/tingly-dev/tingly-box/remote/control"
-	bot2 "github.com/tingly-dev/tingly-box/remote/control/bot"
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 	"github.com/tingly-dev/tingly-box/remote/control/remoteagent"
 
 	"github.com/tingly-dev/tingly-box/remote/channel"
@@ -25,7 +25,7 @@ import (
 // for the imbotsettings module to control bot lifecycle.
 type BotManager struct {
 	mu           sync.RWMutex
-	manager      *bot2.Manager // Internal bot manager from remote_control/bot
+	manager      *bot.Manager // Internal bot manager from remote_control/bot
 	store        *db.ImBotSettingsStore
 	sessionMgr   *session.Manager
 	agentService *agentboot.AgentService
@@ -96,11 +96,11 @@ func NewBotManager(ctx context.Context, cfg *config.Config, channelRegistry *cha
 	//    traffic (the channel itself is bot-host infrastructure);
 	//  - remote_agent owns the agent/SmartGuide machinery and is the
 	//    inbound catch-all, so it goes last.
-	notifyConsumer := bot2.NewNotifyConsumer()
+	notifyConsumer := bot.NewNotifyConsumer()
 	remoteAgentConsumer := remoteagent.NewConsumer(sessionMgr, agentService, tbClient, store)
 
 	// Create internal bot manager
-	internalMgr := bot2.NewManager(store, notifyConsumer, remoteAgentConsumer)
+	internalMgr := bot.NewManager(store, notifyConsumer, remoteAgentConsumer)
 	internalMgr.SetChatStore(chatStore)
 	internalMgr.SetAccessStore(sm.BotAccess())
 	// Wire the channel registry BEFORE periodicBotSync's goroutine gets a
@@ -406,7 +406,7 @@ func (bm *BotManager) GetTBClient() tbclient.TBClient {
 
 // PairingManager returns the underlying TOFU pairing manager for HTTP/CLI handlers
 // that need to mint, read, or rotate pairing codes.
-func (bm *BotManager) PairingManager() *bot2.PairingManager {
+func (bm *BotManager) PairingManager() *bot.PairingManager {
 	if bm == nil || bm.manager == nil {
 		return nil
 	}
@@ -420,7 +420,7 @@ func (bm *BotManager) PairingManager() *bot2.PairingManager {
 // the GET /bots/:bot/chats API to list the chats a bot can reach (so callers
 // of /notify and /interact can discover the channel-native chat_id those
 // endpoints require).
-func (bm *BotManager) ChatStore() (bot2.ChatStoreInterface, error) {
+func (bm *BotManager) ChatStore() (bot.ChatStoreInterface, error) {
 	if bm == nil || bm.manager == nil {
 		return nil, fmt.Errorf("bot manager not initialized")
 	}
