@@ -89,53 +89,12 @@ func TestAppend_DoesNotRewriteEarlierBytes(t *testing.T) {
 	assert.Greater(t, len(after), len(before))
 }
 
-func TestAppendNew_AppendsOnlyTheSuffix(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "s.jsonl")
-	s, err := Open(path)
-	require.NoError(t, err)
-	require.NoError(t, s.Append(userMsg("turn1"), assistantMsg("reply1")))
-
-	// The caller hands over the whole history, as it always has.
-	full := []anthropic.BetaMessageParam{
-		userMsg("turn1"), assistantMsg("reply1"),
-		userMsg("turn2"), assistantMsg("reply2"),
-	}
-	added, err := s.AppendNew(full)
-	require.NoError(t, err)
-	assert.Equal(t, 2, added, "only the new turn should be written")
-	assert.Equal(t, 4, s.Len())
-
-	reopened, err := Open(path)
-	require.NoError(t, err)
-	assert.Equal(t, 4, reopened.Len(), "and it should be durable")
-}
-
-func TestAppendNew_NoopWhenNothingIsNew(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "s.jsonl")
-	s, err := Open(path)
-	require.NoError(t, err)
-	full := []anthropic.BetaMessageParam{userMsg("a"), assistantMsg("b")}
-	require.NoError(t, s.Append(full...))
-
-	added, err := s.AppendNew(full)
-	require.NoError(t, err)
-	assert.Equal(t, 0, added)
-	assert.Equal(t, 2, s.Len(), "re-saving an unchanged history must not duplicate it")
-}
-
-// A shorter history means it was rewritten, not extended. Appending a suffix
-// computed against a mismatched base would splice two conversations together,
-// so the call is refused instead.
-func TestAppendNew_RefusesShorterHistory(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "s.jsonl")
-	s, err := Open(path)
-	require.NoError(t, err)
-	require.NoError(t, s.Append(userMsg("a"), assistantMsg("b"), userMsg("c")))
-
-	added, err := s.AppendNew([]anthropic.BetaMessageParam{userMsg("a")})
-	require.NoError(t, err, "a refusal is not an error the caller should crash on")
-	assert.Equal(t, 0, added)
-	assert.Equal(t, 3, s.Len(), "the log must be left alone")
+// A nil *Session is what a disabled store yields, and it reaches the harness
+// inside an afk.Log interface where it is not == nil. Append absorbs it so no
+// consumer needs its own typed-nil guard.
+func TestAppend_NilSessionIsNoop(t *testing.T) {
+	var s *Session
+	assert.NoError(t, s.Append(userMsg("dropped")))
 }
 
 // One bad line costs one message, not the conversation. The whole-file store

@@ -207,10 +207,10 @@ func TestSessionStore_BlankDirDisabled(t *testing.T) {
 	assert.Nil(t, store, "blank dataDir should disable persistence")
 
 	// nil store methods are safe no-ops.
-	msgs, err := store.Load("chat-1")
+	msgs, err := loadForTest(store, "chat-1")
 	require.NoError(t, err)
 	assert.Nil(t, msgs)
-	require.NoError(t, store.Save("chat-1", nil))
+	require.NoError(t, saveForTest(store, "chat-1", nil))
 	require.NoError(t, store.Clear("chat-1"))
 }
 
@@ -220,7 +220,7 @@ func TestSessionStore_SaveLoadRoundTrip(t *testing.T) {
 	require.NotNil(t, store)
 
 	// Loading an unknown chat returns empty, not an error.
-	got, err := store.Load("unknown")
+	got, err := loadForTest(store, "unknown")
 	require.NoError(t, err)
 	assert.Empty(t, got)
 
@@ -228,9 +228,9 @@ func TestSessionStore_SaveLoadRoundTrip(t *testing.T) {
 		anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock("what is 2+2?")),
 		{Role: anthropic.BetaMessageParamRoleAssistant, Content: []anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock("4")}},
 	}
-	require.NoError(t, store.Save("chat-1", messages))
+	require.NoError(t, saveForTest(store, "chat-1", messages))
 
-	loaded, err := store.Load("chat-1")
+	loaded, err := loadForTest(store, "chat-1")
 	require.NoError(t, err)
 	require.Len(t, loaded, 2)
 
@@ -256,15 +256,15 @@ func TestSessionStore_Clear(t *testing.T) {
 	messages := []anthropic.BetaMessageParam{
 		anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock("hi")),
 	}
-	require.NoError(t, store.Save("chat-2", messages))
+	require.NoError(t, saveForTest(store, "chat-2", messages))
 
-	loaded, err := store.Load("chat-2")
+	loaded, err := loadForTest(store, "chat-2")
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 
 	require.NoError(t, store.Clear("chat-2"))
 
-	loaded, err = store.Load("chat-2")
+	loaded, err = loadForTest(store, "chat-2")
 	require.NoError(t, err)
 	assert.Empty(t, loaded, "the live session should be empty after clear")
 

@@ -44,31 +44,50 @@ type Truncation struct {
 // nothing was dropped. It states what was cut and how to get the rest: a model
 // that knows it is looking at a tail can re-run with a narrower command, while
 // one handed a silently-truncated result will reason from it as if complete.
-func (t Truncation) Notice() string {
+func (t Truncation) Notice() string { return t.NoticeFrom(0) }
+
+// NoticeFrom is Notice for a caller that reads by offset, so the model can be
+// told absolute line numbers and where to resume. firstLine is the 1-based
+// number of the input's first line; 0 means the caller has no offset to page
+// with (a command's output, say) and reads exactly as Notice.
+//
+// It exists so the offset case extends the shared notice instead of hand-rolling
+// a second one. The notice is a contract with the model — what got cut and how
+// to get the rest — and two wordings for that is one too many.
+func (t Truncation) NoticeFrom(firstLine int) string {
 	if !t.Truncated {
 		return ""
 	}
-	which := "first"
-	if t.keptTail {
-		which = "last"
+	recovery := "Re-run with a narrower command, a filter such as grep/head/tail, or redirect to a file and read ranges from it."
+	var what string
+	switch {
+	case firstLine >= 1:
+		last := firstLine + t.KeptLines - 1
+		what = fmt.Sprintf("showing lines %d-%d of the %d selected", firstLine, last, t.TotalLines)
+		recovery = fmt.Sprintf("Re-read with offset=%d to continue from where this stops.", last+1)
+	case t.keptTail:
+		what = fmt.Sprintf("showing the last %d of %d lines", t.KeptLines, t.TotalLines)
+	default:
+		what = fmt.Sprintf("showing the first %d of %d lines", t.KeptLines, t.TotalLines)
 	}
-	return fmt.Sprintf(
-		"[Output truncated: showing the %s %d of %d lines (%d of %d bytes). "+
-			"Re-run with a narrower command, a filter such as grep/head/tail, or redirect to a file and read ranges from it.]",
-		which, t.KeptLines, t.TotalLines, t.KeptBytes, t.TotalBytes,
-	)
+	return fmt.Sprintf("[Output truncated: %s (%d of %d bytes). %s]",
+		what, t.KeptBytes, t.TotalBytes, recovery)
 }
 
 // String returns the truncated text with the notice appended when one applies,
 // which is what a tool wants to return to the model.
-func (t Truncation) String() string {
+func (t Truncation) String() string { return t.StringFrom(0) }
+
+// StringFrom is String with NoticeFrom's absolute line numbering.
+func (t Truncation) StringFrom(firstLine int) string {
 	if !t.Truncated {
 		return t.Text
 	}
+	notice := t.NoticeFrom(firstLine)
 	if t.Text == "" {
-		return t.Notice()
+		return notice
 	}
-	return t.Text + "\n\n" + t.Notice()
+	return t.Text + "\n\n" + notice
 }
 
 // Truncate caps s to the configured line and byte limits, cutting on line

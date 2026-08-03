@@ -108,15 +108,28 @@ func (s *Session) Messages() []anthropic.BetaMessageParam {
 	return msgs
 }
 
-// Len returns the number of messages currently in the log.
-func (s *Session) Len() int { return len(s.Messages()) }
+// Len returns the number of messages currently in the log. It counts rather
+// than calling Messages, which would copy the whole conversation to throw it
+// away.
+func (s *Session) Len() int {
+	n := 0
+	for _, e := range s.entries {
+		if e.Type == EntryMessage && e.Message != nil {
+			n++
+		}
+	}
+	return n
+}
 
 // Append writes messages to the end of the log and to the in-memory view. It is
 // all-or-nothing per call only in the sense that a failed write stops the
 // remaining messages; entries already flushed stay, because that is what an
 // append-only log means.
 func (s *Session) Append(msgs ...anthropic.BetaMessageParam) error {
-	if len(msgs) == 0 {
+	// A nil *Session stored in an afk.Log interface is not == nil, so every
+	// consumer would otherwise need its own typed-nil guard before calling this.
+	// Making the value harmless is cheaper than filtering it at each caller.
+	if s == nil || len(msgs) == 0 {
 		return nil
 	}
 	entries := make([]Entry, 0, len(msgs))
@@ -157,36 +170,6 @@ func (s *Session) appendEntries(entries ...Entry) error {
 
 // AppendNew treats full as an extension of what is already logged and appends
 // only the part that is not.
-//
-// This is what lets a caller keep handing over the agent's whole history — the
-// shape it already had — while the file grows by a few lines instead of being
-// rewritten. It returns how many messages were added.
-//
-// A full that is shorter than the log means the history was rewritten rather
-// than extended, which nothing does yet. It is refused rather than guessed at:
-// appending a suffix computed from a mismatched base would interleave two
-// different conversations in one file.
-func (s *Session) AppendNew(full []anthropic.BetaMessageParam) (int, error) {
-	have := s.Len()
-	if len(full) < have {
-		logger.WithFields(logrus.Fields{
-			"path": s.path, "logged": have, "given": len(full),
-		}).Warn("refusing to append: history is shorter than the log")
-		return 0, nil
-	}
-	if len(full) == have {
-		return 0, nil
-	}
-	newOnes := full[have:]
-	if err := s.Append(newOnes...); err != nil {
-		return 0, err
-	}
-	return len(newOnes), nil
-}
-
-// Path returns the file backing this session.
-func (s *Session) Path() string { return s.path }
-
 // ImportLegacy seeds an empty log from a whole-file JSON array of messages,
 // the format the previous store wrote. It exists so upgrading does not silently
 // drop every existing conversation; it is a no-op once the log has entries.

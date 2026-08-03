@@ -173,7 +173,7 @@ func (h *Harness) Run(
 		"model":         e.model,
 		"history_msgs":  len(history),
 		"prompt_len":    len(userText),
-		"tools":         len(e.tools),
+		"tools":         len(e.toolParams),
 		"maxIterations": e.maxIterations,
 		"stream_text":   e.streamText,
 		"persisted":     h.log != nil,
@@ -236,7 +236,7 @@ func (h *Harness) Run(
 			continue
 		}
 
-		if !step.NeedsAnotherStep {
+		if step.ToolCalls == 0 {
 			res.Messages = messages
 			logrus.WithFields(res.Usage.LogFields()).WithFields(logrus.Fields{
 				"steps":     res.Steps,

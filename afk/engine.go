@@ -217,7 +217,6 @@ type Engine struct {
 	effort        EffortLevel
 	serverCompact bool
 	serverTrigger int64
-	tools         []Tool
 	toolByName    map[string]Tool
 	toolParams    []anthropic.BetaToolUnionParam
 }
@@ -364,7 +363,6 @@ func withConversationCacheBreakpoint(messages []anthropic.BetaMessageParam) []an
 // registerTool adds a tool to the engine's dispatch table and param list.
 func (e *Engine) registerTool(t Tool) {
 	p := t.Param()
-	e.tools = append(e.tools, t)
 	e.toolByName[p.Name] = t
 	e.toolParams = append(e.toolParams, anthropic.BetaToolUnionParam{OfTool: &p})
 }
@@ -384,16 +382,14 @@ type StepResult struct {
 	// Usage and StopReason are the model's accounting for this step.
 	Usage      anthropic.BetaUsage
 	StopReason anthropic.BetaStopReason
-	// ToolCalls is how many tools this step invoked.
+	// ToolCalls is how many tools this step invoked. It is also what says the
+	// run is not finished: their results are already in Messages and the model
+	// has to be shown them, no matter what else this step produced.
 	ToolCalls int
 	// ServerCompacted reports that the response carried a compaction block, so
 	// the API compacted this request's history on its own. It is a fact, not an
 	// estimate, which is why the harness trusts it over any token arithmetic.
 	ServerCompacted bool
-	// NeedsAnotherStep reports that the model asked for tools. Their results
-	// are already in Messages, and the model has to be shown them, so the run
-	// is not finished no matter what else this step produced.
-	NeedsAnotherStep bool
 }
 
 // Step runs one model call against the given conversation and executes whatever
@@ -437,7 +433,6 @@ func (e *Engine) Step(
 	results := e.dispatchTools(ctx, toolUses, sink)
 	res.Messages = append(res.Messages, anthropic.NewBetaUserMessage(results...))
 	res.ToolCalls = len(toolUses)
-	res.NeedsAnotherStep = true
 	return res, nil
 }
 
@@ -610,6 +605,16 @@ func (e *Engine) callTool(ctx context.Context, tu anthropic.BetaContentBlockUnio
 		"input": string(tu.Input),
 	}).Debug("afk engine: tool call")
 	out, err := tool.Call(ctx, tu.Input)
+	// Backstop the context cap here rather than trusting every tool to remember
+	// it. Tools that truncate themselves — to keep the tail, or to renumber
+	// lines against an offset — come in already under the limit and pass through
+	// untouched, so this only catches the ones that would otherwise be unbounded.
+	if t := Truncate(out, TruncateOptions{}); t.Truncated {
+		logrus.WithFields(logrus.Fields{
+			"tool": tu.Name, "total_bytes": t.TotalBytes, "kept_bytes": t.KeptBytes,
+		}).Warn("afk engine: tool result capped by the engine backstop")
+		out = t.String()
+	}
 	if err != nil {
 		logrus.WithError(err).WithField("tool", tu.Name).Warn("afk engine: tool call failed")
 		if out == "" {

@@ -16,9 +16,17 @@ var errExecutionBusy = errors.New("another execution is already in progress for 
 // execution guard (begin) and /stop (cancel) — the two used to be separate
 // map mutations with divergent locking discipline.
 type executionRegistry struct {
-	mu        sync.Mutex
-	cancels   map[string]context.CancelFunc
-	steerable map[string]Steerable
+	mu      sync.Mutex
+	running map[string]*execution
+}
+
+// execution is one chat's in-flight run. Keeping cancel and steerable on one
+// value rather than in two maps is what makes "steerable implies running" hold
+// structurally: there is one key to add and one to delete, so the two can never
+// be left disagreeing about whether the chat is busy.
+type execution struct {
+	cancel    context.CancelFunc
+	steerable Steerable
 }
 
 // Steerable is a running execution that can take a message mid-run instead of
@@ -28,10 +36,7 @@ type Steerable interface {
 }
 
 func newExecutionRegistry() *executionRegistry {
-	return &executionRegistry{
-		cancels:   make(map[string]context.CancelFunc),
-		steerable: make(map[string]Steerable),
-	}
+	return &executionRegistry{running: make(map[string]*execution)}
 }
 
 // setSteerable marks the chat's running execution as able to accept mid-run
@@ -41,10 +46,9 @@ func newExecutionRegistry() *executionRegistry {
 func (r *executionRegistry) setSteerable(chatID string, s Steerable) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, running := r.cancels[chatID]; !running {
-		return
+	if e, running := r.running[chatID]; running {
+		e.steerable = s
 	}
-	r.steerable[chatID] = s
 }
 
 // steer hands text to the chat's running execution, reporting whether it was
@@ -52,9 +56,13 @@ func (r *executionRegistry) setSteerable(chatID string, s Steerable) {
 // caller falls back to telling the user it is busy.
 func (r *executionRegistry) steer(chatID, text string) bool {
 	r.mu.Lock()
-	s, ok := r.steerable[chatID]
+	e, ok := r.running[chatID]
+	var s Steerable
+	if ok {
+		s = e.steerable
+	}
 	r.mu.Unlock()
-	if !ok || s == nil {
+	if s == nil {
 		return false
 	}
 	return s.Steer(text)
@@ -66,10 +74,10 @@ func (r *executionRegistry) steer(chatID, text string) bool {
 func (r *executionRegistry) begin(chatID string, cancel context.CancelFunc) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, exists := r.cancels[chatID]; exists {
+	if _, exists := r.running[chatID]; exists {
 		return errExecutionBusy
 	}
-	r.cancels[chatID] = cancel
+	r.running[chatID] = &execution{cancel: cancel}
 	return nil
 }
 
@@ -78,8 +86,7 @@ func (r *executionRegistry) begin(chatID string, cancel context.CancelFunc) erro
 func (r *executionRegistry) end(chatID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.cancels, chatID)
-	delete(r.steerable, chatID)
+	delete(r.running, chatID)
 }
 
 // cancel stops the chat's running execution, reporting whether one was
@@ -87,15 +94,12 @@ func (r *executionRegistry) end(chatID string) {
 // stop" instead of double-cancelling.
 func (r *executionRegistry) cancel(chatID string) bool {
 	r.mu.Lock()
-	cancel, exists := r.cancels[chatID]
-	if exists {
-		delete(r.cancels, chatID)
-		delete(r.steerable, chatID)
-	}
+	e, exists := r.running[chatID]
+	delete(r.running, chatID)
 	r.mu.Unlock()
 
-	if exists && cancel != nil {
-		cancel()
+	if exists && e.cancel != nil {
+		e.cancel()
 		return true
 	}
 	return false

@@ -56,11 +56,11 @@ func TestSaveLoadRoundTripsUnsafeID(t *testing.T) {
 	want := []anthropic.BetaMessageParam{
 		anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock("hello")),
 	}
-	if err := store.Save(chatID, want); err != nil {
+	if err := saveForTest(store, chatID, want); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
-	got, err := store.Load(chatID)
+	got, err := loadForTest(store, chatID)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestSaveTightensLegacyFileMode(t *testing.T) {
 		t.Fatalf("seed legacy file: %v", err)
 	}
 
-	if err := store.Save(chatID, nil); err != nil {
+	if err := saveForTest(store, chatID, nil); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -127,7 +127,7 @@ func TestNewLogIsOwnerOnly(t *testing.T) {
 	msgs := []anthropic.BetaMessageParam{
 		anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock("hi")),
 	}
-	if err := store.Save(chatID, msgs); err != nil {
+	if err := saveForTest(store, chatID, msgs); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -162,7 +162,7 @@ func TestLegacyWholeFileSessionIsImported(t *testing.T) {
 		t.Fatalf("seed legacy: %v", err)
 	}
 
-	loaded, err := store.Load(chatID)
+	loaded, err := loadForTest(store, chatID)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -172,10 +172,10 @@ func TestLegacyWholeFileSessionIsImported(t *testing.T) {
 
 	// A second turn appends to the log rather than re-importing the legacy file.
 	next := append(loaded, anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock("second turn")))
-	if err := store.Save(chatID, next); err != nil {
+	if err := saveForTest(store, chatID, next); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	again, err := store.Load(chatID)
+	again, err := loadForTest(store, chatID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestClearArchivesLegacyToo(t *testing.T) {
 	if err := os.WriteFile(store.legacyPath(chatID), data, 0o600); err != nil {
 		t.Fatalf("seed legacy: %v", err)
 	}
-	if _, err := store.Load(chatID); err != nil {
+	if _, err := loadForTest(store, chatID); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 
@@ -213,11 +213,38 @@ func TestClearArchivesLegacyToo(t *testing.T) {
 		t.Fatalf("clear: %v", err)
 	}
 
-	after, err := store.Load(chatID)
+	after, err := loadForTest(store, chatID)
 	if err != nil {
 		t.Fatalf("load after clear: %v", err)
 	}
 	if len(after) != 0 {
 		t.Errorf("cleared chat came back with %d messages", len(after))
 	}
+}
+
+// loadForTest reads a chat's conversation the way production now does: take the
+// session handle and project it. It replaces the store's old Load method, which
+// existed only to wrap these two calls.
+func loadForTest(s *SessionStore, chatID string) ([]anthropic.BetaMessageParam, error) {
+	sess, err := s.Open(chatID)
+	if err != nil || sess == nil {
+		return nil, err
+	}
+	return sess.Messages(), nil
+}
+
+// saveForTest appends whatever part of full is not already logged. It stands in
+// for the store's old Save, which production no longer needs: the harness now
+// appends each step as it completes, so nothing hands over a whole history. The
+// tests still seed conversations wholesale, which is what this is for.
+func saveForTest(s *SessionStore, chatID string, full []anthropic.BetaMessageParam) error {
+	sess, err := s.Open(chatID)
+	if err != nil || sess == nil {
+		return err
+	}
+	have := sess.Len()
+	if len(full) <= have {
+		return nil
+	}
+	return sess.Append(full[have:]...)
 }

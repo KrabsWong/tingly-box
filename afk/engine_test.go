@@ -741,3 +741,36 @@ func TestEngineRun_ThinkingBlocksSurviveHistoryRoundTrip(t *testing.T) {
 	assert.Equal(t, "sig-abc123", restoredThinking.Signature,
 		"a dropped signature makes the next turn a 400")
 }
+
+// TestEngine_CapsToolOutputThatToolDidNotCap is the backstop: the context limit
+// is an invariant of the run loop, not a convention each tool has to remember.
+// A tool that returns unbounded output must not be able to swamp the prompt.
+func TestEngine_CapsToolOutputThatToolDidNotCap(t *testing.T) {
+	var reqCount int32
+	var second []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&reqCount, 1) == 1 {
+			writeSSE(t, w, toolUseResponse("toolu_1", "gusher", `{}`))
+			return
+		}
+		second, _ = io.ReadAll(r.Body)
+		writeSSE(t, w, textResponse("ok"))
+	}))
+	defer srv.Close()
+
+	huge := strings.Repeat("x*y*z*", 400_000) // ~2.4MB, far past DefaultMaxOutputBytes
+	eng, err := NewEngine(Config{
+		BaseURL: srv.URL, APIKey: "k", Model: "m",
+		Tools: []Tool{&fakeTool{name: "gusher", result: huge}},
+	})
+	require.NoError(t, err)
+
+	_, _, err = eng.Run(context.Background(), nil, "go", &recordingSink{})
+	require.NoError(t, err)
+
+	require.NotNil(t, second, "the follow-up request should carry the tool result")
+	assert.Less(t, len(second), 4*DefaultMaxOutputBytes,
+		"an uncapped tool result must not reach the model at full size")
+	assert.Contains(t, string(second), "Output truncated",
+		"and the model must be told it is looking at a partial result")
+}

@@ -65,7 +65,7 @@ the agent's.
 | `Engine` | `afk/engine.go` | The model client, tools, thinking/effort, cache breakpoints, one step |
 | `Harness` | `afk/harness.go` | The run loop, checkpoints, steering, compaction, invariants |
 | `Session` | `afk/session/session.go` | The durable log and its projection |
-| Compaction | `afk/compact.go` | Boundary selection and summarization |
+| Compaction | `afk/compact.go` | The server-side compaction request (§3.7) |
 | Truncation | `afk/truncate.go` | Tool-output caps |
 | Skills | `afk/skill/` | Discovery, parsing, the `activate_skill` tool |
 
@@ -198,30 +198,49 @@ gateway routed to. As with thinking, an unrecognized value sends nothing rather
 than becoming a 400, because the value arrives as a plain string from
 `SmartGuideConfig.Effort`.
 
-### 3.5 Skills are discovered once per agent
+### 3.5 The skill catalog is rendered into the prompt's front
 
-The skill catalog is rendered into the `activate_skill` tool description, and
-tools sit at the very front of the prompt. A catalog that changed mid-conversation
-would invalidate the prompt cache for the entire history on the turn it changed.
-Names are sorted so the rendered definition is byte-stable across restarts.
+The catalog is rendered into the `activate_skill` tool description, and tools sit
+at the very front of the request. A catalog that changes invalidates the prompt
+cache for the entire history on the turn it changes, so names are sorted and the
+rendering is byte-stable.
 
-`@tb`'s working directory floats, so this does mean walking into a directory
-with skills does not pick them up until the session restarts. That is the
-accepted cost of a stable prefix; a fresh agent is built per session, so
-`/clear` or a restart picks up changes.
+**Discovery is per message, not per agent-lifetime.** `SmartGuideExecutor.Execute`
+builds a fresh agent for every inbound message, so `loadSkills` walks the search
+directories and parses every `SKILL.md` on each turn. Two consequences, and the
+first is the opposite of what a stable-prefix design would predict:
 
-### 3.6 Tool output is capped, and the direction is per tool
+- Walking into a directory with skills **does** pick them up, on the next
+  message, with no restart. The prefix is stable only because the filesystem
+  usually is — nothing caches it.
+- That turn pays for it twice: the filesystem walk and parse sit on the critical
+  path before the first model call, and a catalog that actually changed re-bills
+  the whole conversation uncached.
+
+Neither is bad enough to have bought a cache yet, but the cost is real and it is
+per message. See §5.
+
+### 3.6 Tool output is capped by the run loop, and the direction is per tool
 
 Two independent limits, whichever binds first: 2000 lines
 (`DefaultMaxOutputLines`) or 50KB (`DefaultMaxOutputBytes`). The byte cap is
 what actually protects the context — one 200KB line is as damaging as ten
 thousand short ones — while the line cap keeps ordinary output readable.
 
+**The cap is enforced in `Engine.callTool`, not left to each tool.** "No single
+tool result can swamp the context" is a property of the run loop, so the run loop
+is where it is applied; a tool added tomorrow is bounded whether or not its author
+knew to call `Truncate`. Tools that truncate themselves come in already under the
+limit and pass through untouched, which is what keeps the per-tool *direction*
+below meaningful.
+
 `bash` keeps the **tail** (a failing command reports its error at the bottom);
 `read` keeps the **head** (matching what reading from an offset means). Every
 truncated result carries a notice saying what was dropped and how to get the
 rest. Silent truncation is worse than none: the model reasons from a partial
-result as if it were complete.
+result as if it were complete. There is one notice renderer, not two —
+`NoticeFrom` handles the offset case so a paging reader can be told absolute line
+numbers and where to resume, rather than hand-rolling a second wording.
 
 **Ordering hazard in `bash`:** truncation runs *after* the trailing `pwd` line is
 stripped. That line is how the tool tracks the working directory; tail-truncating
@@ -346,6 +365,28 @@ needs three reads to break even rather than two, and `@tb` has neither a query
 -source dimension to allowlist by nor knowledge of the model it was routed to.
 Off is the defensible default; the escape hatches upstream exist for callers who
 can make that judgement per route, and we cannot.
+
+**`afk/session` and `remote/session.Transcript` are the same store, written
+twice.** Same append-only JSONL, same `O_APPEND|O_CREATE|O_WRONLY` at 0600, same
+16MB scanner bump, same skip-the-bad-line and missing-file-is-empty handling —
+differing only in payload type. They cannot be shared today: `afk` is its own
+module and cannot import `remote/`. Collapsing them means making `afk/session`
+generic over its entry payload and rebuilding `Transcript` on top, which the root
+module can import. Worth doing before a third copy appears; too large to fold
+into this branch. *Open item.*
+
+**Skill discovery runs per message** (§3.5) — a filesystem walk plus a parse of
+every `SKILL.md` on the critical path of every inbound message, because a fresh
+agent is built per message. Small in absolute terms and not yet worth a cache
+with its own invalidation rules, but it is the cost that pays for skills being
+picked up without a restart, and it should be a deliberate choice rather than an
+accident of the construction path.
+
+**`SmartGuideConfig` has no writer.** `LoadSmartGuideConfig()` returns defaults;
+nothing unmarshals the struct, so `Thinking`, `Effort`, `SystemPrompt`,
+`Temperature` and the rest are config surface waiting on a settings UI. In
+particular `ThinkingVisible` — the mode that makes the 💭 render path do
+anything — is currently unreachable in production.
 
 **The minimum cacheable prefix is model-dependent and not monotonic** — 512
 tokens on Opus 5, 1024 on Opus 4.8 and Sonnet 5, 2048 on Opus 4.7, 4096 on

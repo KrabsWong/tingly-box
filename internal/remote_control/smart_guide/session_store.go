@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/sirupsen/logrus"
 
 	"github.com/tingly-dev/tingly-box/afk/session"
@@ -90,56 +89,15 @@ func (s *SessionStore) open(chatID string) (*session.Session, error) {
 	return sess, nil
 }
 
-// Load returns the stored conversation for a chat, or nil if there is none. A
-// read failure is treated as empty (logged, not fatal) so one bad session never
-// blocks the user.
-func (s *SessionStore) Load(chatID string) ([]anthropic.BetaMessageParam, error) {
-	if s == nil {
-		return nil, nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	sess, err := s.open(chatID)
-	if err != nil {
-		logrus.WithError(err).WithField("chatID", chatID).
-			Warn("SmartGuide session read failed, treating as empty")
-		return nil, nil
-	}
-	return sess.Messages(), nil
-}
-
-// Save persists a chat's conversation, appending whatever part of messages is
-// not already logged.
-//
-// Callers hand over the agent's full history, the shape they already had; the
-// log works out the delta. Nothing on disk is rewritten, so an interrupted save
-// can lose at most the turn in flight instead of truncating the file.
-func (s *SessionStore) Save(chatID string, messages []anthropic.BetaMessageParam) error {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	sess, err := s.open(chatID)
-	if err != nil {
-		return err
-	}
-	added, err := sess.AppendNew(messages)
-	if err != nil {
-		return err
-	}
-	logrus.WithFields(logrus.Fields{
-		"chatID": chatID, "appended": added, "total": len(messages),
-	}).Debug("Saved SmartGuide session")
-	return nil
-}
+// There is deliberately no Load or Save here. Callers take the session handle
+// from Open and use it for both: reading is sess.Messages(), and writing is the
+// harness appending each step through it. A store-level Save would be a second
+// writer working from an independently-loaded copy of the same file.
 
 // Clear ends a chat's current Smart Guide session: the live log is archived
 // (renamed with a timestamp suffix) rather than deleted, so /clear deactivates
 // the conversation instead of destroying it — the same "closed, not erased"
-// semantics remote/session.Manager.Close gives @cc sessions. The next Load for
+// semantics remote/session.Manager.Close gives @cc sessions. The next Open for
 // chatID sees no file and starts fresh; the archived log is left on disk.
 func (s *SessionStore) Clear(chatID string) error {
 	if s == nil {
