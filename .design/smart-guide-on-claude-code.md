@@ -48,8 +48,8 @@ essentially impersonating Claude Code already. This makes it the real thing.
 ## Scope of the dependency (clean removal boundary)
 
 `tingly-agentscope` is imported only under:
-- `internal/remote_control/smart_guide/` (10 files)
-- `internal/remote_control/bot/{agent_smart_guide.go,bot_agent.go}` (2 files)
+- `remote/control/smart_guide/` (10 files)
+- `remote/control/bot/{agent_smart_guide.go,bot_agent.go}` (2 files)
 
 Nothing else in the tree depends on it.
 
@@ -157,7 +157,7 @@ Prove the anchor/logical-pwd split end to end before deleting anything.
   what feels right, lock it into the system prompt.
 
 ### Phase 1 — tingly-box MCP server
-- New package (e.g. `internal/remote_control/smart_guide/mcpserver/`) using
+- New package (e.g. `remote/control/smart_guide/mcpserver/`) using
   `mark3labs/mcp-go`, mounted on the existing HTTP server.
 - Three tools: `change_workdir`, `get_status`, `send_file` — handlers call the
   existing `ChatStore` / `SendFile` callbacks.

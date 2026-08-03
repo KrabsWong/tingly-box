@@ -40,29 +40,45 @@ users of the channel.
 
 ## 1.5 Code layout — host and purposes are separate packages
 
-The three-layer model from §2 is mirrored in the package tree (refactor
-2026-07): the host layer knows nothing about any purpose's machinery, and a
-purpose plugs in by implementing `bot.Consumer`.
+The three-layer model from §2 is mirrored in the package tree: the host
+layer knows nothing about any purpose's machinery, and a purpose plugs in
+by implementing `bot.Consumer`. Since the 2026-08 consolidation the whole
+subsystem lives under `remote/` — the runtime/purpose layer moved out of
+`internal/remote_control/` into `remote/control/`, so `remote/` is the
+single home for both the library leaves and the host glue.
 
 ```
-internal/remote_control/bot/             HOST: Manager (lifecycle supervisor),
-                                         Consumer seam, notify consumer,
-                                         BotSetting / ChatStoreInterface /
-                                         SettingsStore, prompt-reply router
-                                         (prompt_reply.go), pairing aliases
-internal/remote_control/remoteagent/     PURPOSE remote_agent: bot.Consumer impl,
-                                         BotHandler (inbound catch-all), slash
-                                         commands + adapter, agent router and
-                                         the @cc/@tb executors, streaming chat
-                                         renderer, file store, test harness
-internal/remote_control/feature/         chat features (action menu, directory
-                                         browser) shared by the purpose layer
+remote/control/bot/             HOST: Manager (lifecycle supervisor),
+                                 Consumer seam, notify consumer,
+                                 BotSetting / Chat (domain type) /
+                                 ChatStoreInterface / SettingsStore,
+                                 prompt-reply router (prompt_reply.go),
+                                 pairing aliases
+remote/control/remoteagent/     PURPOSE remote_agent: bot.Consumer impl,
+                                 BotHandler (inbound catch-all), slash
+                                 commands + adapter, agent router and
+                                 the @cc/@tb executors, streaming chat
+                                 renderer, file store, test harness
+remote/control/feature/         chat features (action menu, directory
+                                 browser) shared by the purpose layer
+remote/control/adapter/         HOST↔MAIN-MODULE BRIDGE: the only place
+                                 internal/data/db types meet remote
+                                 interfaces (persistence.go maps db.Settings
+                                 → binding.BotInfo; settings.go maps
+                                 db.Settings → bot.BotSetting; session_bridge
+                                 holds the agentboot LifecycleStore assertion)
+remote/control/service.go       NewCore: the one call a host makes to stand
+                                 up the session manager + agent service
 ```
 
-The host exports the shared prompt-reply mechanics
-(`bot.HandlePromptCallback` / `bot.HandlePromptTextReply` /
-`bot.ForwardReplyContext`); the standalone (host-less) BotHandler paths in
-`remoteagent` delegate to them, so behavior is identical either way (§6).
+The runtime packages (`bot`, `remoteagent`) import no `internal/` package;
+`internal/data/db` implements `bot.ChatStoreInterface` / `session.SessionStore`
+against the remote-owned domain types directly (the dependency runs
+`db → remote`, never the reverse — same shape as `remote/session`). The host
+exports the shared prompt-reply mechanics (`bot.HandlePromptCallback` /
+`bot.HandlePromptTextReply` / `bot.ForwardReplyContext`); the standalone
+(host-less) BotHandler paths in `remoteagent` delegate to them, so behavior
+is identical either way (§6).
 
 ## 2. The model — resource, surface, purposes
 
@@ -339,7 +355,11 @@ the `notify` consumer name. Remaining debts, with the agreed direction:
 | two `Enabled`s | `Binding.Enabled` | `active` (or `mounted` after schema work) | schema-touching |
 | asymmetric mount defaults | absent → on (remote_agent) / off (notify) | migrate to explicit rows + one uniform default rule | data migration |
 | Scenarios column holds two species | one JSON list | split capabilities vs routes in schema + API | expensive, separate project |
-| package name vs UI name | `internal/remote_control` | `remote_agent` (UI already renamed) | mechanical, wide |
+
+Note: the *package name vs UI name* debt (`internal/remote_control` vs the
+`remote_agent` UI name) is resolved as of the 2026-08 consolidation — the
+runtime layer moved to `remote/control/`, and `remote/` is now the single
+home for the whole subsystem. See §1.5.
 
 Note: the *platform*-compatibility debts inside `control` (per-platform
 keyboard pre-rendering, capability switches, ownership of platform-specific

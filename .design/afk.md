@@ -3,7 +3,7 @@
 > The in-process agent runtime behind Smart Guide (`@tb`). Lives in `afk/`, its
 > own Go module inside the repo.
 >
-> Read this before changing `afk/` or `internal/remote_control/smart_guide/`. It
+> Read this before changing `afk/` or `remote/control/smart_guide/`. It
 > records the decisions that are not visible from the code, and the ones that
 > look wrong until you know what they are protecting against.
 >
