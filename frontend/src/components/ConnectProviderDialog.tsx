@@ -1,4 +1,4 @@
-import {Add, Close, Computer, ContentPaste, Key, Login, Search, Language, Description, Upload} from '@/components/icons';
+import {Add, Close, Cloud, Computer, ContentPaste, Key, Login, Search, Language, Description, Upload} from '@/components/icons';
 import RegionBadge from './RegionBadge';
 import {
     Box,
@@ -16,7 +16,7 @@ import {
     alpha,
 } from '@mui/material';
 import React, {useMemo, useState} from 'react';
-import {type UniqueProvider, useProviderTemplates, searchProviders} from '../services/serviceProviders';
+import {type UniqueProvider, useProviderTemplates, useCloudProviders, searchProviders} from '../services/serviceProviders';
 import ProviderIcon from './ProviderIcon';
 import {FALLBACK_OAUTH_PROVIDERS, type OAuthProvider} from './OAuthDialog';
 
@@ -27,6 +27,7 @@ export type ConnectSelection =
     | {kind: 'key'; provider: UniqueProvider}
     | {kind: 'oauth'; providerId: string}
     | {kind: 'local'; provider: UniqueProvider}
+    | {kind: 'cloud'; presetId: string}
     | {kind: 'custom'}
     | {kind: 'import'}
     | {kind: 'paste'};
@@ -47,13 +48,14 @@ interface ProviderListContentProps {
     wide?: boolean; // If true, use wider grid layout (2-3 columns)
 }
 
-type Accent = 'custom' | 'oauth' | 'key' | 'local';
+type Accent = 'custom' | 'oauth' | 'key' | 'local' | 'cloud';
 
 const ACCENT: Record<Accent, string> = {
     custom: 'secondary.main',
     oauth: 'success.main',
     key: 'primary.main',
     local: 'warning.main',
+    cloud: 'info.main',
 };
 
 // Search terms that keep the "Custom" section visible. Module-level so it
@@ -81,7 +83,7 @@ const SectionHeader: React.FC<{icon: React.ReactNode; title: string; count?: num
                     width: 26, height: 26, borderRadius: '50%',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color,
-                    bgcolor: (theme) => alpha(theme.palette[accent === 'key' ? 'primary' : accent === 'oauth' ? 'success' : accent === 'local' ? 'warning' : 'secondary'].main, 0.12),
+                    bgcolor: (theme) => alpha(theme.palette[accent === 'key' ? 'primary' : accent === 'oauth' ? 'success' : accent === 'local' ? 'warning' : accent === 'cloud' ? 'info' : 'secondary'].main, 0.12),
                 }}
             >
                 {icon}
@@ -102,7 +104,7 @@ const ProviderCard: React.FC<{
     meta: string;
     badge: {
         label: string;
-        tone: 'primary' | 'success' | 'warning' | 'error';
+        tone: 'primary' | 'success' | 'warning' | 'error' | 'info';
     };
     onClick: () => void;
     website?: string;
@@ -283,6 +285,7 @@ export const ProviderListContent: React.FC<ProviderListContentProps> = ({
     wide = false,
 }) => {
     const keyProviders = useProviderTemplates();
+    const cloudProviders = useCloudProviders();
 
     const oauthProviders = useMemo(
         () => FALLBACK_OAUTH_PROVIDERS.filter(
@@ -299,6 +302,7 @@ export const ProviderListContent: React.FC<ProviderListContentProps> = ({
         ? oauthProviders.filter((p) => `${p.name} ${p.displayName} ${p.id}`.toLowerCase().includes(needle.toLowerCase()))
         : oauthProviders;
     const showCustom = !needle || CUSTOM_SEARCH_TERMS.some(s => s.toLowerCase().includes(needle.toLowerCase()));
+    const filteredCloud = needle ? searchProviders(cloudProviders, needle) : cloudProviders;
 
     // Group key providers by region (CN vs Global vs Self-hosted)
     const {cnKeyProviders, globalKeyProviders, selfHostedProviders} = useMemo(() => {
@@ -322,11 +326,12 @@ export const ProviderListContent: React.FC<ProviderListContentProps> = ({
     const selfHostedBadge = {label: 'Self-hosted', tone: 'warning'} as const;
     const cnBadge = {label: 'CN', tone: 'error'} as const;
     const globalBadge = {label: 'Global', tone: 'primary'} as const;
+    const cloudBadge = {label: 'Cloud', tone: 'info'} as const;
 
     const protocolMeta = (p: UniqueProvider) =>
         [p.supportsOpenAI && 'OpenAI', p.supportsAnthropic && 'Anthropic'].filter(Boolean).join(' · ') || 'Custom API';
 
-    const nothing = filteredKey.length === 0 && filteredOAuth.length === 0 && selfHostedProviders.length === 0 && !showCustom;
+    const nothing = filteredKey.length === 0 && filteredOAuth.length === 0 && selfHostedProviders.length === 0 && filteredCloud.length === 0 && !showCustom;
 
     return (
         <Box>
@@ -417,6 +422,27 @@ export const ProviderListContent: React.FC<ProviderListContentProps> = ({
                                     badge={oauthBadge}
                                     showDetails={showDetails}
                                     onClick={() => onSelect({kind: 'oauth', providerId: p.id})}
+                                />
+                            ))}
+                        </CardGrid>
+                    </>
+                )}
+
+                {filteredCloud.length > 0 && (
+                    <>
+                        <SectionHeader icon={<Cloud fontSize="small"/>} title="Cloud" count={filteredCloud.length} accent="cloud"/>
+                        <CardGrid wide={wide}>
+                            {filteredCloud.map((p) => (
+                                <ProviderCard
+                                    key={`cloud-${p.id}`}
+                                    icon={<ProviderIcon identifier={p.icon || p.id} size={26}/>}
+                                    name={p.alias || p.name}
+                                    meta={p.description || ''}
+                                    badge={cloudBadge}
+                                    website={showDetails ? p.website : undefined}
+                                    apiDoc={showDetails ? p.apiDoc : undefined}
+                                    showDetails={showDetails}
+                                    onClick={() => onSelect({kind: 'cloud', presetId: p.id})}
                                 />
                             ))}
                         </CardGrid>

@@ -71,17 +71,24 @@ func NewGoogleClient(provider *typ.Provider, model string, sessionID typ.Session
 // http.Client. Provider-specific clients (Gemini, Antigravity) use this to
 // inject their round tripper without going through the generic transport path.
 func newGoogleClientFromHTTPClient(provider *typ.Provider, httpClient *http.Client) (*GoogleClient, error) {
-	httpOptions := genai.HTTPOptions{
-		BaseURL: provider.APIBase,
-	}
-
 	config := &genai.ClientConfig{
-		APIKey:      provider.GetAccessToken(),
-		HTTPOptions: httpOptions,
-		HTTPClient:  httpClient,
+		APIKey: provider.GetAccessToken(),
+		HTTPOptions: genai.HTTPOptions{
+			BaseURL: provider.APIBase,
+		},
+		HTTPClient: httpClient,
 	}
 
 	ctx := context.Background()
+
+	// Vertex-Gemini providers (gcp_sa) switch the genai backend to Vertex AI
+	// and authenticate with the service account instead of an API key.
+	if provider.AuthType == typ.AuthTypeGCPVertex {
+		if err := applyVertexToGenaiConfig(ctx, provider, config); err != nil {
+			return nil, err
+		}
+	}
+
 	client, err := genai.NewClient(ctx, config)
 	if err != nil {
 		return nil, err

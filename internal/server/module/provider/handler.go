@@ -7,6 +7,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 
+	"github.com/tingly-dev/tingly-box/ai"
 	"github.com/tingly-dev/tingly-box/internal/constant"
 	"github.com/tingly-dev/tingly-box/internal/dataio"
 	"github.com/tingly-dev/tingly-box/internal/obs"
@@ -35,6 +37,11 @@ func NewHandler(cfg *config.Config, qm providerquota.Manager) *Handler {
 	return &Handler{config: cfg, quotaManager: qm}
 }
 
+// badRequest writes the module's standard 400 error envelope.
+func badRequest(c *gin.Context, format string, args ...any) {
+	c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": fmt.Sprintf(format, args...)})
+}
+
 // maskForResponse masks sensitive data and returns a safe ProviderResponse.
 func maskForResponse(p *typ.Provider) ProviderResponse {
 	resp := ProviderResponse{
@@ -52,12 +59,12 @@ func maskForResponse(p *typ.Provider) ProviderResponse {
 	}
 	// Only surface vmodel_detail on vmodel providers so a stale blob on a
 	// flipped-auth row can never leak via the masked response.
-	if p.AuthType == typ.AuthTypeVirtual {
+	if p.IsVirtual() {
 		resp.VModelDetail = p.VModelDetail
 	}
 
-	switch p.AuthType {
-	case typ.AuthTypeOAuth:
+	switch {
+	case p.IsOAuth():
 		if p.OAuthDetail != nil {
 			resp.OAuthDetail = &typ.OAuthDetail{
 				AccessToken:  p.OAuthDetail.AccessToken,
@@ -67,7 +74,16 @@ func maskForResponse(p *typ.Provider) ProviderResponse {
 				ExpiresAt:    p.OAuthDetail.ExpiresAt,
 			}
 		}
-	case typ.AuthTypeAPIKey, "":
+	case p.IsMultiFieldCredential():
+		// Surface the credential fields so the edit form can round-trip them.
+		// Consistent with Token above, config and secret values are returned to
+		// the local admin UI in full (masking both is a future hardening).
+		// Clone: the response DTO must never alias the store-owned live map,
+		// or a future response-side redaction would corrupt stored secrets.
+		if p.Credential != nil {
+			resp.Credential = maps.Clone(p.Credential.Fields)
+		}
+	case p.IsAPIKey():
 		resp.Token = p.Token
 	}
 
@@ -114,12 +130,6 @@ func (h *Handler) CreateProvider(c *gin.Context) {
 		return
 	}
 
-	// Custom validation: token is required unless NoKeyRequired is true.
-	if !req.NoKeyRequired && req.Token == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Token is required when No Key Required is false"})
-		return
-	}
-
 	// Connectivity verification is intentionally NOT enforced here: provider
 	// keys can be added regardless of probe results (some providers don't
 	// support every endpoint). Connection testing is available separately as
@@ -128,11 +138,46 @@ func (h *Handler) CreateProvider(c *gin.Context) {
 	if !req.Enabled {
 		req.Enabled = true
 	}
-	if req.APIStyle == "" {
-		req.APIStyle = "openai"
-	}
 	if req.AuthType == "" {
 		req.AuthType = string(typ.AuthTypeAPIKey)
+	}
+
+	// Reject unknown auth types up front so a typo can't create an inert
+	// provider that copies an arbitrary auth_type through verbatim.
+	authType := typ.AuthType(req.AuthType)
+	if !authType.IsValid() {
+		badRequest(c, "Unsupported auth_type %q", req.AuthType)
+		return
+	}
+
+	// Default api_style after the auth type is known: cloud auth types with a
+	// single routable style get that style, everything else keeps "openai".
+	if req.APIStyle == "" {
+		if styles := ai.AllowedAPIStyles(authType); len(styles) == 1 {
+			req.APIStyle = styles[0]
+		} else {
+			req.APIStyle = "openai"
+		}
+	}
+	// Reject pairs the client layer can't dispatch (e.g. aws_sigv4 + openai):
+	// they would route to a generic client that sends unauthenticated requests.
+	if err := ai.ValidateCredentialAPIStyle(authType, req.APIStyle); err != nil {
+		badRequest(c, "%s", err)
+		return
+	}
+
+	// Credential requirements differ by auth type: multi-field cloud creds
+	// (aws_sigv4/azure_key/gcp_sa) validate the bundle; every other type keeps
+	// the pre-existing rule — a token is required unless NoKeyRequired.
+	if authType.IsMultiFieldCredential() {
+		req.Credential = ai.NormalizeCredential(req.Credential)
+		if err := ai.ValidateCredential(authType, req.Credential); err != nil {
+			badRequest(c, "%s", err)
+			return
+		}
+	} else if !req.NoKeyRequired && req.Token == "" {
+		badRequest(c, "Token is required when No Key Required is false")
+		return
 	}
 
 	// Dual-mode constraints: optional dual base URLs are only valid for
@@ -174,8 +219,15 @@ func (h *Handler) CreateProvider(c *gin.Context) {
 		NoKeyRequired:    req.NoKeyRequired,
 		Enabled:          true, // always make new provider enabled
 		ProxyURL:         req.ProxyURL,
-		AuthType:         typ.AuthType(req.AuthType),
+		AuthType:         authType,
 		Timeout:          constant.DefaultRequestTimeout,
+	}
+
+	// Attach the multi-field credential bundle and clear any stray token so the
+	// two credential shapes never coexist on one row.
+	if authType.IsMultiFieldCredential() {
+		p.Credential = &typ.CredentialBundle{Fields: req.Credential}
+		p.Token = ""
 	}
 
 	if err = h.config.AddProvider(p); err != nil {
@@ -287,8 +339,27 @@ func (h *Handler) UpdateProvider(c *gin.Context) {
 	if req.APIBaseAnthropic != nil {
 		p.APIBaseAnthropic = *req.APIBaseAnthropic
 	}
-	if req.Token != nil && *req.Token != "" {
+	// Multi-field providers authenticate via the credential bundle only; ignore
+	// a stray token so the two credential shapes never coexist on one row.
+	if req.Token != nil && *req.Token != "" && !p.IsMultiFieldCredential() {
 		p.Token = *req.Token
+	}
+	// Replace the whole credential bundle when provided. The edit UI resends the
+	// complete map (the read path returns it in full), so a non-empty map is a
+	// full replacement; a nil map leaves the stored credentials untouched.
+	if p.IsMultiFieldCredential() && len(req.Credential) > 0 {
+		normalized := ai.NormalizeCredential(req.Credential)
+		if err := ai.ValidateCredential(p.AuthType, normalized); err != nil {
+			badRequest(c, "%s", err)
+			return
+		}
+		p.Credential = &typ.CredentialBundle{Fields: normalized}
+	}
+	// Reject auth_type × api_style pairs the client layer can't dispatch,
+	// post-merge so a PATCH can't flip a cloud provider onto an unroutable style.
+	if err := ai.ValidateCredentialAPIStyle(p.AuthType, string(p.APIStyle)); err != nil {
+		badRequest(c, "%s", err)
+		return
 	}
 	if req.NoKeyRequired != nil {
 		p.NoKeyRequired = *req.NoKeyRequired

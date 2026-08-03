@@ -103,7 +103,6 @@ func (ph *ProtocolHandler) anthropicCountTokens(c *gin.Context, provider *typ.Pr
 	c.Set(ContextKeyModel, model)
 
 	apiStyle := provider.APIStyle
-	wrapper := ph.deps.ClientPool.GetAnthropicClient(context.Background(), provider, model)
 	timeout := time.Duration(provider.Timeout) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -118,6 +117,19 @@ func (ph *ProtocolHandler) anthropicCountTokens(c *gin.Context, provider *typ.Pr
 		})
 		return
 	case protocol.APIStyleAnthropic:
+		// Backends without a count_tokens endpoint (Bedrock) get the local
+		// estimate, same as the openai/google styles.
+		if !client.SupportsAnthropicCountTokens(provider) {
+			ph.anthropicCountTokensViaTiktoken(c, req)
+			return
+		}
+		wrapper := ph.deps.ClientPool.GetAnthropicClient(context.Background(), provider, model)
+		if wrapper == nil {
+			// Client construction failed (e.g. a malformed stored credential);
+			// fall back to local estimation rather than panicking.
+			ph.anthropicCountTokensViaTiktoken(c, req)
+			return
+		}
 		ph.anthropicCountTokensViaAPI(c, ctx, wrapper, req)
 	case protocol.APIStyleOpenAI, protocol.APIStyleGoogle:
 		ph.anthropicCountTokensViaTiktoken(c, req)

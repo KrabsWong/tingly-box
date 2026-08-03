@@ -1,5 +1,6 @@
 import api from "@/services/api.ts";
 import React from "react";
+import {isCloudAuthType} from "@/components/cloud/cloudCredentialSchema";
 
 export interface ServiceProvider {
     id: string;
@@ -18,10 +19,11 @@ export interface ServiceProvider {
     pricing_doc: string;
     base_url_openai?: string;
     base_url_anthropic?: string;
+    api_style?: string; // Explicit protocol ("openai" | "anthropic" | "google"); cloud templates set this
     auth_type?: string;
     oauth_provider?: string;
-    type?: string;
     icon?: string; // Icon identifier for Lobe Icons (e.g., "openai", "anthropic")
+    type?: string;  // Provider type: "official" | "reseller" | "self-hosted" | "cloud" | ...
 }
 
 export interface ServiceProviderOption {
@@ -161,6 +163,9 @@ export interface UniqueProvider {
     icon?: string; // Icon identifier for Lobe Icons
     region?: 'cn' | 'global' | 'self-hosted'; // Derived region grouping for UI
     type?: string; // Provider type: "official" | "reseller" | "self-hosted" | etc.
+    authType?: string; // "aws_sigv4" | "gcp_sa" | "azure_key" | ...; carried for cloud grouping
+    apiStyle?: string; // Explicit protocol for cloud providers ("anthropic" | "openai" | "google")
+    description?: string; // Short description, used as card subtitle for cloud providers
 }
 
 // Heuristic classification of a provider into "cn" (China) or "global".
@@ -180,46 +185,72 @@ function classifyRegion(sp: ServiceProvider): 'cn' | 'global' | 'self-hosted' {
     return 'global';
 }
 
+// A template belongs in the Cloud picker section when it is typed "cloud" or
+// carries a known multi-field auth type. Checking both means a future cloud
+// template (e.g. azure_entra) marked type:"cloud" never silently lands in the
+// API-key list, even before the frontend learns its credential schema.
+function isCloudTemplate(sp: ServiceProvider): boolean {
+    return sp.type === 'cloud' || isCloudAuthType(sp.auth_type);
+}
+
+// Shared ServiceProvider → UniqueProvider mapping used by both picker lists.
+function toUniqueProvider(sp: ServiceProvider): UniqueProvider {
+    return {
+        id: sp.id,
+        name: sp.name,
+        alias: sp.alias,
+        supportsOpenAI: !!sp.base_url_openai,
+        supportsAnthropic: !!sp.base_url_anthropic,
+        baseUrlOpenAI: sp.base_url_openai,
+        baseUrlAnthropic: sp.base_url_anthropic,
+        website: sp.website,
+        apiDoc: sp.api_doc,
+        icon: sp.icon,
+        region: classifyRegion(sp),
+        type: sp.type,
+        authType: sp.auth_type,
+        apiStyle: sp.api_style,
+        description: sp.description,
+    };
+}
+
+function sortByDisplayName(providers: UniqueProvider[]): UniqueProvider[] {
+    providers.sort((a, b) => (a.alias || a.name).localeCompare(b.alias || b.name));
+    return providers;
+}
+
 // Get all unique providers (not split by API style)
 export function getAllUniqueProviders(): UniqueProvider[] {
     const seen = new Map<string, UniqueProvider>();
-    const serviceProviders = getServiceProvidersSync();
 
-    Object.entries(serviceProviders).forEach(([key, provider]: [string, any]) => {
+    Object.values(getServiceProvidersSync()).forEach((provider) => {
         const sp = provider as ServiceProvider;
 
-        // Skip OAuth providers - they should be added via the OAuth dialog, not API key dialog
-        if (sp.oauth_provider) {
+        // OAuth and cloud-credential templates have their own picker sections
+        // and dialogs; neither belongs in the protocol-slot API-key list.
+        if (sp.oauth_provider || isCloudTemplate(sp)) {
             return;
         }
 
         // Use provider.id as the dedup key. When the source dictionary has
         // two entries with the same id (e.g. a coding-plan variant keyed
         // differently but sharing the logical id), the first one seen wins.
-        if (seen.has(sp.id)) {
-            return;
+        if (!seen.has(sp.id)) {
+            seen.set(sp.id, toUniqueProvider(sp));
         }
-
-        seen.set(sp.id, {
-            id: sp.id,
-            name: sp.name,
-            alias: sp.alias,
-            supportsOpenAI: !!sp.base_url_openai,
-            supportsAnthropic: !!sp.base_url_anthropic,
-            baseUrlOpenAI: sp.base_url_openai,
-            baseUrlAnthropic: sp.base_url_anthropic,
-            website: sp.website,
-            apiDoc: sp.api_doc,
-            icon: sp.icon,
-            region: classifyRegion(sp),
-            type: sp.type,
-        });
     });
 
-    // Sort by display name
-    const providers = Array.from(seen.values());
-    providers.sort((a, b) => (a.alias || a.name).localeCompare(b.alias || b.name));
-    return providers;
+    return sortByDisplayName(Array.from(seen.values()));
+}
+
+// Cloud-credential providers (Bedrock / Vertex / Azure) for the "Cloud" picker
+// section; carries authType, apiStyle and description so the cloud dialog can
+// build the right credential form.
+export function getCloudProviders(): UniqueProvider[] {
+    const out = Object.values(getServiceProvidersSync())
+        .filter((sp) => isCloudTemplate(sp as ServiceProvider))
+        .map((sp) => toUniqueProvider(sp as ServiceProvider));
+    return sortByDisplayName(out);
 }
 
 // Unified search function for provider templates.
@@ -243,23 +274,32 @@ export function searchProviders(providers: UniqueProvider[], query: string): Uni
             // Additional discovery fields — users often search by these
             provider.icon || '',
             provider.type || '',
+            provider.description || '',
+            provider.authType || '',
         ];
         return fields.some(f => f.toLowerCase().includes(needle));
     });
 }
 
-// React hook for provider templates
-// This ensures components re-render when providers are loaded
-export function useProviderTemplates(): UniqueProvider[] {
+// Re-render the calling component when the provider templates load/refresh,
+// then return the selector's current value. Shared by all template hooks so
+// the subscription lifecycle exists once.
+function useProviderSelector<T>(select: () => T): T {
     const [, forceUpdate] = React.useReducer(x => x + 1, 0);
 
     React.useEffect(() => {
-        // Subscribe to provider updates
-        const unsubscribe = subscribeToProviders(() => {
-            forceUpdate();
-        });
-        return unsubscribe;
+        return subscribeToProviders(forceUpdate);
     }, []);
 
-    return getAllUniqueProviders();
+    return select();
+}
+
+// React hook for provider templates (API-key picker list).
+export function useProviderTemplates(): UniqueProvider[] {
+    return useProviderSelector(getAllUniqueProviders);
+}
+
+// Reactive accessor for cloud-credential provider templates (Cloud picker section).
+export function useCloudProviders(): UniqueProvider[] {
+    return useProviderSelector(getCloudProviders);
 }

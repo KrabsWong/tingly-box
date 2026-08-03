@@ -72,7 +72,7 @@ func (p *ClientPool) GetOpenAIClient(ctx context.Context, provider *typ.Provider
 	var err error
 
 	// Check if this is a Codex OAuth provider
-	if provider.AuthType == typ.AuthTypeOAuth && provider.OAuthDetail != nil {
+	if provider.IsOAuth() && provider.OAuthDetail != nil {
 		switch issuer := provider.OAuthDetail.GetIssuer(); issuer {
 		case ai.IssuerCodex:
 			client, err = NewCodexClient(provider, model, sessionID)
@@ -89,6 +89,13 @@ func (p *ClientPool) GetOpenAIClient(ctx context.Context, provider *typ.Provider
 			}
 		default:
 			logrus.Errorf("Unsupported oauth issuer: %s", issuer)
+			return nil
+		}
+	} else if provider.AuthType == typ.AuthTypeAzureKey {
+		// GPT / o-series on Azure OpenAI (api-key auth).
+		client, err = NewAzureClient(provider, model, sessionID)
+		if err != nil {
+			logrus.WithContext(ctx).Errorf("Failed to create Azure client for provider %s: %v", provider.Name, err)
 			return nil
 		}
 	} else {
@@ -133,18 +140,21 @@ func (p *ClientPool) GetAnthropicClient(ctx context.Context, provider *typ.Provi
 	var err error
 
 	// Check if this is a Claude Code OAuth provider
-	if provider.AuthType == typ.AuthTypeOAuth && provider.OAuthDetail != nil && provider.OAuthDetail.GetIssuer() == ai.IssuerClaudeCode {
+	switch {
+	case provider.IsClaudeCodeProvider():
 		client, err = NewClaudeClient(ctx, provider, model, sessionID)
-		if err != nil {
-			logrus.WithContext(ctx).Errorf("Failed to create Claude client for provider %s: %v", provider.Name, err)
-			return nil
-		}
-	} else {
+	case provider.AuthType == typ.AuthTypeAWSSigV4:
+		// Claude on Amazon Bedrock (SigV4 / Bedrock bearer token).
+		client, err = NewBedrockClient(provider, model, sessionID)
+	case provider.AuthType == typ.AuthTypeGCPVertex:
+		// Claude on GCP Vertex AI (service-account OAuth2).
+		client, err = NewVertexAnthropicClient(provider, model, sessionID)
+	default:
 		client, err = NewAnthropicClient(provider, model, sessionID)
-		if err != nil {
-			logrus.WithContext(ctx).Errorf("Failed to create Anthropic client for provider %s: %v", provider.Name, err)
-			return nil
-		}
+	}
+	if err != nil {
+		logrus.WithContext(ctx).Errorf("Failed to create Anthropic client for provider %s: %v", provider.Name, err)
+		return nil
 	}
 
 	if p.recordSink != nil && p.recordSink.IsEnabled() {
@@ -196,21 +206,19 @@ func (p *ClientPool) GetGoogleClient(ctx context.Context, provider *typ.Provider
 // forwarding code keeps working unchanged — the provider-specific transport
 // is already baked into the embedded client.
 func newGoogleClientForProvider(provider *typ.Provider, model string, sessionID typ.SessionID) (*GoogleClient, error) {
-	if provider.AuthType == typ.AuthTypeOAuth && provider.OAuthDetail != nil {
-		switch provider.OAuthDetail.GetIssuer() {
-		case ai.IssuerGemini:
-			c, err := NewGeminiClient(provider, model, sessionID)
-			if err != nil {
-				return nil, err
-			}
-			return c.GoogleClient, nil
-		case ai.IssuerAntigravity:
-			c, err := NewAntigravityClient(provider, model, sessionID)
-			if err != nil {
-				return nil, err
-			}
-			return c.GoogleClient, nil
+	switch provider.OAuthIssuer() {
+	case ai.IssuerGemini:
+		c, err := NewGeminiClient(provider, model, sessionID)
+		if err != nil {
+			return nil, err
 		}
+		return c.GoogleClient, nil
+	case ai.IssuerAntigravity:
+		c, err := NewAntigravityClient(provider, model, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		return c.GoogleClient, nil
 	}
 	return NewGoogleClient(provider, model, sessionID)
 }

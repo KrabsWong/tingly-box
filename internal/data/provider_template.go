@@ -94,6 +94,13 @@ type ProviderTemplate struct {
 	BaseURLOpenAI    string `json:"base_url_openai,omitempty"`
 	BaseURLAnthropic string `json:"base_url_anthropic,omitempty"`
 
+	// APIStyle explicitly declares the provider protocol ("openai" | "anthropic"
+	// | "google"). Optional: when empty the style is inferred from which base URL
+	// is set. Cloud templates that share a canonical_domain but differ by model
+	// family (Vertex Claude vs Vertex Gemini) set this so template matching can
+	// disambiguate them by the provider's APIStyle.
+	APIStyle string `json:"api_style,omitempty"`
+
 	// CHANGED: Models now include context/max_output directly (Schema V2)
 	Models []ModelInfo `json:"models"`
 
@@ -253,6 +260,22 @@ func (tm *TemplateManager) FetchTemplates(ctx context.Context) (*ProviderTemplat
 	return tm.fetchFromHTTP(ctx)
 }
 
+// setExternalTemplates is the single write seam for externally sourced
+// registries (GitHub, its disk cache, file://). It merges embedded-only
+// templates in (see mergeEmbeddedOnly) so every ingestion path preserves the
+// "templates ⊇ embedded ids" invariant, and only adopts capability schemas
+// when the external source actually carries some.
+func (tm *TemplateManager) setExternalTemplates(registry *ProviderTemplateRegistry) {
+	tm.mu.Lock()
+	tm.templates = tm.mergeEmbeddedOnly(registry.Providers)
+	if registry.CapabilitySchemas != nil {
+		tm.capabilitySchemas = registry.CapabilitySchemas
+	}
+	tm.version = registry.Version
+	tm.lastUpdated = time.Now()
+	tm.mu.Unlock()
+}
+
 // fetchFromFile loads templates from a local file
 func (tm *TemplateManager) fetchFromFile(filePath string) (*ProviderTemplateRegistry, error) {
 	data, err := os.ReadFile(filePath)
@@ -265,15 +288,10 @@ func (tm *TemplateManager) fetchFromFile(filePath string) (*ProviderTemplateRegi
 		return nil, fmt.Errorf("failed to parse template JSON: %w", err)
 	}
 
-	tm.mu.Lock()
-	tm.templates = registry.Providers
-	tm.capabilitySchemas = registry.CapabilitySchemas
-	tm.version = registry.Version
-	tm.lastUpdated = time.Now()
+	tm.setExternalTemplates(&registry)
 	tm.sourceMu.Lock()
 	tm.source = TemplateSourceLocal
 	tm.sourceMu.Unlock()
-	tm.mu.Unlock()
 
 	return &registry, nil
 }
@@ -340,13 +358,12 @@ func (tm *TemplateManager) fetchFromHTTP(ctx context.Context) (*ProviderTemplate
 		return nil, fmt.Errorf("failed to parse registry JSON: %w", err)
 	}
 
-	// Update templates storage
-	tm.mu.Lock()
-	tm.templates = registry.Providers
-	tm.capabilitySchemas = registry.CapabilitySchemas
-	tm.lastUpdated = time.Now()
-	tm.version = registry.Version
-	tm.mu.Unlock()
+	// Persist the pure remote registry before merging: the cache must never
+	// contain this binary's embedded entries, or a later binary's embedded
+	// fixes would lose to them until the cache expires.
+	_ = tm.saveCache(&registry)
+
+	tm.setExternalTemplates(&registry)
 
 	return &registry, nil
 }
@@ -395,9 +412,9 @@ func (tm *TemplateManager) loadCache() (*ProviderTemplateRegistry, error) {
 func (tm *TemplateManager) saveCache(registry *ProviderTemplateRegistry) error {
 	cacheFile := filepath.Join(tm.cachePath, TemplateCacheFileName)
 
-	tm.mu.RLock()
+	tm.etagMu.RLock()
 	etag := tm.etag
-	tm.mu.RUnlock()
+	tm.etagMu.RUnlock()
 
 	cacheData := TemplateCacheData{
 		Registry: *registry,
@@ -459,23 +476,17 @@ func (tm *TemplateManager) Initialize(ctx context.Context) error {
 			cachedRegistry, err := tm.loadCache()
 			if err == nil && cachedRegistry != nil {
 				// Cache hit - use cached templates
-				tm.mu.Lock()
-				tm.templates = cachedRegistry.Providers
-				tm.lastUpdated = time.Now()
-				tm.version = cachedRegistry.Version
-				tm.mu.Unlock()
+				tm.setExternalTemplates(cachedRegistry)
 
 				tm.sourceMu.Lock()
 				tm.source = TemplateSourceGitHub // Loaded from cache, but originally from GitHub
 				tm.sourceMu.Unlock()
 				return nil
 			}
-			// Cache miss or expired - try GitHub
-			registry, err := tm.FetchTemplates(ctx)
+			// Cache miss or expired - try GitHub. fetchFromHTTP persists the
+			// pure remote registry to the cache itself.
+			_, err = tm.FetchTemplates(ctx)
 			if err == nil {
-				// GitHub fetch successful - save to cache
-				_ = tm.saveCache(registry) // Ignore save errors, we have the data
-
 				tm.sourceMu.Lock()
 				tm.source = TemplateSourceGitHub
 				tm.sourceMu.Unlock()
@@ -490,6 +501,25 @@ func (tm *TemplateManager) Initialize(ctx context.Context) error {
 		tm.sourceMu.Unlock()
 		return nil
 	}
+}
+
+// mergeEmbeddedOnly returns a new map combining an externally sourced set
+// (GitHub registry or its disk cache) with this binary's embedded templates.
+// External entries win on id collision, but templates that ship only with this
+// binary — e.g. the cloud presets a new feature depends on — must stay visible
+// even when the remote registry predates them. The input is not mutated: the
+// external set (and hence the disk cache built from it) stays pure remote
+// content, so a newer binary's embedded fixes are never shadowed by embedded
+// values a previous binary laundered into the cache. Callers must hold tm.mu.
+func (tm *TemplateManager) mergeEmbeddedOnly(external map[string]*ProviderTemplate) map[string]*ProviderTemplate {
+	merged := make(map[string]*ProviderTemplate, len(external)+len(tm.embedded))
+	for id, tmpl := range tm.embedded {
+		merged[id] = deepCopyTemplate(tmpl)
+	}
+	for id, tmpl := range external {
+		merged[id] = tmpl
+	}
+	return merged
 }
 
 // loadEmbeddedTemplates loads templates from embedded JSON file into both templates and embedded
@@ -531,9 +561,12 @@ func ValidateTemplate(tmpl *ProviderTemplate) error {
 	if tmpl.Name == "" {
 		return fmt.Errorf("template name is required")
 	}
-	// OAuth templates (auth_type == "oauth") don't require base_url
-	// Non-OAuth templates must have at least one base URL
-	if tmpl.AuthType != "oauth" && tmpl.BaseURLOpenAI == "" && tmpl.BaseURLAnthropic == "" {
+	// OAuth templates (auth_type == "oauth") and cloud multi-field credential
+	// templates (aws_sigv4/gcp_sa/azure_key) don't require a base URL — their
+	// endpoint is derived from the credential (region/project/endpoint) at
+	// connect time. Every other template must carry at least one base URL.
+	isCloud := typ.AuthType(tmpl.AuthType).IsMultiFieldCredential()
+	if tmpl.AuthType != "oauth" && !isCloud && tmpl.BaseURLOpenAI == "" && tmpl.BaseURLAnthropic == "" {
 		return fmt.Errorf("at least one base URL is required for non-OAuth templates")
 	}
 	// OAuth templates must have oauth_provider field set
@@ -543,32 +576,49 @@ func ValidateTemplate(tmpl *ProviderTemplate) error {
 	return nil
 }
 
-// findTemplateByProvider finds a matching template for the given provider.
-// For OAuth providers, it matches by OAuthDetail.ProviderType against template.OAuthProvider.
-// For API key providers, it matches by APIBase against template canonical_domain or base URLs based on APIStyle.
+// findTemplateByProvider finds a matching template for the given provider,
+// searching the active (possibly remote) template set with embedded fallback.
+// OAuth providers match by OAuthDetail.Issuer; multi-field cloud providers by
+// auth_type + api_style; API-key providers by APIBase against canonical_domain
+// or base URLs.
 func (tm *TemplateManager) findTemplateByProvider(provider *typ.Provider) *ProviderTemplate {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
+	return matchProviderTemplate(provider, tm.searchTemplates)
+}
 
+// matchProviderTemplate holds the provider→template matching rules once; the
+// search parameter selects the template set (active vs embedded-only).
+func matchProviderTemplate(provider *typ.Provider, search func(func(*ProviderTemplate) bool) *ProviderTemplate) *ProviderTemplate {
 	// OAuth providers: match by OAuthProvider only, no fallback
-	if provider.AuthType == typ.AuthTypeOAuth && provider.OAuthDetail != nil {
+	if provider.IsOAuth() && provider.OAuthDetail != nil {
 		issuer := provider.OAuthDetail.Issuer
-		return tm.searchTemplates(func(tmpl *ProviderTemplate) bool {
+		return search(func(tmpl *ProviderTemplate) bool {
 			return tmpl.OAuthProvider == string(issuer)
 		})
 	}
 
+	// Multi-field cloud providers (Bedrock/Vertex/Azure): match by identity —
+	// auth_type plus api_style — not by URL. The credential-derived host varies
+	// by region, and Vertex multi-regional hosts (aiplatform.us.rep.googleapis.com)
+	// don't even contain the canonical domain.
+	if provider.IsMultiFieldCredential() {
+		return search(cloudTemplateMatcher(provider))
+	}
+
 	// API key providers: match by APIBase based on APIStyle
-	apiBase := provider.APIBase
 	// BUGFIX: ignore all "/" in right to make it consistent
-	apiBase = strings.TrimRight(apiBase, "/")
+	apiBase := strings.TrimRight(provider.APIBase, "/")
 	if apiBase == "" {
 		return nil
 	}
 
-	// NEW: Try matching by canonical_domain first (Schema V2)
-	if result := tm.searchTemplates(func(tmpl *ProviderTemplate) bool {
-		return tmpl.CanonicalDomain != "" && strings.Contains(apiBase, tmpl.CanonicalDomain)
+	// Try matching by canonical_domain first (Schema V2). When a template
+	// declares an explicit APIStyle it must also match the provider's style so
+	// the right model family is chosen.
+	if result := search(func(tmpl *ProviderTemplate) bool {
+		return tmpl.CanonicalDomain != "" && strings.Contains(apiBase, tmpl.CanonicalDomain) &&
+			(tmpl.APIStyle == "" || tmpl.APIStyle == string(provider.APIStyle))
 	}); result != nil {
 		return result
 	}
@@ -576,28 +626,33 @@ func (tm *TemplateManager) findTemplateByProvider(provider *typ.Provider) *Provi
 	// Fallback: Determine which base URL field to match based on APIStyle
 	switch provider.APIStyle {
 	case protocol.APIStyleAnthropic:
-		return tm.searchTemplates(func(tmpl *ProviderTemplate) bool {
+		return search(func(tmpl *ProviderTemplate) bool {
 			return tmpl.BaseURLAnthropic == apiBase
 		})
-	case protocol.APIStyleOpenAI:
-		fallthrough
 	default:
-		return tm.searchTemplates(func(tmpl *ProviderTemplate) bool {
+		return search(func(tmpl *ProviderTemplate) bool {
 			return tmpl.BaseURLOpenAI == apiBase
 		})
 	}
 }
 
-// searchTemplates searches for a template by matcher function in both templates and embedded maps
-func (tm *TemplateManager) searchTemplates(matcher func(*ProviderTemplate) bool) *ProviderTemplate {
-	// Search in current templates first
-	for _, tmpl := range tm.templates {
-		if matcher(tmpl) {
-			return tmpl
-		}
+// cloudTemplateMatcher matches a multi-field cloud provider to its template by
+// auth_type, with api_style disambiguating templates that share an auth type
+// (Vertex Claude vs Gemini).
+func cloudTemplateMatcher(provider *typ.Provider) func(*ProviderTemplate) bool {
+	return func(tmpl *ProviderTemplate) bool {
+		return tmpl.AuthType == string(provider.AuthType) &&
+			(tmpl.APIStyle == "" || tmpl.APIStyle == string(provider.APIStyle))
 	}
-	// Search in embedded templates
-	for _, tmpl := range tm.embedded {
+}
+
+// searchTemplates searches the active template set. Every ingestion path goes
+// through setExternalTemplates (or loadEmbeddedTemplates), so tm.templates is
+// always a superset of the embedded ids — no separate embedded scan is needed
+// here. searchEmbedded exists for callers that deliberately bypass a possibly
+// disk-cached set.
+func (tm *TemplateManager) searchTemplates(matcher func(*ProviderTemplate) bool) *ProviderTemplate {
+	for _, tmpl := range tm.templates {
 		if matcher(tmpl) {
 			return tmpl
 		}
@@ -631,6 +686,16 @@ func deepCopyTemplate(tmpl *ProviderTemplate) *ProviderTemplate {
 		for k, v := range tmpl.ModelCapacities {
 			result.ModelCapacities[k] = v
 		}
+	}
+
+	// Copy pointer scalars so the copy shares no memory with the original
+	if tmpl.TotalCapacity != nil {
+		v := *tmpl.TotalCapacity
+		result.TotalCapacity = &v
+	}
+	if tmpl.DefaultModelCapacity != nil {
+		v := *tmpl.DefaultModelCapacity
+		result.DefaultModelCapacity = &v
 	}
 
 	return &result
@@ -703,31 +768,7 @@ func (tm *TemplateManager) GetEmbeddedModelsForProvider(provider *typ.Provider) 
 func (tm *TemplateManager) findEmbeddedTemplateByProvider(provider *typ.Provider) *ProviderTemplate {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
-
-	if provider.AuthType == typ.AuthTypeOAuth && provider.OAuthDetail != nil {
-		issuer := provider.OAuthDetail.Issuer
-		return tm.searchEmbedded(func(tmpl *ProviderTemplate) bool {
-			return tmpl.OAuthProvider == string(issuer)
-		})
-	}
-
-	apiBase := strings.TrimRight(provider.APIBase, "/")
-	if apiBase == "" {
-		return nil
-	}
-
-	if result := tm.searchEmbedded(func(tmpl *ProviderTemplate) bool {
-		return tmpl.CanonicalDomain != "" && strings.Contains(apiBase, tmpl.CanonicalDomain)
-	}); result != nil {
-		return result
-	}
-
-	switch provider.APIStyle {
-	case protocol.APIStyleAnthropic:
-		return tm.searchEmbedded(func(tmpl *ProviderTemplate) bool { return tmpl.BaseURLAnthropic == apiBase })
-	default:
-		return tm.searchEmbedded(func(tmpl *ProviderTemplate) bool { return tmpl.BaseURLOpenAI == apiBase })
-	}
+	return matchProviderTemplate(provider, tm.searchEmbedded)
 }
 
 // GetMaxTokensForModel returns the maximum allowed tokens for a specific model

@@ -60,9 +60,14 @@ func NewAnthropicClient(provider *typ.Provider, model string, sessionID typ.Sess
 	}
 
 	options := []anthropicOption.RequestOption{
-		anthropicOption.WithAPIKey(provider.GetAccessToken()),
 		anthropicOption.WithBaseURL(apiBase),
 		anthropicOption.WithMaxRetries(0), // Disable automatic retries for 429 errors in test environments
+	}
+	// Multi-field credential providers (Bedrock / Vertex) carry no bearer token;
+	// their cloud adapter option (appended last) installs its own auth. Setting
+	// an empty WithAPIKey would only plant a stray x-api-key header.
+	if !provider.IsMultiFieldCredential() {
+		options = append(options, anthropicOption.WithAPIKey(provider.GetAccessToken()))
 	}
 
 	// Create HTTP client with session-bound transport.
@@ -95,9 +100,7 @@ func NewAnthropicClient(provider *typ.Provider, model string, sessionID typ.Sess
 		// Use the transport pool instead of http.DefaultTransport so that env
 		// proxy variables (HTTP_PROXY / HTTPS_PROXY) are not inherited when no
 		// proxy is explicitly configured for the provider.
-		base := GetGlobalTransportPool().GetTransport(provider.UUID, model, provider.ProxyURL, ai.Issuer(""), sessionID)
-		transport = &userAgentTransport{base: base}
-		transport = wrapWithLogging(transport, provider)
+		transport = anthropicTransport(provider, model, sessionID)
 	}
 
 	httpClient := &http.Client{
@@ -122,6 +125,16 @@ func NewAnthropicClient(provider *typ.Provider, model string, sessionID typ.Sess
 		provider:   provider,
 		httpClient: httpClient,
 	}, nil
+}
+
+// anthropicTransport builds the transport chain generic Anthropic providers
+// use: pooled session-bound base (provider proxy_url honored, env proxy not
+// inherited), UA resolution, logging. Shared with the Vertex path, which must
+// rebuild this chain under its OAuth transport (see vertexAnthropicOptions).
+func anthropicTransport(provider *typ.Provider, model string, sessionID typ.SessionID) http.RoundTripper {
+	base := GetGlobalTransportPool().GetTransport(provider.UUID, model, provider.ProxyURL, ai.Issuer(""), sessionID)
+	var transport http.RoundTripper = &userAgentTransport{base: base}
+	return wrapWithLogging(transport, provider)
 }
 
 // ProviderType returns the provider type
@@ -231,6 +244,14 @@ func (c *AnthropicClient) GetProvider() *typ.Provider {
 
 // ListModels returns the list of available models from the Anthropic API
 func (c *AnthropicClient) ListModels(ctx context.Context) ([]string, error) {
+	// Bedrock / Vertex expose only the messages endpoint, not the Anthropic
+	// /v1/models list; use the template model list instead.
+	if c.provider.IsMultiFieldCredential() {
+		return nil, &ErrModelsEndpointNotSupported{
+			Provider: c.provider.Name,
+			Reason:   "cloud-credential providers use template model lists",
+		}
+	}
 	models, err := c.client.Models.List(ctx, anthropic.ModelListParams{})
 	if err != nil {
 		return nil, err
