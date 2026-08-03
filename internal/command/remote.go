@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/remote/control"
 	bot2 "github.com/tingly-dev/tingly-box/remote/control/bot"
 	"github.com/tingly-dev/tingly-box/remote/control/feature"
 	"github.com/tingly-dev/tingly-box/remote/control/remoteagent"
 
 	"github.com/tingly-dev/tingly-box/agentboot"
-	"github.com/tingly-dev/tingly-box/agentboot/claude"
 	"github.com/tingly-dev/tingly-box/imbot"
 	imbotfeishu "github.com/tingly-dev/tingly-box/imbot/platform/feishu"
 	imbottelegram "github.com/tingly-dev/tingly-box/imbot/platform/telegram"
@@ -338,23 +338,13 @@ func runStandaloneBot(ctx context.Context, appManager *AppManager, setting db.Se
 		return fmt.Errorf("failed to open store manager: %w", err)
 	}
 	defer sm.Close()
-	msgStore := sm.RemoteSessions()
-
-	sessionMgr := session.NewManager(session.Config{
-		Timeout:          30 * time.Minute,
-		MessageRetention: 7 * 24 * time.Hour,
-	}, msgStore)
-
-	// Compose the Claude Code agent with its historical session reader.
-	agentBootConfig := agentboot.DefaultConfig()
-	agentBootConfig.DefaultExecutionTimeout = 30 * time.Minute
-	agentService, err := claude.NewService(agentBootConfig)
+	core, err := control.NewCore(sm.RemoteSessions())
 	if err != nil {
-		return fmt.Errorf("create agent service: %w", err)
+		return err
 	}
 
 	// Run the bot
-	return runBotWithSettingsInternal(ctx, appManager, botSetting, sm.RemoteChats(), sessionMgr, agentService)
+	return runBotWithSettingsInternal(ctx, appManager, botSetting, sm.RemoteChats(), core.Session, core.Agent)
 }
 
 func standaloneBotSetting(setting db.Settings, provider, model string) bot2.BotSetting {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/remote/control"
 	bot2 "github.com/tingly-dev/tingly-box/remote/control/bot"
 	"github.com/tingly-dev/tingly-box/remote/control/remoteagent"
 
@@ -14,7 +15,6 @@ import (
 	"github.com/tingly-dev/tingly-box/remote/session"
 
 	"github.com/tingly-dev/tingly-box/agentboot"
-	"github.com/tingly-dev/tingly-box/agentboot/claude"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/tbclient"
@@ -80,18 +80,12 @@ func NewBotManager(ctx context.Context, cfg *config.Config, channelRegistry *cha
 	if sessionStore == nil {
 		return nil, fmt.Errorf("remote session store is nil")
 	}
-	sessionMgr := session.NewManager(session.Config{
-		Timeout:          30 * 60, // 30 minutes
-		MessageRetention: 7 * 24 * time.Hour,
-	}, sessionStore)
-
-	// Compose the Claude Code agent with its historical session reader.
-	agentBootConfig := agentboot.DefaultConfig()
-	agentBootConfig.DefaultExecutionTimeout = 30 * time.Minute
-	agentService, err := claude.NewService(agentBootConfig)
+	core, err := control.NewCore(sessionStore)
 	if err != nil {
-		return nil, fmt.Errorf("create agent service: %w", err)
+		return nil, err
 	}
+	sessionMgr := core.Session
+	agentService := core.Agent
 
 	// Create TBClient (SmartGuide model configuration)
 	tbClient := tbclient.NewTBClient(cfg, sm.Provider())
