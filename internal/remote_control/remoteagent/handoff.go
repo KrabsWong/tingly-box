@@ -65,13 +65,10 @@ func (c *SmartGuideCompletionCallback) OnComplete(result *smart_guide.Completion
 		responseText = c.agent.LastAssistantText()
 	}
 
-	// Persist the agent's full updated history (user + assistant + tool turns)
-	// as native Anthropic params. The engine owns history; we snapshot it here.
-	if c.tbSessionStore != nil {
-		if err := c.tbSessionStore.Save(c.hCtx.ChatID, c.agent.History()); err != nil {
-			logrus.WithError(err).Warn("Failed to save SmartGuide session history")
-		}
-	}
+	// History is not saved here. The harness owns durability now: the executor
+	// hands it the chat's live session log, and every step is appended as it
+	// completes. A snapshot at the end of the turn re-opened the log, re-parsed
+	// the whole conversation to compute a delta, and appended nothing.
 
 	// Sync working directory state to ChatStore
 	// This handles both change_workdir tool (which already persisted via updateProjectFunc)

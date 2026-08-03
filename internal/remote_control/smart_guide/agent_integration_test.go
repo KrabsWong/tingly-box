@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tingly-dev/tingly-box/afk"
+	"github.com/tingly-dev/tingly-box/afk/session"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	anthropicvm "github.com/tingly-dev/tingly-box/vmodel/anthropic"
 	"github.com/tingly-dev/tingly-box/vmodel/virtualserver"
@@ -129,6 +131,7 @@ type recordingHandler struct {
 	t           *testing.T
 	mu          sync.Mutex
 	texts       []string
+	thinking    []string
 	toolCalls   []string
 	toolResults []string
 	completed   *CompletionResult
@@ -152,6 +155,13 @@ func (h *recordingHandler) OnMessage(msg any) error {
 			h.texts = append(h.texts, s)
 			if h.t != nil {
 				h.t.Logf("[assistant] %s", s)
+			}
+		}
+	case "thinking":
+		if s, ok := m["message"].(string); ok {
+			h.thinking = append(h.thinking, s)
+			if h.t != nil {
+				h.t.Logf("[thinking] %s", s)
 			}
 		}
 	case "tool_use":
@@ -225,6 +235,9 @@ func rebuildEngineWithTools(t *testing.T, agent *TinglyBoxAgent, baseURL, model 
 	})
 	require.NoError(t, err)
 	agent.engine = eng
+	// The agent runs through its harness, not the engine directly, so a swapped
+	// engine only takes effect once the harness wraps it.
+	agent.harness = afk.NewHarness(eng, nil)
 }
 
 // TestExecuteWithHandler_PlainText drives a no-tool turn and asserts streamed
@@ -474,12 +487,15 @@ func TestExecuteWithHandler_MultiTurnTextNotLost(t *testing.T) {
 	assert.Contains(t, joined, "All done — here is the answer.", "final-turn text was lost")
 }
 
-// TestExecuteWithHandler_ThinkingSurfacesWhenNoText is the end-to-end test for
-// the thinking fallback: when a turn produces only a thinking block (no text)
-// the user must still see something. Here the intermediate turn is thinking +
-// tool, and the final turn is thinking only — neither has a text block, so
-// without the fallback the user would receive nothing at all.
-func TestExecuteWithHandler_ThinkingSurfacesWhenNoText(t *testing.T) {
+// TestExecuteWithHandler_ThinkingSurfacesOnItsOwnChannel is the end-to-end test
+// for how reasoning reaches the user. A turn that produces only a thinking block
+// still has to surface something — but as reasoning, not as the reply. It used
+// to be substituted in as assistant text, so a think-then-call-a-tool turn
+// published the model's private deliberation to the chat as if it were the
+// answer. It now arrives as its own message type, which the streaming layer
+// renders marked (and only in verbose mode), and it never becomes the run's
+// final output.
+func TestExecuteWithHandler_ThinkingSurfacesOnItsOwnChannel(t *testing.T) {
 	const model = "thinking-only"
 	mt := newMultiTurnModel(model,
 		turnScript{thinking: "I should look this up first.", toolName: "lookup", toolArgs: map[string]any{"q": "x"}},
@@ -497,10 +513,61 @@ func TestExecuteWithHandler_ThinkingSurfacesWhenNoText(t *testing.T) {
 	assert.True(t, res.IsSuccess())
 	assert.Equal(t, 1, tool.called, "tool should have run once")
 
-	// Both turns' thinking surfaced to the user even though neither had text.
+	// Both turns' reasoning reached the handler, on the thinking channel.
+	assert.Equal(t, []string{
+		"I should look this up first.",
+		"Based on the result, the answer is 42.",
+	}, handler.thinking, "reasoning must still surface, just not as the reply")
+
+	// ...and none of it was delivered as assistant text.
 	joined := handler.joinedText()
-	assert.Contains(t, joined, "I should look this up first.", "intermediate thinking was lost")
-	assert.Contains(t, joined, "Based on the result, the answer is 42.", "final thinking was lost")
-	// The final response is the thinking fallback, not empty.
-	assert.Contains(t, res.Output, "the answer is 42")
+	assert.NotContains(t, joined, "I should look this up first.",
+		"reasoning must not be published as the assistant's message")
+	assert.NotContains(t, joined, "Based on the result, the answer is 42.",
+		"reasoning must not be published as the assistant's message")
+
+	// The run produced no text block, so it has no answer to report. Claiming
+	// the reasoning as the output would make a non-answer look like an answer.
+	assert.Empty(t, res.Output, "reasoning is not the run's final output")
+}
+
+// TestExecuteWithHandler_CheckpointsToSessionLog is the end-to-end proof that
+// the wiring is live: a run handed a session log writes to it as steps complete,
+// so a turn interrupted after its tools have already touched the user's machine
+// keeps that work instead of being discarded.
+func TestExecuteWithHandler_CheckpointsToSessionLog(t *testing.T) {
+	const model = "checkpointing"
+	mt := newMultiTurnModel(model,
+		turnScript{text: "Checking.", toolName: "lookup", toolArgs: map[string]any{"q": "x"}},
+		turnScript{text: "All done."},
+	)
+	baseURL := newVModelServer(t, mt)
+
+	logPath := filepath.Join(t.TempDir(), "chat.jsonl")
+	sess, err := session.Open(logPath)
+	require.NoError(t, err)
+
+	tool := &recordingTool{name: "lookup"}
+	agent := newTestAgent(t, baseURL, model, &AgentConfig{ChatID: "cp1"})
+	eng, err := afk.NewEngine(afk.Config{BaseURL: baseURL, APIKey: "test-key", Model: model, Tools: []afk.Tool{tool}})
+	require.NoError(t, err)
+	agent.engine = eng
+	agent.harness = afk.NewHarness(eng, sess)
+
+	handler := &recordingHandler{t: t}
+	_, err = agent.ExecuteWithHandler(context.Background(), "do a thing", &ToolContext{ChatID: "cp1"}, handler)
+	require.NoError(t, err)
+
+	// Read the log back from disk, not from the in-memory session: durability
+	// is the claim being tested.
+	onDisk, err := session.Open(logPath)
+	require.NoError(t, err)
+	logged := onDisk.Messages()
+
+	require.Equal(t, len(agent.History()), len(logged),
+		"everything the run produced should be on disk")
+	require.NotEmpty(t, logged)
+	assert.Equal(t, sdk.BetaMessageParamRoleUser, logged[0].Role, "the prompt is logged too")
+	assert.Equal(t, sdk.BetaMessageParamRoleAssistant, logged[len(logged)-1].Role,
+		"a persisted transcript must be replayable, so it cannot end on a user turn")
 }

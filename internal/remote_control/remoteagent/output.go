@@ -18,6 +18,8 @@ const (
 	IconProcess    = "⏳" // Processing
 	IconTool       = "🔧" // Tool call
 	IconToolResult = "↳" // Tool result
+	IconThinking   = "💭" // Model reasoning (not an answer)
+	IconSteer      = "↪" // Follow-up folded into the running task
 )
 
 // Agent display names

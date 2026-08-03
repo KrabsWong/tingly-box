@@ -45,6 +45,12 @@ const toolBufferFlushThreshold = 20
 // an "(+N more)" suffix.
 const quietToolPreviewCount = 3
 
+// eventTypeThinking is the map-message type Smart Guide emits for a turn's
+// reasoning. It is not an agentboot event type: agentboot's stream carries
+// thinking inside the Claude message types, so this exists only on the
+// smart-guide map path.
+const eventTypeThinking = "thinking"
+
 // newStreamingMessageHandler creates a new streaming message handler
 func newStreamingMessageHandler(bot imbot.Bot, chatID, replyTo string, verbose bool) *streamingMessageHandler {
 	return &streamingMessageHandler{
@@ -377,6 +383,16 @@ func (h *streamingMessageHandler) handleMapMessage(m map[string]interface{}) err
 		}
 	case agentboot.EventTypeAssistant:
 		h.sendText(assistantTextFromMap(m))
+	case eventTypeThinking:
+		// Reasoning is marked, never rendered as the assistant's reply: a turn
+		// that thinks and then calls a tool has not answered yet, and showing
+		// its deliberation unmarked reads as a rambling non-answer. Quiet mode
+		// drops it — the same treatment intermediate tool renders get.
+		if h.verbose {
+			if text := assistantTextFromMap(m); text != "" {
+				h.sendText(IconThinking + " " + text)
+			}
+		}
 	case agentboot.EventTypeResult:
 		// Flush trailing tool renders before OnComplete's banner.
 		h.flushToolBufferLocked()

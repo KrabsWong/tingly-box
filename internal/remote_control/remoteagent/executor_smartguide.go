@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 
+	"github.com/tingly-dev/tingly-box/afk"
 	"github.com/tingly-dev/tingly-box/agentboot"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
 	"github.com/tingly-dev/tingly-box/internal/remote_control/bot"
@@ -39,14 +40,21 @@ func (e *SmartGuideExecutor) Execute(ctx context.Context, req PreparedRequest) e
 	// Get current bot settings (dynamic lookup for latest config)
 	botSetting := e.deps.GetBotSettingOrCache()
 
-	// 1. Load conversation history (native Anthropic beta params) from session store
-	var messages []anthropic.BetaMessageParam
+	// 1. Open the chat's conversation log. The same handle serves both roles:
+	// it is the history the agent starts from, and the log the harness
+	// checkpoints each step into, so an interrupted turn keeps its work instead
+	// of being discarded at the end.
+	var (
+		messages   []anthropic.BetaMessageParam
+		sessionLog afk.Log
+	)
 	if e.deps.TBSessionStore != nil {
-		msgs, err := e.deps.TBSessionStore.Load(req.HCtx.ChatID)
+		sess, err := e.deps.TBSessionStore.Open(req.HCtx.ChatID)
 		if err != nil {
-			logrus.WithError(err).Warn("Failed to load session, starting with empty history")
-		} else {
-			messages = msgs
+			logrus.WithError(err).Warn("Failed to open session, starting with empty history")
+		} else if sess != nil {
+			messages = sess.Messages()
+			sessionLog = sess
 		}
 		logrus.WithFields(logrus.Fields{
 			"chatID":       req.HCtx.ChatID,
@@ -113,6 +121,7 @@ func (e *SmartGuideExecutor) Execute(ctx context.Context, req PreparedRequest) e
 		Platform:         string(hCtx.Platform),
 		BotUUID:          botSetting.UUID,
 		ToolCtx:          toolCtx,
+		SessionLog:       sessionLog,
 		GetStatusFunc: func(chatID string) (*smart_guide.StatusInfo, error) {
 			projectPath, _, _ := e.deps.ChatStore.GetProjectPath(chatID)
 			workingDir, hasWD, _ := e.deps.ChatStore.GetBashCwd(chatID)
@@ -152,6 +161,13 @@ func (e *SmartGuideExecutor) Execute(ctx context.Context, req PreparedRequest) e
 			"Reason: "+err.Error()+"\n"+
 			"Type '/help' for available commands.")
 		return err
+	}
+
+	// Register the agent as this chat's steerable execution, so a message the
+	// user sends while the turn is still running is delivered into it instead of
+	// being rejected as concurrent.
+	if e.deps.Executions != nil {
+		e.deps.Executions.setSteerable(req.HCtx.ChatID, agent)
 	}
 
 	// Set working directory from BashCwd (preferred) or projectPath (fallback)

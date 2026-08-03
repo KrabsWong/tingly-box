@@ -4,12 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tingly-dev/tingly-box/afk"
+	"github.com/tingly-dev/tingly-box/afk/skill"
 )
 
 // rawArgs marshals a map of tool arguments into the json.RawMessage the new
@@ -231,7 +236,7 @@ func TestBuildTools(t *testing.T) {
 	getStatusFunc := func(chatID string) (*StatusInfo, error) { return nil, nil }
 	updateProjectFunc := func(chatID string, projectPath string) error { return nil }
 
-	tools := BuildTools(executor, "test-chat", getStatusFunc, updateProjectFunc, nil)
+	tools := BuildTools(executor, "test-chat", getStatusFunc, updateProjectFunc, nil, nil)
 	assert.GreaterOrEqual(t, len(tools), 3, "Should build at least 3 tools")
 
 	names := make([]string, 0, len(tools))
@@ -244,11 +249,14 @@ func TestBuildTools(t *testing.T) {
 
 	// send_file is only registered when a SendFile callback is available.
 	assert.NotContains(t, names, "send_file")
+	// Likewise activate_skill: no skills discovered means no tool, rather than
+	// an activator advertising an empty catalog.
+	assert.NotContains(t, names, "activate_skill")
 
 	toolCtx := &ToolContext{
 		SendFile: func(ctx context.Context, path, caption string) error { return nil },
 	}
-	withSend := BuildTools(executor, "test-chat", getStatusFunc, updateProjectFunc, toolCtx)
+	withSend := BuildTools(executor, "test-chat", getStatusFunc, updateProjectFunc, toolCtx, nil)
 	sendNames := make([]string, 0, len(withSend))
 	for _, tl := range withSend {
 		sendNames = append(sendNames, tl.Param().Name)
@@ -408,4 +416,146 @@ func TestToolExecutor_ExecuteBash_NotAllowedCommand(t *testing.T) {
 	_, err := executor.ExecuteBash(context.Background(), "rm", "-rf", "/")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not allowed")
+}
+
+// TestBashTool_TruncatesLongOutput checks that a command producing far more
+// output than the context can hold comes back capped, with the tail retained —
+// a failing command reports its error at the bottom.
+func TestBashTool_TruncatesLongOutput(t *testing.T) {
+	ctx := context.Background()
+	executor := NewToolExecutor([]string{})
+	bashTool := NewBashTool(executor, []string{})
+
+	out, err := bashTool.Call(ctx, rawArgs(t, map[string]any{
+		"command": "for i in $(seq 1 5000); do echo line-$i; done",
+	}))
+	require.NoError(t, err)
+
+	assert.Contains(t, out, "Output truncated", "the model must be told the output was cut")
+	assert.Contains(t, out, "line-5000", "the tail is the part worth keeping")
+	assert.NotContains(t, out, "line-1\n", "the head should have been dropped")
+	assert.Less(t, len(out), 80*1024, "truncated output should stay near the byte cap")
+}
+
+// TestBashTool_TruncationPreservesDirectoryTracking is the ordering guard: the
+// working directory is carried by a pwd line appended to the end of the output,
+// so truncating before stripping it would tail-cut the pwd away and silently
+// strand the session in the previous directory.
+func TestBashTool_TruncationPreservesDirectoryTracking(t *testing.T) {
+	ctx := context.Background()
+
+	rootTempDir := t.TempDir()
+	subDir := filepath.Join(rootTempDir, "sub")
+	require.NoError(t, os.Mkdir(subDir, 0755))
+
+	executor := NewToolExecutor([]string{})
+	executor.SetWorkingDirectory(rootTempDir)
+	bashTool := NewBashTool(executor, []string{})
+
+	// Change directory *and* emit enough output to force truncation.
+	out, err := bashTool.Call(ctx, rawArgs(t, map[string]any{
+		"command": "cd sub && for i in $(seq 1 5000); do echo line-$i; done",
+	}))
+	require.NoError(t, err)
+	require.Contains(t, out, "Output truncated", "this test is meaningless unless truncation fired")
+
+	assert.Equal(t, subDir, executor.GetWorkingDirectory(),
+		"cwd tracking must survive truncation")
+	assert.NotContains(t, out, subDir+"\n"+"[Output truncated",
+		"the pwd marker line must not leak into the visible output")
+}
+
+// TestReadFileTool_TruncatesLargeFile covers the read side: a file well under
+// the 10MB hard limit can still swamp the context, and the notice has to tell
+// the model where to resume.
+func TestReadFileTool_TruncatesLargeFile(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.txt")
+
+	var b strings.Builder
+	for i := 1; i <= 5000; i++ {
+		fmt.Fprintf(&b, "line-%d\n", i)
+	}
+	require.NoError(t, os.WriteFile(path, []byte(b.String()), 0o600))
+
+	tool := NewReadFileTool(NewToolExecutor([]string{}))
+	out, err := tool.Call(ctx, rawArgs(t, map[string]any{"path": path}))
+	require.NoError(t, err)
+
+	assert.Contains(t, out, "line-1\n", "reads keep the head")
+	assert.NotContains(t, out, "line-5000")
+	assert.Contains(t, out, "Output truncated")
+	assert.Contains(t, out, "offset=", "the notice must say how to page onward")
+}
+
+// TestReadFileTool_TruncationNoticeUsesAbsoluteLineNumbers checks the notice
+// accounts for an offset already applied — a 1-based notice would send the
+// model back to re-read lines it already has.
+func TestReadFileTool_TruncationNoticeUsesAbsoluteLineNumbers(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.txt")
+
+	var b strings.Builder
+	for i := 1; i <= 6000; i++ {
+		fmt.Fprintf(&b, "line-%d\n", i)
+	}
+	require.NoError(t, os.WriteFile(path, []byte(b.String()), 0o600))
+
+	tool := NewReadFileTool(NewToolExecutor([]string{}))
+	out, err := tool.Call(ctx, rawArgs(t, map[string]any{"path": path, "offset": 1001}))
+	require.NoError(t, err)
+
+	require.Contains(t, out, "Output truncated")
+	assert.Contains(t, out, "showing lines 1001-", "line numbers should be absolute, not restarted at 1")
+	assert.Contains(t, out, "offset=3001", "resume point should follow the last line actually shown")
+}
+
+// TestBuildTools_RegistersSkillActivator covers the skill path: when skills are
+// discovered the activator joins the toolset, and its description carries each
+// skill's name and summary. That description is the only place the model can
+// learn what a skill is for — the input enum constrains the name but says
+// nothing about when to reach for it.
+func TestBuildTools_RegistersSkillActivator(t *testing.T) {
+	executor := NewToolExecutor(DefaultBashAllowlist)
+	getStatusFunc := func(chatID string) (*StatusInfo, error) { return nil, nil }
+	updateProjectFunc := func(chatID string, projectPath string) error { return nil }
+
+	skills, err := loadSkillsFromDir(t, "../../../.agents/skills")
+	require.NoError(t, err)
+	require.NotEmpty(t, skills, "repo ships skills under .agents/skills")
+
+	tools := BuildTools(executor, "test-chat", getStatusFunc, updateProjectFunc, nil, skills)
+
+	var activator afk.Tool
+	for _, tl := range tools {
+		if tl.Param().Name == "activate_skill" {
+			activator = tl
+		}
+	}
+	require.NotNil(t, activator, "activate_skill should be registered when skills exist")
+
+	desc := activator.Param().Description.Value
+	for _, s := range skills {
+		assert.Contains(t, desc, s.Name, "each skill name should be listed")
+		if s.Description != "" {
+			assert.Contains(t, desc, s.Description, "each skill description should be listed")
+		}
+	}
+}
+
+// loadSkillsFromDir loads skills from an explicit directory only, so the test
+// does not depend on whatever skills happen to exist in the developer's home.
+func loadSkillsFromDir(t *testing.T, dir string) (skill.Skills, error) {
+	t.Helper()
+	loader, err := skill.NewLoader(&skill.Config{
+		EnableStandardPaths: false,
+		EnableDefaultSkills: true,
+		Paths:               []string{dir},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return loader.Skills(), nil
 }

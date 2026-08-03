@@ -1,5 +1,31 @@
 # Smart Guide on Claude Code (retiring tingly-agentscope)
 
+> **Superseded — do not build from this.** Kept for the reasoning, not the plan.
+> Current design: [`afk.md`](./afk.md).
+>
+> This plan collapsed `@tb` into a constrained Claude Code subprocess. Its
+> premise was that maintaining a second agent runtime (`tingly-agentscope`) was
+> the real burden. That burden is gone: agentscope was replaced by `afk/`, an
+> in-process runtime we own, and the duplication argument no longer applies.
+>
+> Three reasons not to revive it:
+>
+> - **The changedir section is evidence against itself.** The stable-anchor /
+>   logical-pwd split exists only to work around the `claude` CLI resolving
+>   `--resume` relative to cwd. Inventing a fake anchor directory and then
+>   prompting the model to use absolute paths is an impedance mismatch, not a
+>   design.
+> - **It puts a third-party binary and its private session-file layout on the
+>   critical path** of a core product surface. `@tb` could not then run inside
+>   the gateway process, the TUI, or the desktop app.
+> - **It forfeits the single-protocol depth advantage** described in
+>   [`afk.md` §1](./afk.md) — the thing that makes `@tb` something only
+>   Tingly-Box can build.
+>
+> What remains valid: §2's observation that only three tools
+> (`change_workdir`, `get_status`, `send_file`) are genuinely tingly-box-specific,
+> and §3's conclusion that `@tb` and `@cc` should not share a session.
+
 ## Motivation
 
 Smart Guide (`@tb`) today runs on a second, home-grown agent runtime

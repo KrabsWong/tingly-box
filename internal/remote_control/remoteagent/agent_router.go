@@ -2,6 +2,7 @@ package remoteagent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/sirupsen/logrus"
@@ -68,6 +69,15 @@ func (r *AgentRouter) Execute(ctx context.Context, agentType agentboot.AgentType
 	execCtx, cancel := context.WithCancel(ctx)
 	if err := r.deps.Executions.begin(req.HCtx.ChatID, cancel); err != nil {
 		cancel()
+		// The chat is already working. If that execution can take a mid-run
+		// message, hand this one to it rather than telling the user to wait:
+		// in a chat, a follow-up sent while the agent is working is the normal
+		// thing to do, not a mistake to be corrected.
+		if errors.Is(err, errExecutionBusy) && r.deps.Executions.steer(req.HCtx.ChatID, req.Text) {
+			logrus.WithField("chatID", req.HCtx.ChatID).Info("Steered running execution with a follow-up message")
+			r.deps.SendText(req.HCtx, IconSteer+" Added to the running task.")
+			return nil
+		}
 		return err
 	}
 
