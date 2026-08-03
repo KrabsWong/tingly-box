@@ -1,3 +1,11 @@
+// testharness.go is TEST INFRASTRUCTURE, not runtime code: it stands up a real
+// db-backed environment (chat store, session manager, agentboot) so the
+// remoteagent tests can drive the production BotHandler end-to-end. The
+// internal/data/db import is intentional here — building a real store manager
+// is host-side wiring that does not belong on the runtime path, and this file
+// is only linked into test binaries. The runtime packages (bot, remoteagent
+// non-test code) remain free of db.* imports.
+
 package remoteagent
 
 import (

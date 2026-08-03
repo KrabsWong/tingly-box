@@ -1,10 +1,6 @@
 package remoteagent
 
-import (
-	"strings"
-
-	"github.com/tingly-dev/tingly-box/internal/data/db"
-)
+import "strings"
 
 // Output format constants for bot messages
 // Centralized for easy customization and i18n support
@@ -24,9 +20,9 @@ const (
 
 // Agent display names
 const (
-	AgentNameTB        = "@tb" // Tingly-Box short name
-	AgentNameCC        = "@cc" // Claude Code short name
-	AgentNameTinglyBox = db.DefaultChatAgent
+	AgentNameTB        = "@tb"        // Tingly-Box short name
+	AgentNameCC        = "@cc"        // Claude Code short name
+	AgentNameTinglyBox = "tingly-box" // mirrors db.DefaultChatAgent; the single source of truth lives in internal/data/db, kept here as a literal so this package does not import db
 	AgentNameClaude    = "claude"
 )
 
