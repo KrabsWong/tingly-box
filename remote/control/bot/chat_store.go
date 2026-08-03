@@ -1,8 +1,9 @@
 package bot
 
 import (
+	"time"
+
 	"github.com/tingly-dev/tingly-box/imbot"
-	"github.com/tingly-dev/tingly-box/internal/data/db"
 )
 
 // BotSetting represents bot configuration with platform-specific auth
@@ -65,16 +66,88 @@ func PlatformDefaultsRequirePairing(platform string) bool {
 	return imbot.GetPlatformBehavior(imbot.Platform(platform)).RequiresPairingByDefault
 }
 
-// Chat represents all state associated with a chat (direct or group).
+// ProjectHistoryCap bounds the per-chat MRU list so storage stays bounded and
+// the /project list stays readable.
+const ProjectHistoryCap = 20
+
+// Chat is all state associated with an IM chat (direct or group): which
+// project it is bound to, whether it is paired or whitelisted, and which
+// agent is currently driving it.
 //
-// The struct itself lives in internal/data/db because that is where the store
-// backing it lives, and this package already imports db — defining it there
-// is what lets the SQLite store implement ChatStoreInterface without an import
-// cycle. The alias keeps every caller in this package writing bot.Chat.
+// This is the remote-owned domain type. The SQLite store in internal/data/db
+// implements ChatStoreInterface against it directly (converting to/from its
+// own GORM RemoteChatRecord) — same pattern as remote/session, where db
+// imports the remote package that owns the domain type. Callers write
+// bot.Chat everywhere.
 //
 // Sessions are not part of a Chat: they are managed by SessionManager, keyed
 // by the (ChatID, Agent, Project) binding.
-type Chat = db.Chat
+type Chat struct {
+	ChatID         string   `json:"chat_id"`
+	Platform       string   `json:"platform"`
+	ProjectPath    string   `json:"project_path,omitempty"`
+	ProjectHistory []string `json:"project_history,omitempty"` // MRU list of paths this chat has bound to
+	OwnerID        string   `json:"owner_id,omitempty"`
+
+	// Pairing (TOFU) — applies to direct messages only. Group chats continue
+	// to use the IsWhitelisted gate, but the operator who whitelisted the
+	// group must themselves be paired in DM with the same bot.
+	IsPaired       bool      `json:"is_paired,omitempty"`
+	PairedBotUUID  string    `json:"paired_bot_uuid,omitempty"`
+	PairedSenderID string    `json:"paired_sender_id,omitempty"`
+	PairedAt       time.Time `json:"paired_at,omitempty"`
+
+	// Group-specific
+	IsWhitelisted bool   `json:"is_whitelisted"`
+	WhitelistedBy string `json:"whitelisted_by,omitempty"`
+
+	// Bash state
+	BashCwd string `json:"bash_cwd,omitempty"`
+
+	// CurrentAgent is which agent is driving the chat ("tingly-box" or "claude").
+	CurrentAgent string `json:"current_agent,omitempty"`
+
+	// Chat-level settings
+	Verbose *bool `json:"verbose,omitempty"` // Verbose mode: nil=use bot default, true=verbose, false=quiet
+
+	// Disabled is the inbound blocklist flag: a disabled chat's messages are
+	// dropped before any handler runs and the chat is excluded from the
+	// reachable list. Unlike deletion, the row survives auto-create paths —
+	// only an explicit enable clears it.
+	Disabled   bool      `json:"disabled,omitempty"`
+	DisabledAt time.Time `json:"disabled_at,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PushProjectHistory sets chat.ProjectPath and prepends it to ProjectHistory
+// (deduped, capped). When the chat already had a ProjectPath that wasn't in
+// the history yet, it is preserved one slot below so a fresh upgrade keeps
+// the previous binding visible.
+func (c *Chat) PushProjectHistory(path string) {
+	if c == nil || path == "" {
+		return
+	}
+	prior := c.ProjectHistory
+	if len(prior) == 0 && c.ProjectPath != "" && c.ProjectPath != path {
+		prior = []string{c.ProjectPath}
+	}
+	c.ProjectPath = path
+
+	out := make([]string, 0, len(prior)+1)
+	out = append(out, path)
+	for _, p := range prior {
+		if p == "" || p == path {
+			continue
+		}
+		out = append(out, p)
+		if len(out) >= ProjectHistoryCap {
+			break
+		}
+	}
+	c.ProjectHistory = out
+}
 
 // ChatStoreInterface defines the interface for chat persistence, keeping the
 // bot package independent of where chats are actually stored.
@@ -166,7 +239,8 @@ type ChatStoreInterface interface {
 	IsChatDisabled(chatID string) bool
 }
 
-// Ensure the SQLite-backed store satisfies the interface. The JSON store this
-// replaces is gone: it kept every chat in one file that each holder rewrote
-// whole, so concurrent writers erased each other. See .design/remote-storage.md.
-var _ ChatStoreInterface = (*db.RemoteChatStore)(nil)
+// The SQLite-backed store (internal/data/db.RemoteChatStore) satisfies this
+// interface; the compile-time assertion lives on the db side, next to the
+// store, so this package does not import db. The JSON store this replaces is
+// gone: it kept every chat in one file that each holder rewrote whole, so
+// concurrent writers erased each other. See .design/remote-storage.md.

@@ -1,8 +1,10 @@
-package bot
+package bot_test
 
 import (
 	"os"
 	"testing"
+
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 )
 
 // TestSetPaired_RoundTrip verifies SetPaired persists across reload and that
@@ -120,7 +122,7 @@ func TestBotSetting_IsRequirePairing(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			b := BotSetting{RequirePairing: tc.v, Platform: tc.platform}
+			b := bot.BotSetting{RequirePairing: tc.v, Platform: tc.platform}
 			if got := b.IsRequirePairing(); got != tc.want {
 				t.Fatalf("IsRequirePairing()=%v want %v", got, tc.want)
 			}

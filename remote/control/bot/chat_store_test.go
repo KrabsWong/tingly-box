@@ -1,10 +1,11 @@
-package bot
+package bot_test
 
 import (
 	"testing"
 	"time"
 
 	"github.com/tingly-dev/tingly-box/internal/data/db"
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 )
 
 // openStore returns a chat store over a temp directory, plus a reopen helper.
@@ -13,7 +14,7 @@ import (
 // substring-matching its contents. That checked the encoding rather than the
 // contract; now that chats are rows, the equivalent — and stricter — check is
 // to close, reopen, and read the value back.
-func openStore(t *testing.T, dir string) ChatStoreInterface {
+func openStore(t *testing.T, dir string) bot.ChatStoreInterface {
 	t.Helper()
 	sm, err := db.NewStoreManager(dir)
 	if err != nil {
@@ -33,7 +34,7 @@ func TestUpdateChatPersistsImmediately(t *testing.T) {
 		projectPath = "/test/path"
 	)
 
-	chat := &Chat{
+	chat := &bot.Chat{
 		ChatID:      chatID,
 		Platform:    "telegram",
 		ProjectPath: "",
@@ -45,7 +46,7 @@ func TestUpdateChatPersistsImmediately(t *testing.T) {
 		t.Fatalf("Failed to upsert chat: %v", err)
 	}
 
-	if err := store.UpdateChat(chatID, func(c *Chat) {
+	if err := store.UpdateChat(chatID, func(c *bot.Chat) {
 		c.ProjectPath = projectPath
 		c.BashCwd = projectPath
 	}); err != nil {
@@ -83,7 +84,7 @@ func TestUpsertChatPersistsImmediately(t *testing.T) {
 		projectPath = "/another/test/path"
 	)
 
-	if err := store.UpsertChat(&Chat{
+	if err := store.UpsertChat(&bot.Chat{
 		ChatID:       chatID,
 		Platform:     "telegram",
 		ProjectPath:  projectPath,
@@ -119,7 +120,7 @@ func TestSetCurrentAgentPersistsImmediately(t *testing.T) {
 
 	const chatID = "test-chat-789"
 
-	if err := store.UpsertChat(&Chat{
+	if err := store.UpsertChat(&bot.Chat{
 		ChatID:    chatID,
 		Platform:  "telegram",
 		CreatedAt: time.Now().UTC(),

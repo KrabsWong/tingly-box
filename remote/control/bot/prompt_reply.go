@@ -25,7 +25,7 @@ import (
 // of the IsChatDisabled check for the standalone / host-less path (CLI + test
 // harness), which never enters this dispatch chain — two paths into the
 // handler, two gates. See the spec (bot-chat-lifecycle-collapse §3b).
-func disabledChatGate(chatStore ChatStoreInterface) OnMessage {
+func DisabledChatGate(chatStore ChatStoreInterface) OnMessage {
 	return func(msg imbot.Message, platform imbot.Platform, botUUID string) bool {
 		chatID := msg.GetReplyTarget()
 		if chatID == "" || chatStore == nil {

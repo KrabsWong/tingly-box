@@ -9,17 +9,17 @@ import (
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 )
 
-// DefaultChatAgent is the agent a chat is driven by until something hands it
-// off — Smart Guide is the entry point. This is the single definition;
-// bot.AgentNameTinglyBox aliases it (the bot package imports this one, so the
-// dependency can only run in that direction).
-const DefaultChatAgent = "tingly-box"
+// Compile-time proof that this store backs the remote bot runtime's chat
+// persistence. Mirrors the assertion in remote_session_store.go.
+var _ bot.ChatStoreInterface = (*RemoteChatStore)(nil)
 
-// ProjectHistoryCap bounds the per-chat MRU list so storage stays bounded and
-// the /project list stays readable.
-const ProjectHistoryCap = 20
+// DefaultChatAgent is the agent a chat is driven by until something hands it
+// off — Smart Guide is the entry point.
+const DefaultChatAgent = "tingly-box"
 
 // Sentinels for the remote chat store.
 var (
@@ -73,7 +73,7 @@ func decodeProjectHistory(raw string) []string {
 	return out
 }
 
-func toChatRecord(c *Chat) *RemoteChatRecord {
+func toChatRecord(c *bot.Chat) *RemoteChatRecord {
 	return &RemoteChatRecord{
 		ChatID:         c.ChatID,
 		Platform:       c.Platform,
@@ -96,8 +96,8 @@ func toChatRecord(c *Chat) *RemoteChatRecord {
 	}
 }
 
-func fromChatRecord(r *RemoteChatRecord) *Chat {
-	return &Chat{
+func fromChatRecord(r *RemoteChatRecord) *bot.Chat {
+	return &bot.Chat{
 		ChatID:         r.ChatID,
 		Platform:       r.Platform,
 		ProjectPath:    r.ProjectPath,
@@ -120,7 +120,7 @@ func fromChatRecord(r *RemoteChatRecord) *Chat {
 }
 
 // normalizeChat fills in the invariants every stored chat must satisfy.
-func normalizeChat(chat *Chat) error {
+func normalizeChat(chat *bot.Chat) error {
 	if chat == nil || chat.ChatID == "" {
 		return ErrChatIDRequired
 	}
@@ -138,7 +138,7 @@ func normalizeChat(chat *Chat) error {
 // ---------- basic CRUD ----------
 
 // GetChat retrieves a chat by ID. A missing chat is (nil, nil).
-func (s *RemoteChatStore) GetChat(chatID string) (*Chat, error) {
+func (s *RemoteChatStore) GetChat(chatID string) (*bot.Chat, error) {
 	if !s.ready() || chatID == "" {
 		return nil, nil
 	}
@@ -159,7 +159,7 @@ func (s *RemoteChatStore) GetChat(chatID string) (*Chat, error) {
 // than silently returning (and later overwriting) another platform's chat.
 // This is the guard against cross-platform chatID-string collisions leaking
 // platform A's chat into platform B.
-func (s *RemoteChatStore) GetOrCreateChat(chatID, platform string) (*Chat, error) {
+func (s *RemoteChatStore) GetOrCreateChat(chatID, platform string) (*bot.Chat, error) {
 	if !s.ready() {
 		return nil, ErrStoreClosed
 	}
@@ -175,7 +175,7 @@ func (s *RemoteChatStore) GetOrCreateChat(chatID, platform string) (*Chat, error
 	}
 
 	now := time.Now().UTC()
-	fresh := &Chat{
+	fresh := &bot.Chat{
 		ChatID:    chatID,
 		Platform:  platform,
 		CreatedAt: now,
@@ -188,7 +188,7 @@ func (s *RemoteChatStore) GetOrCreateChat(chatID, platform string) (*Chat, error
 }
 
 // UpsertChat creates or replaces a chat row.
-func (s *RemoteChatStore) UpsertChat(chat *Chat) error {
+func (s *RemoteChatStore) UpsertChat(chat *bot.Chat) error {
 	if !s.ready() {
 		return ErrStoreClosed
 	}
@@ -203,7 +203,7 @@ func (s *RemoteChatStore) UpsertChat(chat *Chat) error {
 // Migration needs this for the same reason sessions do: UpdatedAt orders
 // ListChats, so stamping it on import would make every migrated chat look
 // equally and freshly active in the bot's chat list.
-func (s *RemoteChatStore) ImportChat(chat *Chat) error {
+func (s *RemoteChatStore) ImportChat(chat *bot.Chat) error {
 	if !s.ready() {
 		return ErrStoreClosed
 	}
@@ -221,7 +221,7 @@ func (s *RemoteChatStore) ImportChat(chat *Chat) error {
 // Upsert rather than GORM's Updates: struct-based Updates skips zero values, so
 // turning a flag back off (RemoveFromWhitelist, ClearPaired) or clearing a
 // string would silently not persist.
-func upsertChatRecord(tx *gorm.DB, chat *Chat) error {
+func upsertChatRecord(tx *gorm.DB, chat *bot.Chat) error {
 	if err := tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "chat_id"}},
 		UpdateAll: true,
@@ -234,7 +234,7 @@ func upsertChatRecord(tx *gorm.DB, chat *Chat) error {
 // UpdateChat applies fn to an existing chat inside a transaction, so a
 // concurrent writer cannot interleave between the read and the write.
 // A missing chat is a no-op, matching the store this replaces.
-func (s *RemoteChatStore) UpdateChat(chatID string, fn func(*Chat)) error {
+func (s *RemoteChatStore) UpdateChat(chatID string, fn func(*bot.Chat)) error {
 	if !s.ready() {
 		return ErrStoreClosed
 	}
@@ -272,7 +272,7 @@ func (s *RemoteChatStore) UpdateChat(chatID string, fn func(*Chat)) error {
 // GetOrCreateChat followed by UpdateChat, as those used to, cost two
 // transactions and read the row twice, and on a fresh chat wrote it twice with
 // the first write immediately overwritten.
-func (s *RemoteChatStore) mutate(chatID, platform string, fn func(*Chat)) error {
+func (s *RemoteChatStore) mutate(chatID, platform string, fn func(*bot.Chat)) error {
 	if !s.ready() {
 		return ErrStoreClosed
 	}
@@ -281,7 +281,7 @@ func (s *RemoteChatStore) mutate(chatID, platform string, fn func(*Chat)) error 
 	}
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		var chat *Chat
+		var chat *bot.Chat
 
 		var rec RemoteChatRecord
 		switch err := tx.Where("chat_id = ?", chatID).First(&rec).Error; {
@@ -294,7 +294,7 @@ func (s *RemoteChatStore) mutate(chatID, platform string, fn func(*Chat)) error 
 				return fmt.Errorf("chat %q belongs to platform %q, not %q", chatID, chat.Platform, platform)
 			}
 		case errors.Is(err, gorm.ErrRecordNotFound):
-			chat = &Chat{ChatID: chatID, Platform: platform}
+			chat = &bot.Chat{ChatID: chatID, Platform: platform}
 		default:
 			return fmt.Errorf("load chat %s: %w", chatID, err)
 		}
@@ -328,7 +328,7 @@ func (s *RemoteChatStore) DeleteChat(chatID string) error {
 // no-op (there is nothing to block; the flag would be erased by the next
 // auto-create anyway).
 func (s *RemoteChatStore) SetChatDisabled(chatID string, disabled bool) error {
-	return s.UpdateChat(chatID, func(chat *Chat) {
+	return s.UpdateChat(chatID, func(chat *bot.Chat) {
 		chat.Disabled = disabled
 		if disabled {
 			chat.DisabledAt = time.Now().UTC()
@@ -352,39 +352,11 @@ func (s *RemoteChatStore) IsChatDisabled(chatID string) bool {
 // BindProject binds a project to a chat, creating the chat if needed, and
 // pushes the path onto the chat's MRU history.
 func (s *RemoteChatStore) BindProject(chatID, platform, projectPath, ownerID string) error {
-	return s.mutate(chatID, platform, func(chat *Chat) {
+	return s.mutate(chatID, platform, func(chat *bot.Chat) {
 		chat.Platform = platform
 		chat.OwnerID = ownerID
-		PushProjectHistory(chat, projectPath)
+		chat.PushProjectHistory(projectPath)
 	})
-}
-
-// PushProjectHistory sets chat.ProjectPath and prepends it to ProjectHistory
-// (deduped, capped). When the chat already had a ProjectPath that wasn't in
-// the history yet, it is preserved one slot below so a fresh upgrade keeps
-// the previous binding visible.
-func PushProjectHistory(chat *Chat, path string) {
-	if chat == nil || path == "" {
-		return
-	}
-	prior := chat.ProjectHistory
-	if len(prior) == 0 && chat.ProjectPath != "" && chat.ProjectPath != path {
-		prior = []string{chat.ProjectPath}
-	}
-	chat.ProjectPath = path
-
-	out := make([]string, 0, len(prior)+1)
-	out = append(out, path)
-	for _, p := range prior {
-		if p == "" || p == path {
-			continue
-		}
-		out = append(out, p)
-		if len(out) >= ProjectHistoryCap {
-			break
-		}
-	}
-	chat.ProjectHistory = out
 }
 
 // ListChatProjectPaths returns the per-chat MRU list of project paths (newest
@@ -418,7 +390,7 @@ func (s *RemoteChatStore) GetProjectPath(chatID string) (string, bool, error) {
 }
 
 // ListChatsByOwner lists a user's chats on a platform that have a project bound.
-func (s *RemoteChatStore) ListChatsByOwner(ownerID, platform string) ([]*Chat, error) {
+func (s *RemoteChatStore) ListChatsByOwner(ownerID, platform string) ([]*bot.Chat, error) {
 	if !s.ready() {
 		return nil, ErrStoreClosed
 	}
@@ -428,7 +400,7 @@ func (s *RemoteChatStore) ListChatsByOwner(ownerID, platform string) ([]*Chat, e
 		Find(&recs).Error; err != nil {
 		return nil, fmt.Errorf("list chats by owner: %w", err)
 	}
-	out := make([]*Chat, 0, len(recs))
+	out := make([]*bot.Chat, 0, len(recs))
 	for i := range recs {
 		out = append(out, fromChatRecord(&recs[i]))
 	}
@@ -440,7 +412,7 @@ func (s *RemoteChatStore) ListChatsByOwner(ownerID, platform string) ([]*Chat, e
 // are dropped at the source (see bot.ChatStoreInterface.ListChats for why).
 // Ordered newest-first by updated_at, with chat_id as a stable tiebreaker, so
 // the most recently active chats surface at the top.
-func (s *RemoteChatStore) ListChats(platform string, includeDisabled bool) ([]*Chat, error) {
+func (s *RemoteChatStore) ListChats(platform string, includeDisabled bool) ([]*bot.Chat, error) {
 	if !s.ready() {
 		return nil, ErrStoreClosed
 	}
@@ -461,7 +433,7 @@ func (s *RemoteChatStore) ListChats(platform string, includeDisabled bool) ([]*C
 		return nil, fmt.Errorf("list chats for platform %s: %w", platform, err)
 	}
 
-	out := make([]*Chat, 0, len(recs))
+	out := make([]*bot.Chat, 0, len(recs))
 	for i := range recs {
 		out = append(out, fromChatRecord(&recs[i]))
 	}
@@ -472,7 +444,7 @@ func (s *RemoteChatStore) ListChats(platform string, includeDisabled bool) ([]*C
 
 // AddToWhitelist whitelists a chat, creating it if needed.
 func (s *RemoteChatStore) AddToWhitelist(chatID, platform, addedBy string) error {
-	return s.mutate(chatID, platform, func(chat *Chat) {
+	return s.mutate(chatID, platform, func(chat *bot.Chat) {
 		chat.IsWhitelisted = true
 		chat.WhitelistedBy = addedBy
 	})
@@ -480,7 +452,7 @@ func (s *RemoteChatStore) AddToWhitelist(chatID, platform, addedBy string) error
 
 // RemoveFromWhitelist clears a chat's whitelist flag.
 func (s *RemoteChatStore) RemoveFromWhitelist(chatID string) error {
-	return s.UpdateChat(chatID, func(chat *Chat) {
+	return s.UpdateChat(chatID, func(chat *bot.Chat) {
 		chat.IsWhitelisted = false
 	})
 }
@@ -498,7 +470,7 @@ func (s *RemoteChatStore) IsWhitelisted(chatID string) bool {
 
 // SetBashCwd sets the bash working directory for a chat.
 func (s *RemoteChatStore) SetBashCwd(chatID, cwd string) error {
-	return s.UpdateChat(chatID, func(chat *Chat) {
+	return s.UpdateChat(chatID, func(chat *bot.Chat) {
 		chat.BashCwd = cwd
 	})
 }
@@ -521,7 +493,7 @@ func (s *RemoteChatStore) GetBashCwd(chatID string) (string, bool, error) {
 // doesn't exist yet — without the auto-create, handoff state was silently
 // dropped for any chat that hadn't been bound or paired first.
 func (s *RemoteChatStore) SetCurrentAgent(chatID, platform, agentType string) error {
-	return s.mutate(chatID, platform, func(chat *Chat) {
+	return s.mutate(chatID, platform, func(chat *bot.Chat) {
 		chat.CurrentAgent = agentType
 	})
 }
@@ -547,7 +519,7 @@ func (s *RemoteChatStore) SetPaired(chatID, platform, botUUID, senderID string) 
 	if chatID == "" || botUUID == "" {
 		return fmt.Errorf("chat_id and bot_uuid are required")
 	}
-	return s.mutate(chatID, platform, func(chat *Chat) {
+	return s.mutate(chatID, platform, func(chat *bot.Chat) {
 		chat.IsPaired = true
 		chat.PairedBotUUID = botUUID
 		chat.PairedSenderID = senderID
@@ -561,7 +533,7 @@ func (s *RemoteChatStore) SetPaired(chatID, platform, botUUID, senderID string) 
 // ClearPaired removes any pairing recorded on the chat, preserving the rest of
 // its state.
 func (s *RemoteChatStore) ClearPaired(chatID string) error {
-	return s.UpdateChat(chatID, func(chat *Chat) {
+	return s.UpdateChat(chatID, func(chat *bot.Chat) {
 		chat.IsPaired = false
 		chat.PairedBotUUID = ""
 		chat.PairedSenderID = ""

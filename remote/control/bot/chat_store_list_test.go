@@ -1,11 +1,13 @@
-package bot
+package bot_test
 
 import (
 	"testing"
 	"time"
+
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 )
 
-func newTestChatStore(t *testing.T) ChatStoreInterface {
+func newTestChatStore(t *testing.T) bot.ChatStoreInterface {
 	t.Helper()
 	return openStore(t, t.TempDir())
 }
@@ -18,7 +20,7 @@ func TestListChats_ScopesToPlatform(t *testing.T) {
 	store := newTestChatStore(t)
 
 	now := time.Now().UTC()
-	for _, c := range []*Chat{
+	for _, c := range []*bot.Chat{
 		{ChatID: "tg:1", Platform: "telegram", CreatedAt: now, UpdatedAt: now},
 		{ChatID: "dc:1", Platform: "discord", CreatedAt: now, UpdatedAt: now},
 		{ChatID: "orphan", Platform: "", CreatedAt: now, UpdatedAt: now},
@@ -56,7 +58,7 @@ func TestListChats_NewestFirst(t *testing.T) {
 
 	inserted := []string{"first", "second", "third"}
 	for _, id := range inserted {
-		if err := store.UpsertChat(&Chat{ChatID: id, Platform: "telegram"}); err != nil {
+		if err := store.UpsertChat(&bot.Chat{ChatID: id, Platform: "telegram"}); err != nil {
 			t.Fatalf("UpsertChat(%s): %v", id, err)
 		}
 	}

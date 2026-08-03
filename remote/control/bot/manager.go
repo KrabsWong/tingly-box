@@ -91,9 +91,9 @@ func runBotWithSettings(ctx context.Context, setting BotSetting, chatStore ChatS
 		attachedList = append(attachedList, attached)
 	}
 	handlers := make([]OnMessage, 0, len(attachedList)+2)
-	handlers = append(handlers, disabledChatGate(chatStore))
+	handlers = append(handlers, DisabledChatGate(chatStore))
 	if accessStore != nil && authorizer != nil {
-		handlers = append(handlers, authorizationGate(accessStore, authorizer, chatStore, setting.IsRequirePairing(), func(chatID string) (access.CapabilityName, access.ActionName) {
+		handlers = append(handlers, AuthorizationGate(accessStore, authorizer, chatStore, setting.IsRequirePairing(), func(chatID string) (access.CapabilityName, access.ActionName) {
 			pending := prompter.GetPendingRequestsForChat(chatID)
 			if len(pending) == 0 {
 				return "", ""

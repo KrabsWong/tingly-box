@@ -52,7 +52,7 @@ func inboundAction(msg imbot.Message, pendingCapability access.CapabilityName, p
 
 // authorizationGate is the one production inbound seam for text, callbacks,
 // and files. A denied message is claimed here and cannot reach a Capability.
-func authorizationGate(store AccessStore, authorizer access.Authorizer, legacyChats ChatStoreInterface, requirePairing bool, pendingForChat func(string) (access.CapabilityName, access.ActionName)) OnMessage {
+func AuthorizationGate(store AccessStore, authorizer access.Authorizer, legacyChats ChatStoreInterface, requirePairing bool, pendingForChat func(string) (access.CapabilityName, access.ActionName)) OnMessage {
 	return func(msg imbot.Message, platform imbot.Platform, botUUID string) bool {
 		if store == nil || authorizer == nil {
 			return false

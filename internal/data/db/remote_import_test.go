@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 	"github.com/tingly-dev/tingly-box/remote/session"
 )
 
@@ -38,7 +39,7 @@ func writeJSON(t *testing.T, path string, v any) {
 // session keys are capitalized on purpose: the old Session struct carried no
 // json tags, so the Go field names went to disk verbatim. Getting this wrong
 // would silently import empty sessions.
-func writeLegacyChats(t *testing.T, dir string, chats map[string]*Chat) {
+func writeLegacyChats(t *testing.T, dir string, chats map[string]*bot.Chat) {
 	t.Helper()
 	writeJSON(t, filepath.Join(dir, "bot_chats.json"), map[string]any{
 		"version": 1,
@@ -59,7 +60,7 @@ func TestImportMovesChatsAndSessions(t *testing.T) {
 	chatStore, sessionStore := stores(t, dir)
 
 	dormant := time.Now().UTC().Add(-30 * 24 * time.Hour).Truncate(time.Second)
-	writeLegacyChats(t, dir, map[string]*Chat{
+	writeLegacyChats(t, dir, map[string]*bot.Chat{
 		"chat-1": {
 			ChatID:         "chat-1",
 			Platform:       "telegram",
@@ -159,7 +160,7 @@ func TestImportRenamesFiles(t *testing.T) {
 	dir := t.TempDir()
 	chatStore, sessionStore := stores(t, dir)
 
-	writeLegacyChats(t, dir, map[string]*Chat{"chat-1": {ChatID: "chat-1"}})
+	writeLegacyChats(t, dir, map[string]*bot.Chat{"chat-1": {ChatID: "chat-1"}})
 	writeLegacySessions(t, dir, `{"version":1,"items":{}}`)
 
 	if err := importLegacyRemoteJSON(dir, chatStore, sessionStore); err != nil {
@@ -183,7 +184,7 @@ func TestImportIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	chatStore, sessionStore := stores(t, dir)
 
-	writeLegacyChats(t, dir, map[string]*Chat{
+	writeLegacyChats(t, dir, map[string]*bot.Chat{
 		"chat-1": {ChatID: "chat-1", Platform: "telegram", ProjectPath: "/stale"},
 	})
 	if err := importLegacyRemoteJSON(dir, chatStore, sessionStore); err != nil {
@@ -197,7 +198,7 @@ func TestImportIsIdempotent(t *testing.T) {
 
 	// The stale file comes back (restored from a backup, say) and is imported
 	// again. Live state must win.
-	writeLegacyChats(t, dir, map[string]*Chat{
+	writeLegacyChats(t, dir, map[string]*bot.Chat{
 		"chat-1": {ChatID: "chat-1", Platform: "telegram", ProjectPath: "/stale"},
 	})
 	if err := importLegacyRemoteJSON(dir, chatStore, sessionStore); err != nil {

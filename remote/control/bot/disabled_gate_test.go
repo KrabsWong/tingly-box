@@ -1,9 +1,10 @@
-package bot
+package bot_test
 
 import (
 	"testing"
 
 	"github.com/tingly-dev/tingly-box/imbot"
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 )
 
 func newIncomingMessage(chatID, text string) imbot.Message {
@@ -28,7 +29,7 @@ func TestDisabledChatGate_ClaimsBeforeAnyoneElse(t *testing.T) {
 		t.Fatalf("disable: %v", err)
 	}
 
-	gate := disabledChatGate(store)
+	gate := bot.DisabledChatGate(store)
 
 	msg := newIncomingMessage(chatID, "yes")
 	if claimed := gate(msg, imbot.PlatformTelegram, "bot-1"); !claimed {
@@ -49,7 +50,7 @@ func TestDisabledChatGate_ClaimsBeforeAnyoneElse(t *testing.T) {
 // never been seen before (no row in the store yet).
 func TestDisabledChatGate_PassesThroughEnabledChats(t *testing.T) {
 	store := openStore(t, t.TempDir())
-	gate := disabledChatGate(store)
+	gate := bot.DisabledChatGate(store)
 
 	fresh := newIncomingMessage("brand-new-chat", "hi")
 	if claimed := gate(fresh, imbot.PlatformTelegram, "bot-1"); claimed {
@@ -69,7 +70,7 @@ func TestDisabledChatGate_PassesThroughEnabledChats(t *testing.T) {
 // TestDisabledChatGate_NilStoreNeverClaims covers a nil-injected store (e.g.
 // misconfigured host) failing open rather than panicking or blocking traffic.
 func TestDisabledChatGate_NilStoreNeverClaims(t *testing.T) {
-	gate := disabledChatGate(nil)
+	gate := bot.DisabledChatGate(nil)
 	msg := newIncomingMessage("any-chat", "hi")
 	if claimed := gate(msg, imbot.PlatformTelegram, "bot-1"); claimed {
 		t.Fatal("gate with nil store claimed a message")

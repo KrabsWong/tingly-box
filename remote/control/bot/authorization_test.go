@@ -1,4 +1,4 @@
-package bot
+package bot_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"github.com/tingly-dev/tingly-box/imbot"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
 	"github.com/tingly-dev/tingly-box/remote/access"
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 )
 
 type authorizationOnlineTransport struct{}
@@ -37,7 +38,7 @@ func directAuthorizationFixture(t *testing.T) (*db.StoreManager, db.Settings, im
 
 func TestAuthorizationGateAutoPairsDirectPeerWhenPairingDisabled(t *testing.T) {
 	sm, setting, msg := directAuthorizationFixture(t)
-	gate := authorizationGate(sm.BotAccess(), access.NewEvaluator(sm.BotAccess()), sm.RemoteChats(), false, nil)
+	gate := bot.AuthorizationGate(sm.BotAccess(), access.NewEvaluator(sm.BotAccess()), sm.RemoteChats(), false, nil)
 	require.False(t, gate(msg, imbot.Platform(setting.Platform), setting.UUID), "authorized direct message must continue to Remote Control")
 
 	chats, err := sm.BotAccess().ListDirectChats(context.Background(), setting.UUID)
@@ -57,7 +58,7 @@ func TestAuthorizationGateAutoPairsDirectPeerWhenPairingDisabled(t *testing.T) {
 
 func TestAuthorizationGateKeepsUnpairedDirectPeerDeniedWhenPairingRequired(t *testing.T) {
 	sm, setting, msg := directAuthorizationFixture(t)
-	gate := authorizationGate(sm.BotAccess(), access.NewEvaluator(sm.BotAccess()), sm.RemoteChats(), true, nil)
+	gate := bot.AuthorizationGate(sm.BotAccess(), access.NewEvaluator(sm.BotAccess()), sm.RemoteChats(), true, nil)
 	require.True(t, gate(msg, imbot.Platform(setting.Platform), setting.UUID), "unpaired direct message must be claimed")
 
 	chats, err := sm.BotAccess().ListDirectChats(context.Background(), setting.UUID)
@@ -69,7 +70,7 @@ func TestAuthorizationGateKeepsUnpairedDirectPeerDeniedWhenPairingRequired(t *te
 func TestAuthorizationGateMigratesLegacyPairedDirectPeer(t *testing.T) {
 	sm, setting, msg := directAuthorizationFixture(t)
 	require.NoError(t, sm.RemoteChats().SetPaired(msg.Recipient.ID, setting.Platform, setting.UUID, msg.Sender.ID))
-	gate := authorizationGate(sm.BotAccess(), access.NewEvaluator(sm.BotAccess()), sm.RemoteChats(), true, nil)
+	gate := bot.AuthorizationGate(sm.BotAccess(), access.NewEvaluator(sm.BotAccess()), sm.RemoteChats(), true, nil)
 	require.False(t, gate(msg, imbot.Platform(setting.Platform), setting.UUID), "legacy paired direct message must remain authorized")
 
 	chats, err := sm.BotAccess().ListDirectChats(context.Background(), setting.UUID)

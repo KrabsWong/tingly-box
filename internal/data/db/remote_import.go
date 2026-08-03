@@ -10,6 +10,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 	"github.com/tingly-dev/tingly-box/remote/session"
 )
 
@@ -118,7 +119,7 @@ func importChats(path string, store *RemoteChatStore) error {
 	if store == nil {
 		return nil
 	}
-	items, ok, err := readLegacy[Chat](path)
+	items, ok, err := readLegacy[bot.Chat](path)
 	if err != nil || !ok {
 		return err
 	}

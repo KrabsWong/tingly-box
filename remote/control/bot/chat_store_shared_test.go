@@ -1,8 +1,10 @@
-package bot
+package bot_test
 
 import (
 	"context"
 	"testing"
+
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 )
 
 // TestManagerChatStoreIsShared pins the invariant that every bot a manager
@@ -12,7 +14,7 @@ import (
 func TestManagerChatStoreIsShared(t *testing.T) {
 	store := openStore(t, t.TempDir())
 
-	m := NewManager(nil)
+	m := bot.NewManager(nil)
 	m.SetChatStore(store)
 
 	first, err := m.ChatStore()
@@ -42,7 +44,7 @@ func TestManagerChatStoreIsShared(t *testing.T) {
 // TestManagerRequiresChatStore keeps the failure loud: a bot must not run
 // without persistence, and Start is the last place to catch that.
 func TestManagerRequiresChatStore(t *testing.T) {
-	m := NewManager(nil)
+	m := bot.NewManager(nil)
 
 	if _, err := m.ChatStore(); err == nil {
 		t.Error("expected an error when no chat store is configured")

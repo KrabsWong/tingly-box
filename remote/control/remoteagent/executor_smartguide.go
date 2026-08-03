@@ -13,7 +13,6 @@ import (
 
 	"github.com/tingly-dev/tingly-box/afk"
 	"github.com/tingly-dev/tingly-box/agentboot"
-	"github.com/tingly-dev/tingly-box/internal/data/db"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 
@@ -148,7 +147,7 @@ func (e *SmartGuideExecutor) Execute(ctx context.Context, req PreparedRequest) e
 				"newPath": newProjectPath,
 			}).Info("updateProjectFunc called - persisting to chat store")
 			return e.deps.ChatStore.UpdateChat(chatID, func(chat *bot.Chat) {
-				db.PushProjectHistory(chat, newProjectPath)
+				chat.PushProjectHistory(newProjectPath)
 				chat.BashCwd = newProjectPath
 			})
 		},

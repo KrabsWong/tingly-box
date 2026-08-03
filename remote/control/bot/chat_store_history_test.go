@@ -1,12 +1,16 @@
-package bot
+package bot_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
+)
 
 func TestListChatProjectPaths_FallbackToProjectPath(t *testing.T) {
 	dir := t.TempDir()
 	store := openStore(t, dir)
 	// Simulate a legacy chat written before ProjectHistory existed.
-	if err := store.UpsertChat(&Chat{
+	if err := store.UpsertChat(&bot.Chat{
 		ChatID:      "legacy",
 		Platform:    "telegram",
 		ProjectPath: "/legacy/path",

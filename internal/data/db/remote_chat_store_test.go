@@ -1,8 +1,9 @@
 package db
 
 import (
-	"fmt"
 	"testing"
+
+	"github.com/tingly-dev/tingly-box/remote/control/bot"
 )
 
 func newChatStore(t *testing.T) *RemoteChatStore {
@@ -139,7 +140,7 @@ func TestUpdateChatMissingIsNoop(t *testing.T) {
 	store := newChatStore(t)
 
 	called := false
-	if err := store.UpdateChat("nope", func(c *Chat) { called = true }); err != nil {
+	if err := store.UpdateChat("nope", func(c *bot.Chat) { called = true }); err != nil {
 		t.Fatalf("update missing: %v", err)
 	}
 	if called {
@@ -206,58 +207,14 @@ func TestListChatsByOwnerFiltersUnbound(t *testing.T) {
 func TestUpsertRequiresChatID(t *testing.T) {
 	store := newChatStore(t)
 
-	if err := store.UpsertChat(&Chat{}); err == nil {
+	if err := store.UpsertChat(&bot.Chat{}); err == nil {
 		t.Error("expected an error upserting a chat with no ID")
 	}
 }
 
 // ---------- project-history MRU ----------
 //
-// These moved here with PushProjectHistory itself when chats became rows.
-
-func TestPushProjectHistory_PrependsAndDedupes(t *testing.T) {
-	chat := &Chat{}
-	PushProjectHistory(chat, "/a")
-	PushProjectHistory(chat, "/b")
-	PushProjectHistory(chat, "/c")
-	PushProjectHistory(chat, "/a") // dedupe — should move to front, not duplicate
-	want := []string{"/a", "/c", "/b"}
-	if len(chat.ProjectHistory) != len(want) {
-		t.Fatalf("history length %d, want %d (%v)", len(chat.ProjectHistory), len(want), chat.ProjectHistory)
-	}
-	for i, w := range want {
-		if chat.ProjectHistory[i] != w {
-			t.Errorf("history[%d] = %q, want %q (%v)", i, chat.ProjectHistory[i], w, chat.ProjectHistory)
-		}
-	}
-	if chat.ProjectPath != "/a" {
-		t.Errorf("ProjectPath = %q, want /a", chat.ProjectPath)
-	}
-}
-
-func TestPushProjectHistory_SeedsLegacyProjectPath(t *testing.T) {
-	chat := &Chat{ProjectPath: "/legacy"} // pre-existing binding from before history
-	PushProjectHistory(chat, "/new")
-	want := []string{"/new", "/legacy"}
-	if len(chat.ProjectHistory) != 2 || chat.ProjectHistory[0] != want[0] || chat.ProjectHistory[1] != want[1] {
-		t.Errorf("history = %v, want %v", chat.ProjectHistory, want)
-	}
-}
-
-func TestPushProjectHistory_EmptyPathIsNoOp(t *testing.T) {
-	chat := &Chat{ProjectPath: "/x", ProjectHistory: []string{"/x"}}
-	PushProjectHistory(chat, "")
-	if chat.ProjectPath != "/x" || len(chat.ProjectHistory) != 1 {
-		t.Errorf("empty path should not mutate state: path=%q history=%v", chat.ProjectPath, chat.ProjectHistory)
-	}
-}
-
-func TestPushProjectHistory_Caps(t *testing.T) {
-	chat := &Chat{}
-	for i := 0; i < ProjectHistoryCap+5; i++ {
-		PushProjectHistory(chat, fmt.Sprintf("/p%d", i))
-	}
-	if len(chat.ProjectHistory) != ProjectHistoryCap {
-		t.Errorf("history not capped: got %d, want %d", len(chat.ProjectHistory), ProjectHistoryCap)
-	}
-}
+// PushProjectHistory is now a method on *bot.Chat; its unit tests moved to
+// remote/control/bot/chat_test.go alongside the type. BindProject (below in
+// remote_chat_store.go) is the store-level caller exercised by the import
+// and binding tests above.
