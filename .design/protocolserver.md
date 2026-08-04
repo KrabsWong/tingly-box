@@ -90,10 +90,12 @@ handler 类型 — **拆分对外部 API 零破坏**。
 
 - `load_balance_handler.go`（`LoadBalancerAPI`，管理面 HTTP 包装）与 `guardrails_handler.go`
   留在 server 侧（管理面），只消费 protocolserver 暴露的接口。
-- **`module/mcp` 位置待定**：protocolserver 大量依赖 `internal/server/module/mcp`
-  （adapter/forwarder/loop processor/stream interceptor —— 本质是 serving 端逻辑）。
-  这是目前唯一残留的 `protocolserver → server/module/*` 依赖；后续可将其迁为
-  `protocolserver/mcpconv`（或类似）以彻底单向化。
+- **`internal/mcpserver`**（Step 5，2026-08-04）：MCP 转换引擎（adapters/forwarder/
+  loop processor/stream interceptor/tool executor/continuation store，~3.6k 行）已从
+  `server/module/mcp` 独立；管理面（handler/routes，/api/v1/mcp CRUD）留在 module/mcp。
+  `protocolserver → server/module/*` 反向依赖清零。注意 mcpserver 引用
+  `protocolserver/forwarding`（context provider 接口）——方向可接受，若要彻底解耦可将
+  ForwardContext 下沉。
 - LB 模拟器（`load_balance_simulator.go`）与 serving 侧测试中若干仍构造 `&Server{}`
   的用例留在 server 包（它们需要 unexported failover 入口经 aiHandler 走通）。
 - 拆完后可为依赖方向加 lint 规则（depguard / go vet 自定义）。
