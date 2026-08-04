@@ -1,9 +1,8 @@
-package server
+package protocolserver
 
 import (
 	"context"
 	"errors"
-	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -37,7 +36,7 @@ func TestSanitizeErrorCode(t *testing.T) {
 }
 
 func TestUpdateServiceStats(t *testing.T) {
-	s := &Server{}
+	s := &ProtocolHandler{}
 	// Minimal test - just verify it doesn't panic with nil inputs
 	s.updateServiceStats(nil, nil, "", MetricsData{})
 
@@ -81,7 +80,7 @@ func TestTrackUsageFromContext_DoesNotPanic(t *testing.T) {
 			setup: func(c *gin.Context) {
 				rule := &typ.Rule{UUID: "test-rule"}
 				provider := &typ.Provider{UUID: "test-provider", Name: "test"}
-				protocolserver.SetTrackingContext(c, rule, provider, "gpt-4", "gpt-4", false)
+				SetTrackingContext(c, rule, provider, "gpt-4", "gpt-4", false)
 			},
 			input:  100,
 			output: 50,
@@ -92,7 +91,7 @@ func TestTrackUsageFromContext_DoesNotPanic(t *testing.T) {
 			setup: func(c *gin.Context) {
 				rule := &typ.Rule{UUID: "test-rule"}
 				provider := &typ.Provider{UUID: "test-provider", Name: "test"}
-				protocolserver.SetTrackingContext(c, rule, provider, "gpt-4", "gpt-4", false)
+				SetTrackingContext(c, rule, provider, "gpt-4", "gpt-4", false)
 			},
 			input:  0,
 			output: 0,
@@ -110,7 +109,7 @@ func TestTrackUsageFromContext_DoesNotPanic(t *testing.T) {
 			setup: func(c *gin.Context) {
 				rule := &typ.Rule{UUID: "test-rule"}
 				provider := &typ.Provider{UUID: "test-provider", Name: "test"}
-				protocolserver.SetTrackingContext(c, rule, provider, "gpt-4", "gpt-4", false)
+				SetTrackingContext(c, rule, provider, "gpt-4", "gpt-4", false)
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
 				c.Request = &http.Request{}
@@ -127,7 +126,7 @@ func TestTrackUsageFromContext_DoesNotPanic(t *testing.T) {
 			c, _ := gin.CreateTestContext(nil)
 			tt.setup(c)
 
-			s := &Server{}
+			s := &ProtocolHandler{}
 
 			// Should not panic
 			s.trackUsageFromContext(c, tt.input, tt.output, tt.err)
@@ -157,11 +156,11 @@ func TestTrackUsageFromContext_ReportsEnterpriseRateLimit(t *testing.T) {
 
 	rule := &typ.Rule{UUID: "r1"}
 	provider := &typ.Provider{UUID: "p1", Name: "provider-1"}
-	protocolserver.SetTrackingContext(c, rule, provider, "tingly/cc", "tingly/cc", false)
+	SetTrackingContext(c, rule, provider, "tingly/cc", "tingly/cc", false)
 	c.Set(constant.CtxKeyEnterpriseKeyPrefix, "sk-tbe-12345678")
 	c.Set(constant.CtxKeyEnterpriseUserID, "u1")
 
-	s := &Server{}
+	s := &ProtocolHandler{}
 	s.trackUsageFromContext(c, 0, 0, errors.New("upstream returned 429 rate limit"))
 
 	if atomic.LoadInt32(&called) != 1 {

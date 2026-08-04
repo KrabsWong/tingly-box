@@ -23,7 +23,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
 	mcpruntime "github.com/tingly-dev/tingly-box/internal/mcp/runtime"
 	"github.com/tingly-dev/tingly-box/internal/obs"
-	"github.com/tingly-dev/tingly-box/internal/protocol"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/affinity"
 	"github.com/tingly-dev/tingly-box/internal/protocolserver/recording"
 	"github.com/tingly-dev/tingly-box/internal/protocolserver/routing"
 	"github.com/tingly-dev/tingly-box/internal/protocolserver/servertool"
@@ -85,16 +85,20 @@ type ProtocolHandlerDeps struct {
 	// nil — callers fall back to servertool.NewDefaultExecutor.
 	GetServertoolPipeline func() *servertool.Pipeline
 
-	// The callbacks below reach back into root *Server state that has not
-	// (yet) moved to aimodel: OTel usage-tracking wiring, the affinity
-	// store, scenario recording sinks, and the guardrails runtime pointer.
-	// Wiring them as funcs keeps this package independent of *server.Server
-	// while letting already-moved gateway logic still reach that state.
-	TrackUsageWithTokenUsage func(c *gin.Context, usage *protocol.TokenUsage, err error)
-	TrackUsageFromContext    func(c *gin.Context, inputTokens, outputTokens int, err error)
-	UpdateAffinityMessageID  func(c *gin.Context, rule *typ.Rule, messageID string)
-	GetOrCreateScenarioSink  func(scenario typ.RuleScenario) *obs.Sink
-	CurrentGuardrailsRuntime func() *guardrails.Guardrails
+	// AffinityStore holds session→service affinity entries (sticky routing).
+	// Owned by the host server (constructed and GC-started there); the
+	// gateway updates message IDs on it after each response.
+	AffinityStore *affinity.AffinityStore
+
+	// GuardrailsState holds the mutex-guarded guardrails runtime pointer and
+	// its lifecycle operations. Owned by this package; the host server's
+	// admin handlers drive it through *Server's thin forwarding methods.
+	GuardrailsState *GuardrailsState
+
+	// GetOrCreateScenarioSink reaches back into root *Server state that has
+	// not (yet) moved here: scenario recording sinks. Wiring it as a func
+	// keeps this package independent of *server.Server.
+	GetOrCreateScenarioSink func(scenario typ.RuleScenario) *obs.Sink
 
 	// GetScenarioRecordMode resolves the effective recording mode for a
 	// scenario. Backed by root's s.recordMode/s.scenarioRecordSinks, which
@@ -124,32 +128,8 @@ func NewHandler(deps ProtocolHandlerDeps) *ProtocolHandler {
 // corresponding Deps field may be unset in tests that construct a bare
 // Handler.
 
-func (ph *ProtocolHandler) trackUsageWithTokenUsage(c *gin.Context, usage *protocol.TokenUsage, err error) {
-	if ph.deps.TrackUsageWithTokenUsage == nil {
-		return
-	}
-	ph.deps.TrackUsageWithTokenUsage(c, usage, err)
-}
-
-func (ph *ProtocolHandler) trackUsageFromContext(c *gin.Context, inputTokens, outputTokens int, err error) {
-	if ph.deps.TrackUsageFromContext == nil {
-		return
-	}
-	ph.deps.TrackUsageFromContext(c, inputTokens, outputTokens, err)
-}
-
-func (ph *ProtocolHandler) updateAffinityMessageID(c *gin.Context, rule *typ.Rule, messageID string) {
-	if ph.deps.UpdateAffinityMessageID == nil {
-		return
-	}
-	ph.deps.UpdateAffinityMessageID(c, rule, messageID)
-}
-
 func (ph *ProtocolHandler) currentGuardrailsRuntime() *guardrails.Guardrails {
-	if ph.deps.CurrentGuardrailsRuntime == nil {
-		return nil
-	}
-	return ph.deps.CurrentGuardrailsRuntime()
+	return ph.deps.GuardrailsState.Current()
 }
 
 func (ph *ProtocolHandler) guardrailsEnabledForScenario(scenario string) bool {

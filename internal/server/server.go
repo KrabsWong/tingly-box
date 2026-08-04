@@ -117,10 +117,10 @@ type Server struct {
 	// servertool pipeline — owns virtual tool providers and hook list
 	servertoolPipeline *servertool.Pipeline
 
-	// guardrails runtime (optional)
-	guardrailsRuntime   *guardrails.Guardrails
-	guardrailsRuntimeMu sync.RWMutex
-	guardrailsConfigMu  sync.Mutex
+	// guardrails runtime state (owned by protocolserver; constructed in
+	// NewServer before anything reads it)
+	guardrailsState    *protocolserver.GuardrailsState
+	guardrailsConfigMu sync.Mutex
 
 	// recording sinks
 	recordSink *obs.Sink
@@ -212,9 +212,10 @@ func NewServer(cfg *config.Config, opts ...ServerOption) *Server {
 
 	// Default options
 	server := &Server{
-		config: cfg,
-		ctx:    ctx,
-		cancel: cancel,
+		config:          cfg,
+		ctx:             ctx,
+		cancel:          cancel,
+		guardrailsState: protocolserver.NewGuardrailsState(cfg),
 	}
 
 	// Apply all options (defaults + provided)
@@ -487,22 +488,20 @@ func NewServer(cfg *config.Config, opts ...ServerOption) *Server {
 	// root state that has not moved to aimodel yet (usage tracking, affinity
 	// store, recording sinks, guardrails runtime) — see aimodel.Deps.
 	server.aiHandler = protocolserver.NewHandler(protocolserver.ProtocolHandlerDeps{
-		Config:                   server.config,
-		TokenTracker:             server.tokenTracker,
-		HealthMonitor:            server.healthMonitor,
-		ClientPool:               server.clientPool,
-		LoadBalancer:             server.loadBalancer,
-		MCPRuntime:               server.mcpRuntime,
-		TemplateManager:          server.templateManager,
-		RoutingSelector:          server.routingSelector,
-		VisionProxyService:       server.visionProxyService,
-		GetServertoolPipeline:    func() *servertool.Pipeline { return server.servertoolPipeline },
-		TrackUsageWithTokenUsage: server.trackUsageWithTokenUsage,
-		TrackUsageFromContext:    server.trackUsageFromContext,
-		UpdateAffinityMessageID:  server.updateAffinityMessageID,
-		GetOrCreateScenarioSink:  server.GetOrCreateScenarioSink,
-		CurrentGuardrailsRuntime: server.currentGuardrailsRuntime,
-		GetScenarioRecordMode:    server.GetScenarioRecordMode,
+		Config:                  server.config,
+		TokenTracker:            server.tokenTracker,
+		HealthMonitor:           server.healthMonitor,
+		ClientPool:              server.clientPool,
+		LoadBalancer:            server.loadBalancer,
+		MCPRuntime:              server.mcpRuntime,
+		TemplateManager:         server.templateManager,
+		RoutingSelector:         server.routingSelector,
+		VisionProxyService:      server.visionProxyService,
+		GetServertoolPipeline:   func() *servertool.Pipeline { return server.servertoolPipeline },
+		AffinityStore:           server.affinityStore,
+		GetOrCreateScenarioSink: server.GetOrCreateScenarioSink,
+		GuardrailsState:         server.guardrailsState,
+		GetScenarioRecordMode:   server.GetScenarioRecordMode,
 	})
 
 	// Setup middleware

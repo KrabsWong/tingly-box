@@ -1,12 +1,10 @@
-package server
+package protocolserver
 
 import (
 	"context"
 	"errors"
 	"strings"
 	"sync"
-
-	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -76,14 +74,14 @@ func reportEnterpriseRateLimitEvent(ctx context.Context, keyPrefix, providerID, 
 //   - inputTokens: Number of input/prompt tokens consumed
 //   - outputTokens: Number of output/completion tokens consumed
 //   - err: Error if request failed, nil for success (context.Canceled maps to "canceled" status)
-func (s *Server) trackUsageFromContext(c *gin.Context, inputTokens, outputTokens int, err error) {
-	rule, provider, model, requestModel, scenario, streamed, startTime := protocolserver.GetTrackingContext(c)
+func (ph *ProtocolHandler) trackUsageFromContext(c *gin.Context, inputTokens, outputTokens int, err error) {
+	rule, provider, model, requestModel, scenario, streamed, startTime := GetTrackingContext(c)
 
 	if rule == nil || provider == nil || model == "" {
 		return
 	}
 
-	latencyMs := protocolserver.CalculateLatencyFromStart(startTime)
+	latencyMs := CalculateLatencyFromStart(startTime)
 
 	// Determine status and error code from error
 	status, errorCode := "success", ""
@@ -98,9 +96,9 @@ func (s *Server) trackUsageFromContext(c *gin.Context, inputTokens, outputTokens
 	}
 
 	// Collect all metrics from context
-	ttftMs := protocolserver.CalculateTTFT(c)
-	cacheHit, _ := protocolserver.GetCacheHit(c) // Default false if not set
-	tps := protocolserver.CalculateTPS(c, outputTokens, streamed)
+	ttftMs := CalculateTTFT(c)
+	cacheHit, _ := GetCacheHit(c) // Default false if not set
+	tps := CalculateTPS(c, outputTokens, streamed)
 
 	// Build comprehensive metrics data
 	metrics := MetricsData{
@@ -113,17 +111,17 @@ func (s *Server) trackUsageFromContext(c *gin.Context, inputTokens, outputTokens
 	}
 
 	// 1. Update service stats with comprehensive metrics
-	s.updateServiceStats(rule, provider, model, metrics)
+	ph.updateServiceStats(rule, provider, model, metrics)
 
 	// 2. Record to OTel (primary path for metrics)
-	if s.tokenTracker != nil {
+	if ph.deps.TokenTracker != nil {
 		userTier := ""
 		if strings.TrimSpace(c.GetString(constant.CtxKeyEnterpriseUserID)) != "" {
 			userTier = "enterprise"
 		}
 		// Metric attributes must stay low-cardinality: pass the bounded error
 		// class, never the raw error message (see classifyErrorCode).
-		s.tokenTracker.RecordUsage(c.Request.Context(), tracker.UsageOptions{
+		ph.deps.TokenTracker.RecordUsage(c.Request.Context(), tracker.UsageOptions{
 			Provider:     provider.Name,
 			ProviderUUID: provider.UUID,
 			Model:        model,
@@ -141,10 +139,10 @@ func (s *Server) trackUsageFromContext(c *gin.Context, inputTokens, outputTokens
 	}
 
 	// 3. Record detailed usage (for analytics/dashboard)
-	s.recordDetailedUsage(c, rule, provider, model, requestModel, scenario, inputTokens, outputTokens, streamed, status, errorCode, latencyMs)
+	ph.recordDetailedUsage(c, rule, provider, model, requestModel, scenario, inputTokens, outputTokens, streamed, status, errorCode, latencyMs)
 
 	// 4. Report to health monitor for service health tracking
-	s.reportHealthStatus(provider, model, err, errorCode)
+	ph.ReportHealthStatus(provider, model, err, errorCode)
 
 	// 5. Enterprise key-level 429 alerting hook (best-effort).
 	if err != nil && isRateLimitError(err) && strings.TrimSpace(c.GetString(constant.CtxKeyEnterpriseUserID)) != "" {
@@ -165,8 +163,8 @@ func (s *Server) trackUsageFromContext(c *gin.Context, inputTokens, outputTokens
 //   - c: Gin context containing all tracking metadata
 //   - usage: Comprehensive token usage including cache and system tokens
 //   - err: Error if request failed, nil for success
-func (s *Server) trackUsageWithTokenUsage(c *gin.Context, usage *protocol.TokenUsage, err error) {
-	rule, provider, model, requestModel, scenario, streamed, startTime := protocolserver.GetTrackingContext(c)
+func (ph *ProtocolHandler) trackUsageWithTokenUsage(c *gin.Context, usage *protocol.TokenUsage, err error) {
+	rule, provider, model, requestModel, scenario, streamed, startTime := GetTrackingContext(c)
 
 	logrus.WithFields(logrus.Fields{
 		"has_rule":     rule != nil,
@@ -181,7 +179,7 @@ func (s *Server) trackUsageWithTokenUsage(c *gin.Context, usage *protocol.TokenU
 		return
 	}
 
-	latencyMs := protocolserver.CalculateLatencyFromStart(startTime)
+	latencyMs := CalculateLatencyFromStart(startTime)
 
 	// Determine status and error code from error
 	status, errorCode := "success", ""
@@ -212,12 +210,12 @@ func (s *Server) trackUsageWithTokenUsage(c *gin.Context, usage *protocol.TokenU
 	}).Debug("trackUsage: token usage recorded")
 
 	// Detect cache hit from usage data and set in context
-	cacheHit := protocolserver.DetectCacheHit(usage)
-	protocolserver.SetCacheHit(c, cacheHit)
+	cacheHit := DetectCacheHit(usage)
+	SetCacheHit(c, cacheHit)
 
 	// Collect all metrics from context and usage
-	ttftMs := protocolserver.CalculateTTFT(c)
-	tps := protocolserver.CalculateTPS(c, usage.OutputTokens, streamed)
+	ttftMs := CalculateTTFT(c)
+	tps := CalculateTPS(c, usage.OutputTokens, streamed)
 
 	// Build comprehensive metrics data
 	metrics := MetricsData{
@@ -230,13 +228,13 @@ func (s *Server) trackUsageWithTokenUsage(c *gin.Context, usage *protocol.TokenU
 	}
 
 	// 1. Update service stats with comprehensive metrics
-	s.updateServiceStats(rule, provider, model, metrics)
+	ph.updateServiceStats(rule, provider, model, metrics)
 
 	// 2. Record to OTel with comprehensive usage data
-	if s.tokenTracker != nil {
+	if ph.deps.TokenTracker != nil {
 		// Metric attributes must stay low-cardinality: pass the bounded error
 		// class, never the raw error message (see classifyErrorCode).
-		s.tokenTracker.RecordUsage(c.Request.Context(), tracker.UsageOptions{
+		ph.deps.TokenTracker.RecordUsage(c.Request.Context(), tracker.UsageOptions{
 			Provider:         provider.Name,
 			ProviderUUID:     provider.UUID,
 			Model:            model,
@@ -256,10 +254,10 @@ func (s *Server) trackUsageWithTokenUsage(c *gin.Context, usage *protocol.TokenU
 	}
 
 	// 3. Record detailed usage with comprehensive token data
-	s.recordDetailedUsageWithTokenUsage(c, rule, provider, model, requestModel, scenario, usage, streamed, status, errorCode, latencyMs)
+	ph.recordDetailedUsageWithTokenUsage(c, rule, provider, model, requestModel, scenario, usage, streamed, status, errorCode, latencyMs)
 
 	// 4. Report to health monitor for service health tracking
-	s.reportHealthStatus(provider, model, err, errorCode)
+	ph.ReportHealthStatus(provider, model, err, errorCode)
 
 	// 5. Enterprise key-level 429 alerting hook (best-effort).
 	if err != nil && isRateLimitError(err) && strings.TrimSpace(c.GetString(constant.CtxKeyEnterpriseUserID)) != "" {
@@ -341,12 +339,12 @@ func isRateLimitError(err error) bool {
 
 // recordDetailedUsage writes a detailed usage record to the database.
 // This maintains the detailed analytics tracking for the dashboard.
-func (s *Server) recordDetailedUsage(c *gin.Context, rule *typ.Rule, provider *typ.Provider, model, requestModel, scenario string, inputTokens, outputTokens int, streamed bool, status, errorCode string, latencyMs int) {
-	if s.config == nil {
+func (ph *ProtocolHandler) recordDetailedUsage(c *gin.Context, rule *typ.Rule, provider *typ.Provider, model, requestModel, scenario string, inputTokens, outputTokens int, streamed bool, status, errorCode string, latencyMs int) {
+	if ph.deps.Config == nil {
 		return
 	}
 
-	sm := s.config.StoreManager()
+	sm := ph.deps.Config.StoreManager()
 	if sm == nil {
 		return
 	}
@@ -355,7 +353,7 @@ func (s *Server) recordDetailedUsage(c *gin.Context, rule *typ.Rule, provider *t
 		return
 	}
 
-	ttftMs := protocolserver.CalculateTTFT(c)
+	ttftMs := CalculateTTFT(c)
 
 	record := &db.UsageRecord{
 		ProviderUUID: provider.UUID,
@@ -382,12 +380,12 @@ func (s *Server) recordDetailedUsage(c *gin.Context, rule *typ.Rule, provider *t
 }
 
 // recordDetailedUsageWithTokenUsage writes a detailed usage record with comprehensive token data.
-func (s *Server) recordDetailedUsageWithTokenUsage(c *gin.Context, rule *typ.Rule, provider *typ.Provider, model, requestModel, scenario string, usage *protocol.TokenUsage, streamed bool, status, errorCode string, latencyMs int) {
-	if s.config == nil || usage == nil {
+func (ph *ProtocolHandler) recordDetailedUsageWithTokenUsage(c *gin.Context, rule *typ.Rule, provider *typ.Provider, model, requestModel, scenario string, usage *protocol.TokenUsage, streamed bool, status, errorCode string, latencyMs int) {
+	if ph.deps.Config == nil || usage == nil {
 		return
 	}
 
-	sm := s.config.StoreManager()
+	sm := ph.deps.Config.StoreManager()
 	if sm == nil {
 		return
 	}
@@ -396,7 +394,7 @@ func (s *Server) recordDetailedUsageWithTokenUsage(c *gin.Context, rule *typ.Rul
 		return
 	}
 
-	ttftMs := protocolserver.CalculateTTFT(c)
+	ttftMs := CalculateTTFT(c)
 
 	record := &db.UsageRecord{
 		ProviderUUID:     provider.UUID,
@@ -427,8 +425,8 @@ func (s *Server) recordDetailedUsageWithTokenUsage(c *gin.Context, rule *typ.Rul
 
 // updateServiceStats updates the service-level statistics for load balancing.
 // This function records comprehensive metrics including tokens, latency, TTFT, cache, and TPS.
-func (s *Server) updateServiceStats(rule *typ.Rule, provider *typ.Provider, model string, metrics MetricsData) {
-	if rule == nil || provider == nil || s.config == nil {
+func (ph *ProtocolHandler) updateServiceStats(rule *typ.Rule, provider *typ.Provider, model string, metrics MetricsData) {
+	if rule == nil || provider == nil || ph.deps.Config == nil {
 		return
 	}
 
@@ -458,7 +456,7 @@ func (s *Server) updateServiceStats(rule *typ.Rule, provider *typ.Provider, mode
 			}
 
 			// Persist to stats store
-			sm := s.config.StoreManager()
+			sm := ph.deps.Config.StoreManager()
 			if sm != nil {
 				if statsStore := sm.Stats(); statsStore != nil {
 					_ = statsStore.UpdateFromService(service)
@@ -471,8 +469,8 @@ func (s *Server) updateServiceStats(rule *typ.Rule, provider *typ.Provider, mode
 
 // reportHealthStatus reports the health status of a service based on request outcome.
 // It uses the health monitor to track service health for load balancing decisions.
-func (s *Server) reportHealthStatus(provider *typ.Provider, model string, err error, errorCode string) {
-	if s.healthMonitor == nil {
+func (ph *ProtocolHandler) ReportHealthStatus(provider *typ.Provider, model string, err error, errorCode string) {
+	if ph.deps.HealthMonitor == nil {
 		logrus.Warn("[health] healthMonitor is nil - cannot report health status")
 		return
 	}
@@ -493,7 +491,7 @@ func (s *Server) reportHealthStatus(provider *typ.Provider, model string, err er
 
 	if err == nil {
 		// Success - report to health monitor
-		s.healthMonitor.ReportSuccess(serviceID)
+		ph.deps.HealthMonitor.ReportSuccess(serviceID)
 		return
 	}
 
@@ -509,7 +507,7 @@ func (s *Server) reportHealthStatus(provider *typ.Provider, model string, err er
 			"model":      model,
 			"error":      errStr,
 		}).Warn("[health] Rate limit detected - marking service unhealthy")
-		s.healthMonitor.ReportRateLimit(serviceID)
+		ph.deps.HealthMonitor.ReportRateLimit(serviceID)
 		return
 	}
 
@@ -518,9 +516,9 @@ func (s *Server) reportHealthStatus(provider *typ.Provider, model string, err er
 		strings.Contains(errStr, "unauthorized") || strings.Contains(errStr, "forbidden") {
 		// Try to determine if it's 401 or 403
 		if strings.Contains(errStr, "401") {
-			s.healthMonitor.ReportAuthError(serviceID, 401)
+			ph.deps.HealthMonitor.ReportAuthError(serviceID, 401)
 		} else {
-			s.healthMonitor.ReportAuthError(serviceID, 403)
+			ph.deps.HealthMonitor.ReportAuthError(serviceID, 403)
 		}
 		return
 	}

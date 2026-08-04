@@ -179,10 +179,9 @@ func NewLBSimulatorWithSequences(rule *typ.Rule, faults map[string]vmodel.Sequen
 
 	simServer := &Server{config: cfg, loadBalancer: lb, healthMonitor: hm}
 	simServer.aiHandler = protocolserver.NewHandler(protocolserver.ProtocolHandlerDeps{
-		Config:                cfg,
-		LoadBalancer:          lb,
-		HealthMonitor:         hm,
-		TrackUsageFromContext: simServer.trackUsageFromContext,
+		Config:        cfg,
+		LoadBalancer:  lb,
+		HealthMonitor: hm,
 	})
 
 	sim = &LBSimulator{
@@ -239,10 +238,10 @@ func (s *LBSimulator) Request(session string) (LBTrace, error) {
 		if status == http.StatusOK {
 			c.Writer.WriteHeader(http.StatusOK)
 			protocolserver.CommitFirstChunkIfGate(c.Writer) // simulate the stream's first real chunk
-			s.server.reportHealthStatus(provider, model, nil, "")
+			s.server.aiHandler.ReportHealthStatus(provider, model, nil, "")
 		} else {
 			c.Writer.WriteHeader(status)
-			s.server.reportHealthStatus(provider, model,
+			s.server.aiHandler.ReportHealthStatus(provider, model,
 				fmt.Errorf("upstream returned HTTP %d", status), "")
 		}
 	}
