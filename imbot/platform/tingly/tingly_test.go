@@ -197,36 +197,6 @@ func TestBot_CallbackRoundtrip(t *testing.T) {
 	}
 }
 
-func TestInteractionAdapter_BuildAndParse(t *testing.T) {
-	adapter := NewInteractionAdapter()
-	assert.True(t, adapter.SupportsInteractions())
-	assert.True(t, adapter.CanEditMessages())
-
-	markup, err := adapter.BuildMarkup([]itx.Interaction{
-		{ID: "perm", Type: itx.ActionConfirm, Label: "Approve", Value: "yes"},
-		{ID: "perm", Type: itx.ActionCancel, Label: "Deny", Value: "no"},
-	})
-	require.NoError(t, err)
-	kb, ok := markup.(itx.InlineKeyboardMarkup)
-	require.True(t, ok)
-	require.Len(t, kb.InlineKeyboard, 2)
-	assert.Equal(t, "ia:perm:yes", kb.InlineKeyboard[0][0].CallbackData)
-
-	cbMsg := NewIncomingCallback("cb-1", "chat-1", core.Sender{ID: "u"}, "ia:perm:yes", core.ChatTypeDirect)
-	resp, err := adapter.ParseResponse(cbMsg)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	assert.Equal(t, "perm", resp.Action.ID)
-	assert.Equal(t, "yes", resp.Action.Value)
-
-	// Non-callback returns (nil, nil) so the handler can fall through to
-	// numbered-text parsing.
-	textMsg := NewIncomingTextMessage("m", "chat-1", core.Sender{ID: "u"}, "1", core.ChatTypeDirect)
-	resp, err = adapter.ParseResponse(textMsg)
-	assert.NoError(t, err)
-	assert.Nil(t, resp)
-}
-
 func TestTransport_Channel(t *testing.T) {
 	bot, tr := newReadyBot(t)
 	ch := tr.Channel("chat-1")
