@@ -11,8 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	assets "github.com/tingly-dev/tingly-box/internal"
+	"github.com/tingly-dev/tingly-box/internal/middleware"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
-	"github.com/tingly-dev/tingly-box/internal/server/middleware"
 	"github.com/tingly-dev/tingly-box/pkg/auth"
 	"github.com/tingly-dev/tingly-box/pkg/obs"
 	remotescenario "github.com/tingly-dev/tingly-box/remote/scenario"
@@ -32,7 +32,7 @@ func init() {
 // fields/methods it actually touches on *Server today.
 type WebDeps struct {
 	// MemoryLogMW backs the HTTP request log API (GetLogs/GetLogStats/ClearLogs).
-	MemoryLogMW *middleware.MultiModeMemoryLogMiddleware
+	MemoryLogMW *middleware.MemoryLog
 
 	// MultiLogger backs the system log, model-request trace and action
 	// history APIs.

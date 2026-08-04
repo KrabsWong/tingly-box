@@ -3,12 +3,13 @@ package server
 import (
 	"context"
 	"fmt"
-	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -25,6 +26,7 @@ import (
 	guardrailsutils "github.com/tingly-dev/tingly-box/internal/guardrails/utils"
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
 	mcpruntime "github.com/tingly-dev/tingly-box/internal/mcp/runtime"
+	"github.com/tingly-dev/tingly-box/internal/middleware"
 	"github.com/tingly-dev/tingly-box/internal/obs"
 	"github.com/tingly-dev/tingly-box/internal/probe"
 	"github.com/tingly-dev/tingly-box/internal/protocolserver/advisortool"
@@ -32,7 +34,6 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/protocolserver/servertool"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/server/hooks"
-	"github.com/tingly-dev/tingly-box/internal/server/middleware"
 	imbotmodule "github.com/tingly-dev/tingly-box/internal/server/module/imbot"
 	oauthmodule "github.com/tingly-dev/tingly-box/internal/server/module/oauth"
 	providerQuotaModule "github.com/tingly-dev/tingly-box/internal/server/module/providerquota"
@@ -63,7 +64,7 @@ type Server struct {
 
 	// middleware
 	authMW          *middleware.AuthMiddleware
-	memoryLogMW     *middleware.MultiModeMemoryLogMiddleware
+	memoryLogMW     *middleware.MemoryLog
 	loadBalancer    *protocolserver.LoadBalancer
 	loadBalancerAPI *LoadBalancerAPI
 	healthMonitor   *loadbalance.HealthMonitor
@@ -290,7 +291,7 @@ func NewServer(cfg *config.Config, opts ...ServerOption) *Server {
 
 	// Initialize multi-mode memory log middleware for HTTP request logging
 	// Logs are written to both multi-mode logger (persistence) and memory (quick access)
-	memoryLogMW := middleware.NewMultiModeMemoryLogMiddleware(server.multiLogger)
+	memoryLogMW := middleware.NewMemoryLogMiddleware(server.multiLogger)
 
 	// Initialize API token manager (for multi-tenant authentication)
 	var apiTokenManager *auth.APITokenManager
