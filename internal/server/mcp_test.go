@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,8 +13,8 @@ func TestAnthropicBetaGenericPathUsesProviderLimits(t *testing.T) {
 	s := &Server{config: &config.Config{}}
 
 	provider := &typ.Provider{Name: "deepseek"}
-	assert.True(t, ShouldUseGenericMCPForProvider(s.config, provider))
+	assert.True(t, protocolserver.ShouldUseGenericMCPForProvider(s.config, provider))
 
 	s.config.GenericMCP.ProviderLimits = "other-provider"
-	assert.False(t, ShouldUseGenericMCPForProvider(s.config, provider))
+	assert.False(t, protocolserver.ShouldUseGenericMCPForProvider(s.config, provider))
 }

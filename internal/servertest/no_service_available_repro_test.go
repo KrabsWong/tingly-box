@@ -5,12 +5,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"github.com/tingly-dev/tingly-box/internal/server/affinity"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/affinity"
 
 	"github.com/tingly-dev/tingly-box/internal/config"
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
-	"github.com/tingly-dev/tingly-box/internal/server"
-	"github.com/tingly-dev/tingly-box/internal/server/routing"
+	server "github.com/tingly-dev/tingly-box/internal/protocolserver"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/routing"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 

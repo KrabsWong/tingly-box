@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	affinity2 "github.com/tingly-dev/tingly-box/internal/server/affinity"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
+	affinity2 "github.com/tingly-dev/tingly-box/internal/protocolserver/affinity"
 
 	"github.com/tingly-dev/tingly-box/internal/clock"
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/routing"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
-	"github.com/tingly-dev/tingly-box/internal/server/routing"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/vmodel"
 )
@@ -159,7 +160,7 @@ func NewLBSimulatorWithSequences(rule *typ.Rule, faults map[string]vmodel.Sequen
 		ProbeEnabled:           false,
 	})
 	hf := typ.NewHealthFilter(hm)
-	lb := NewLoadBalancer(cfg, hf)
+	lb := protocolserver.NewLoadBalancer(cfg, hf)
 	affinity := affinity2.NewAffinityStore(0)
 
 	scripts := make(map[string]*vmodel.Sequence, len(faults))
@@ -177,11 +178,10 @@ func NewLBSimulatorWithSequences(rule *typ.Rule, faults map[string]vmodel.Sequen
 	cleanups = append(cleanups, restoreClock)
 
 	simServer := &Server{config: cfg, loadBalancer: lb, healthMonitor: hm}
-	simServer.aiHandler = NewHandler(ProtocolHandlerDeps{
-		Config:                cfg,
-		LoadBalancer:          lb,
-		HealthMonitor:         hm,
-		TrackUsageFromContext: simServer.trackUsageFromContext,
+	simServer.aiHandler = protocolserver.NewHandler(protocolserver.ProtocolHandlerDeps{
+		Config:        cfg,
+		LoadBalancer:  lb,
+		HealthMonitor: hm,
 	})
 
 	sim = &LBSimulator{
@@ -237,11 +237,11 @@ func (s *LBSimulator) Request(session string) (LBTrace, error) {
 		// recording is disabled.
 		if status == http.StatusOK {
 			c.Writer.WriteHeader(http.StatusOK)
-			CommitFirstChunkIfGate(c.Writer) // simulate the stream's first real chunk
-			s.server.reportHealthStatus(provider, model, nil, "")
+			protocolserver.CommitFirstChunkIfGate(c.Writer) // simulate the stream's first real chunk
+			s.server.aiHandler.ReportHealthStatus(provider, model, nil, "")
 		} else {
 			c.Writer.WriteHeader(status)
-			s.server.reportHealthStatus(provider, model,
+			s.server.aiHandler.ReportHealthStatus(provider, model,
 				fmt.Errorf("upstream returned HTTP %d", status), "")
 		}
 	}

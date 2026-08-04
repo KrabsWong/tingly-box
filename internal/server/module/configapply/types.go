@@ -45,10 +45,10 @@ type ClaudeConfigResponse struct {
 // returned — same safety stance as ClaudeConfigResponse. writeCatalog is inferred
 // from the presence of model_catalog_json in config.toml.
 type CodexConfigResponse struct {
-	Success      bool               `json:"success"`
-	Exists       bool               `json:"exists"`
-	Preferences  config.CodexPrefs  `json:"preferences"`
-	WriteCatalog bool               `json:"writeCatalog"`
+	Success      bool              `json:"success"`
+	Exists       bool              `json:"exists"`
+	Preferences  config.CodexPrefs `json:"preferences"`
+	WriteCatalog bool              `json:"writeCatalog"`
 }
 
 // ApplyOpenCodeConfigResponse is the response for ApplyOpenCodeConfigFromState

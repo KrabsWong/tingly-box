@@ -1,0 +1,88 @@
+package protocolserver
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/tingly-dev/tingly-box/internal/server/middleware"
+)
+
+// RegisterRoutes mounts the LLM gateway surface (/tingly/:scenario[/v1]/...)
+// onto engine. modelAuth gates every model endpoint (model API-token trust
+// domain — distinct from the host's user/admin auth).
+//
+// The host server owns the gin engine and the auth middleware; this package
+// owns the route shape and the handlers behind it.
+func (ph *ProtocolHandler) RegisterRoutes(engine *gin.Engine, modelAuth gin.HandlerFunc) {
+	// scenario routes with middleware to inject scenario into context.
+	// profileAliasMiddleware runs first so it can rewrite a profile name alias
+	// (e.g. "claude_code:mine") to its canonical ID form ("claude_code:p1")
+	// before contextMiddleware validates and downstream stages consume it.
+	scenario := engine.Group("/tingly/:scenario")
+	scenario.Use(middleware.ClearServerIOTimeouts())
+	scenario.Use(ph.profileAliasMiddleware)
+	scenario.Use(ph.contextMiddleware)
+	ph.SetupMixinEndpoints(scenario, modelAuth)
+	// Claude Code v2.1+ sends HEAD <ANTHROPIC_BASE_URL> as a connectivity
+	// check before making any API call. Respond 200 so CC doesn't treat the
+	// missing route as a server error and spiral into api_retry storms.
+	scenario.HEAD("", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	// scenario v1 routes with middleware
+	scenarioV1 := engine.Group("/tingly/:scenario/v1")
+	scenarioV1.Use(middleware.ClearServerIOTimeouts())
+	scenarioV1.Use(ph.profileAliasMiddleware)
+	scenarioV1.Use(ph.contextMiddleware)
+	ph.SetupMixinEndpoints(scenarioV1, modelAuth)
+	scenarioV1.HEAD("", func(c *gin.Context) { c.Status(http.StatusOK) })
+}
+
+// SetupMixinEndpoints registers the protocol-mixed endpoint set (OpenAI +
+// Anthropic surfaces on one group), each gated by modelAuth.
+func (ph *ProtocolHandler) SetupMixinEndpoints(group *gin.RouterGroup, modelAuth gin.HandlerFunc) {
+	// Chat completions endpoint (OpenAI compatible)
+	group.POST("/chat/completions", modelAuth, ph.HandleOpenAIChatCompletions)
+
+	// Responses API endpoints (OpenAI compatible)
+	group.POST("/responses", modelAuth, ph.HandleResponsesCreate)
+	group.GET("/responses/:id", modelAuth, ph.HandleResponsesGet)
+
+	// Chat completions endpoint (Anthropic compatible)
+	group.POST("/messages", modelAuth, ph.HandleAnthropicMessages)
+	// Count tokens endpoint (Anthropic compatible)
+	group.POST("/messages/count_tokens", modelAuth, ph.AnthropicCountTokens)
+
+	// Embeddings endpoint (OpenAI compatible)
+	group.POST("/embeddings", modelAuth, ph.HandleOpenAIEmbeddings)
+
+	// Image generation endpoint (OpenAI compatible).
+	// Routed directly to upstream POST /v1/images/generations; the Responses API
+	// (POST /responses with the image_generation tool) is exposed in parallel via
+	// the same scenario, with the caller choosing which surface to use.
+	group.POST("/images/generations", modelAuth, ph.HandleOpenAIImageGeneration)
+
+	// Models endpoint (routed by scenario: openai -> OpenAIListModels, anthropic/claude_code -> AnthropicListModels)
+	group.GET("/models", modelAuth, ph.ListModelsByScenario)
+}
+
+// SetupOpenAIEndpoints registers the OpenAI-only endpoint set on group.
+func (ph *ProtocolHandler) SetupOpenAIEndpoints(group *gin.RouterGroup, modelAuth gin.HandlerFunc) {
+	// Chat completions endpoint (OpenAI compatible)
+	group.POST("/chat/completions", modelAuth, ph.HandleOpenAIChatCompletions)
+	// Models endpoint (OpenAI compatible)
+	group.GET("/models", modelAuth, ph.HandleOpenAIListModels)
+
+	// Responses API endpoints (OpenAI compatible)
+	group.POST("/responses", modelAuth, ph.HandleResponsesCreate)
+	group.GET("/responses/:id", modelAuth, ph.HandleResponsesGet)
+}
+
+// SetupAnthropicEndpoints registers the Anthropic-only endpoint set on group.
+func (ph *ProtocolHandler) SetupAnthropicEndpoints(group *gin.RouterGroup, modelAuth gin.HandlerFunc) {
+	// Chat completions endpoint (Anthropic compatible)
+	group.POST("/messages", modelAuth, ph.HandleAnthropicMessages)
+	// Count tokens endpoint (Anthropic compatible)
+	group.POST("/messages/count_tokens", modelAuth, ph.AnthropicCountTokens)
+	// Models endpoint (Anthropic compatible)
+	group.GET("/models", modelAuth, ph.HandleAnthropicListModels)
+}

@@ -1,15 +1,15 @@
 // Package recordingtest provides shared test helpers for exercising
-// internal/server/recording's AttachRecorderHooks/ProtocolRecorder wiring
-// through the production *server.ProtocolHandler entry points.
+// internal/protocolserver/recording's AttachRecorderHooks/ProtocolRecorder
+// wiring through the production *protocolserver.ProtocolHandler entry points.
 //
 // This is a plain (non-_test.go) package rather than an external
 // recording_test file because its helpers must be importable both from
-// internal/server/recording's own tests and from internal/server's e2e
-// tests (anthropic_recording_e2e_test.go) — Go test files, even in an
-// external _test package, are never importable from another package.
-// Putting the helpers in a normal package that imports internal/server
-// avoids that restriction; it stays free of any import cycle because
-// internal/server's production code never imports recordingtest.
+// internal/protocolserver/recording's own tests and from internal/server's
+// e2e tests — Go test files, even in an external _test package, are never
+// importable from another package. Putting the helpers in a normal package
+// that imports internal/protocolserver avoids that restriction; it stays
+// free of any import cycle because protocolserver's production code never
+// imports recordingtest.
 package recordingtest
 
 import (
@@ -23,7 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tingly-dev/tingly-box/internal/obs"
-	"github.com/tingly-dev/tingly-box/internal/server"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 
 	"github.com/gin-gonic/gin"
@@ -69,17 +69,17 @@ func NewStreamableRecorder() *StreamableRecorder {
 
 func (s *StreamableRecorder) CloseNotify() <-chan bool { return s.closeCh }
 
-// NewRecordingTestHandler builds a *server.ProtocolHandler whose
+// NewRecordingTestHandler builds a *protocolserver.ProtocolHandler whose
 // GetOrCreateScenarioSink callback always returns the same in-memory-backed
 // sink for scenario, mirroring what root's *Server does via its
 // scenarioRecordSinks map.
-func NewRecordingTestHandler(t *testing.T, scenario typ.RuleScenario, mode obs.RecordMode) (*server.ProtocolHandler, *obs.Sink, *MemExporter) {
+func NewRecordingTestHandler(t *testing.T, scenario typ.RuleScenario, mode obs.RecordMode) (*protocolserver.ProtocolHandler, *obs.Sink, *MemExporter) {
 	t.Helper()
 	mem := &MemExporter{}
 	sink := obs.NewSink("", mode, obs.WithExporters(mem))
 	require.NotNil(t, sink, "obs.NewSink must succeed with WithExporters")
 
-	h := server.NewHandler(server.ProtocolHandlerDeps{
+	h := protocolserver.NewHandler(protocolserver.ProtocolHandlerDeps{
 		GetOrCreateScenarioSink: func(s typ.RuleScenario) *obs.Sink {
 			if s == scenario {
 				return sink

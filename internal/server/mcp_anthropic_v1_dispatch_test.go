@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	coretool "github.com/tingly-dev/tingly-box/internal/tool"
 	"github.com/tingly-dev/tingly-box/internal/typ"
@@ -53,7 +54,7 @@ func TestShouldUseGenericMCPForProvider(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s.config.GenericMCP.ProviderLimits = tt.limits
 			provider := &typ.Provider{Name: tt.providerName}
-			result := ShouldUseGenericMCPForProvider(s.config, provider)
+			result := protocolserver.ShouldUseGenericMCPForProvider(s.config, provider)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

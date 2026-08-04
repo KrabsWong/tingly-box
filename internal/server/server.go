@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"log"
 	"net/http"
 	"strings"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
-	"github.com/tingly-dev/tingly-box/internal/server/affinity"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/affinity"
 
 	"github.com/tingly-dev/tingly-box/ai/oauth"
 	"github.com/tingly-dev/tingly-box/ai/quota"
@@ -26,7 +27,9 @@ import (
 	mcpruntime "github.com/tingly-dev/tingly-box/internal/mcp/runtime"
 	"github.com/tingly-dev/tingly-box/internal/obs"
 	"github.com/tingly-dev/tingly-box/internal/probe"
-	"github.com/tingly-dev/tingly-box/internal/server/advisortool"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/advisortool"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/routing"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/servertool"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/server/hooks"
 	"github.com/tingly-dev/tingly-box/internal/server/middleware"
@@ -34,8 +37,6 @@ import (
 	oauthmodule "github.com/tingly-dev/tingly-box/internal/server/module/oauth"
 	providerQuotaModule "github.com/tingly-dev/tingly-box/internal/server/module/providerquota"
 	"github.com/tingly-dev/tingly-box/internal/server/module/tokenrefresh"
-	"github.com/tingly-dev/tingly-box/internal/server/routing"
-	"github.com/tingly-dev/tingly-box/internal/server/servertool"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/internal/visionproxy"
 	"github.com/tingly-dev/tingly-box/pkg/auth"
@@ -63,7 +64,7 @@ type Server struct {
 	// middleware
 	authMW          *middleware.AuthMiddleware
 	memoryLogMW     *middleware.MultiModeMemoryLogMiddleware
-	loadBalancer    *LoadBalancer
+	loadBalancer    *protocolserver.LoadBalancer
 	loadBalancerAPI *LoadBalancerAPI
 	healthMonitor   *loadbalance.HealthMonitor
 
@@ -116,10 +117,10 @@ type Server struct {
 	// servertool pipeline — owns virtual tool providers and hook list
 	servertoolPipeline *servertool.Pipeline
 
-	// guardrails runtime (optional)
-	guardrailsRuntime   *guardrails.Guardrails
-	guardrailsRuntimeMu sync.RWMutex
-	guardrailsConfigMu  sync.Mutex
+	// guardrails runtime state (owned by protocolserver; constructed in
+	// NewServer before anything reads it)
+	guardrailsState    *protocolserver.GuardrailsState
+	guardrailsConfigMu sync.Mutex
 
 	// recording sinks
 	recordSink *obs.Sink
@@ -199,7 +200,7 @@ type Server struct {
 	// recording, and (eventually) protocol dispatch/transform/passthrough.
 	// Same last-step construction constraint as webHandler above — every
 	// field/callback in aimodel.Deps must already be set.
-	aiHandler *ProtocolHandler
+	aiHandler *protocolserver.ProtocolHandler
 }
 
 // NewServer creates a new HTTP server instance with functional options
@@ -211,9 +212,10 @@ func NewServer(cfg *config.Config, opts ...ServerOption) *Server {
 
 	// Default options
 	server := &Server{
-		config: cfg,
-		ctx:    ctx,
-		cancel: cancel,
+		config:          cfg,
+		ctx:             ctx,
+		cancel:          cancel,
+		guardrailsState: protocolserver.NewGuardrailsState(cfg),
 	}
 
 	// Apply all options (defaults + provided)
@@ -329,7 +331,7 @@ func NewServer(cfg *config.Config, opts ...ServerOption) *Server {
 	}
 
 	// Initialize load balancer
-	loadBalancer := NewLoadBalancer(cfg, healthFilter)
+	loadBalancer := protocolserver.NewLoadBalancer(cfg, healthFilter)
 
 	// Initialize affinity store for smart routing
 	affinityStore := affinity.NewAffinityStore(0) // 0 = use default TTL
@@ -485,23 +487,21 @@ func NewServer(cfg *config.Config, opts ...ServerOption) *Server {
 	// constraint as webHandler above. The callback fields reach back into
 	// root state that has not moved to aimodel yet (usage tracking, affinity
 	// store, recording sinks, guardrails runtime) — see aimodel.Deps.
-	server.aiHandler = NewHandler(ProtocolHandlerDeps{
-		Config:                   server.config,
-		TokenTracker:             server.tokenTracker,
-		HealthMonitor:            server.healthMonitor,
-		ClientPool:               server.clientPool,
-		LoadBalancer:             server.loadBalancer,
-		MCPRuntime:               server.mcpRuntime,
-		TemplateManager:          server.templateManager,
-		RoutingSelector:          server.routingSelector,
-		VisionProxyService:       server.visionProxyService,
-		GetServertoolPipeline:    func() *servertool.Pipeline { return server.servertoolPipeline },
-		TrackUsageWithTokenUsage: server.trackUsageWithTokenUsage,
-		TrackUsageFromContext:    server.trackUsageFromContext,
-		UpdateAffinityMessageID:  server.updateAffinityMessageID,
-		GetOrCreateScenarioSink:  server.GetOrCreateScenarioSink,
-		CurrentGuardrailsRuntime: server.currentGuardrailsRuntime,
-		GetScenarioRecordMode:    server.GetScenarioRecordMode,
+	server.aiHandler = protocolserver.NewHandler(protocolserver.ProtocolHandlerDeps{
+		Config:                  server.config,
+		TokenTracker:            server.tokenTracker,
+		HealthMonitor:           server.healthMonitor,
+		ClientPool:              server.clientPool,
+		LoadBalancer:            server.loadBalancer,
+		MCPRuntime:              server.mcpRuntime,
+		TemplateManager:         server.templateManager,
+		RoutingSelector:         server.routingSelector,
+		VisionProxyService:      server.visionProxyService,
+		GetServertoolPipeline:   func() *servertool.Pipeline { return server.servertoolPipeline },
+		AffinityStore:           server.affinityStore,
+		GetOrCreateScenarioSink: server.GetOrCreateScenarioSink,
+		GuardrailsState:         server.guardrailsState,
+		GetScenarioRecordMode:   server.GetScenarioRecordMode,
 	})
 
 	// Setup middleware

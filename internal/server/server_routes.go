@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tingly-dev/tingly-box/internal/server/middleware"
@@ -44,73 +43,9 @@ func (s *Server) setupRoutes(ctx context.Context) {
 }
 
 func (s *Server) UseAIEndpoints() {
-	// scenario routes with middleware to inject scenario into context.
-	// profileAliasMiddleware runs first so it can rewrite a profile name alias
-	// (e.g. "claude_code:mine") to its canonical ID form ("claude_code:p1")
-	// before contextMiddleware validates and downstream stages consume it.
-	scenario := s.engine.Group("/tingly/:scenario")
-	scenario.Use(middleware.ClearServerIOTimeouts())
-	scenario.Use(s.profileAliasMiddleware)
-	scenario.Use(s.contextMiddleware)
-	s.SetupMixinEndpoints(scenario)
-	// Claude Code v2.1+ sends HEAD <ANTHROPIC_BASE_URL> as a connectivity
-	// check before making any API call. Respond 200 so CC doesn't treat the
-	// missing route as a server error and spiral into api_retry storms.
-	scenario.HEAD("", func(c *gin.Context) { c.Status(http.StatusOK) })
-
-	// scenario v1 routes with middleware
-	scenarioV1 := s.engine.Group("/tingly/:scenario/v1")
-	scenarioV1.Use(middleware.ClearServerIOTimeouts())
-	scenarioV1.Use(s.profileAliasMiddleware)
-	scenarioV1.Use(s.contextMiddleware)
-	s.SetupMixinEndpoints(scenarioV1)
-	scenarioV1.HEAD("", func(c *gin.Context) { c.Status(http.StatusOK) })
-}
-
-func (s *Server) SetupMixinEndpoints(group *gin.RouterGroup) {
-	// Chat completions endpoint (OpenAI compatible)
-	group.POST("/chat/completions", s.getModelAuthMiddleware(), s.aiHandler.HandleOpenAIChatCompletions)
-
-	// Responses API endpoints (OpenAI compatible)
-	group.POST("/responses", s.getModelAuthMiddleware(), s.aiHandler.HandleResponsesCreate)
-	group.GET("/responses/:id", s.getModelAuthMiddleware(), s.aiHandler.HandleResponsesGet)
-
-	// Chat completions endpoint (Anthropic compatible)
-	group.POST("/messages", s.getModelAuthMiddleware(), s.aiHandler.HandleAnthropicMessages)
-	// Count tokens endpoint (Anthropic compatible)
-	group.POST("/messages/count_tokens", s.getModelAuthMiddleware(), s.aiHandler.AnthropicCountTokens)
-
-	// Embeddings endpoint (OpenAI compatible)
-	group.POST("/embeddings", s.getModelAuthMiddleware(), s.aiHandler.HandleOpenAIEmbeddings)
-
-	// Image generation endpoint (OpenAI compatible).
-	// Routed directly to upstream POST /v1/images/generations; the Responses API
-	// (POST /responses with the image_generation tool) is exposed in parallel via
-	// the same scenario, with the caller choosing which surface to use.
-	group.POST("/images/generations", s.getModelAuthMiddleware(), s.aiHandler.HandleOpenAIImageGeneration)
-
-	// Models endpoint (routed by scenario: openai -> OpenAIListModels, anthropic/claude_code -> AnthropicListModels)
-	group.GET("/models", s.getModelAuthMiddleware(), s.aiHandler.ListModelsByScenario)
-}
-
-func (s *Server) SetupOpenAIEndpoints(group *gin.RouterGroup) {
-	// Chat completions endpoint (OpenAI compatible)
-	group.POST("/chat/completions", s.getModelAuthMiddleware(), s.aiHandler.HandleOpenAIChatCompletions)
-	// Models endpoint (OpenAI compatible)
-	group.GET("/models", s.getModelAuthMiddleware(), s.aiHandler.HandleOpenAIListModels)
-
-	// Responses API endpoints (OpenAI compatible)
-	group.POST("/responses", s.getModelAuthMiddleware(), s.aiHandler.HandleResponsesCreate)
-	group.GET("/responses/:id", s.getModelAuthMiddleware(), s.aiHandler.HandleResponsesGet)
-}
-
-func (s *Server) SetupAnthropicEndpoints(group *gin.RouterGroup) {
-	// Chat completions endpoint (Anthropic compatible)
-	group.POST("/messages", s.getModelAuthMiddleware(), s.aiHandler.HandleAnthropicMessages)
-	// Count tokens endpoint (Anthropic compatible)
-	group.POST("/messages/count_tokens", s.getModelAuthMiddleware(), s.aiHandler.AnthropicCountTokens)
-	// Models endpoint (Anthropic compatible)
-	group.GET("/models", s.getModelAuthMiddleware(), s.aiHandler.HandleAnthropicListModels)
+	// The gateway route shape (/tingly/:scenario[/v1]/...) is owned by
+	// protocolserver; the host only supplies the engine and model auth.
+	s.aiHandler.RegisterRoutes(s.engine, s.getModelAuthMiddleware())
 }
 
 // UseVirtualModelEndpoints sets up the direct virtual-model entrypoints,

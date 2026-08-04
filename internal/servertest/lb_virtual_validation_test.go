@@ -11,7 +11,7 @@ import (
 
 	"github.com/tingly-dev/tingly-box/internal/config"
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
-	"github.com/tingly-dev/tingly-box/internal/server"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	typ "github.com/tingly-dev/tingly-box/internal/typ"
 )
 
