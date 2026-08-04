@@ -3,8 +3,6 @@
 .PHONY: all build test clean fmt lint deps help
 
 # Variables
-BINARY_NAME=imbot
-PACKAGE_PATH=./pkg
 GO=go
 GOFLAGS=-v
 TESTFLAGS=-race -cover -coverprofile=coverage.out -covermode=atomic
@@ -39,7 +37,6 @@ clean:
 	@echo "Cleaning..."
 	$(GO) clean
 	rm -f coverage.out coverage.html
-	rm -f $(BINARY_NAME)
 
 ## fmt: Format code
 fmt:
@@ -69,8 +66,7 @@ deps:
 ## examples: Build examples
 examples:
 	@echo "Building examples..."
-	$(GO) build $(GOFLAGS) ./examples/basic/...
-	$(GO) build $(GOFLAGS) ./examples/multi_platform/...
+	$(GO) build $(GOFLAGS) ./examples/...
 
 ## install: Install the package
 install:
