@@ -36,3 +36,9 @@ func NewBot(config *core.Config) (*Bot, error) {
 func (b *Bot) PlatformInfo() *core.PlatformInfo {
 	return core.NewPlatformInfoFor(core.PlatformLark)
 }
+
+// GetWebhookURL returns the webhook URL for Lark. This differs from the
+// embedded Feishu implementation, which uses a "/webhook/feishu/" prefix.
+func (b *Bot) GetWebhookURL(webhookPath string) string {
+	return "/webhook/lark/" + webhookPath
+}
