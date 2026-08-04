@@ -39,8 +39,12 @@ func (m *Message) IsCallback() bool {
 
 // TextContent represents text message content
 type TextContent struct {
-	Text     string   `json:"text"`
-	Entities []Entity `json:"entities,omitempty"`
+	Text     string    `json:"text"`
+	Entities []Entity  `json:"entities,omitempty"`
+	// Segments preserves an ordered multi-segment body (e.g. interleaved
+	// body + thinking) on inbound messages. Nil for ordinary single-text
+	// messages. See core.Segment.
+	Segments []Segment `json:"segments,omitempty"`
 }
 
 func (c *TextContent) ContentType() string { return "text" }
@@ -309,6 +313,7 @@ func (m *Message) Clone() *Message {
 		clone.Content = &TextContent{
 			Text:     c.Text,
 			Entities: entities,
+			Segments: cloneSegments(c.Segments),
 		}
 	case *MediaContent:
 		media := make([]MediaAttachment, len(c.Media))

@@ -59,6 +59,14 @@ type SendMessageOptions struct {
 	Entities  []Entity          `json:"entities,omitempty"` // Telegram message entities (alternative to ParseMode)
 	Silent    bool              `json:"silent,omitempty"`
 
+	// Segments carries an ordered multi-segment message (e.g. interleaved
+	// body + thinking). When non-empty it is AUTHORITATIVE: Text/Entities/
+	// ParseMode are ignored and a one-time warning is logged, mirroring how
+	// Actions superseded Metadata["replyMarkup"]. When nil/empty, behavior is
+	// identical to today (Text path). Segmentation is produced upstream — imbot
+	// only consumes it. See EffectiveSegments / segments.go.
+	Segments []Segment `json:"segments,omitempty"`
+
 	// Actions attaches message-scoped interactive controls in a
 	// platform-neutral form. Each platform renders it natively (Telegram
 	// inline keyboard, Feishu card buttons, ...) or degrades per each action's

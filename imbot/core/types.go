@@ -90,6 +90,52 @@ type Entity struct {
 	Data   map[string]interface{} `json:"data,omitempty"`
 }
 
+// SegmentKind classifies one ordered piece of a message.
+//
+// A message body is modeled as an ordered sequence of segments so that
+// interleaved content roles — typically body text alternating with model
+// reasoning (thinking) — can be expressed faithfully. Segmentation is
+// produced upstream (the gateway / stream assembler holds the structured
+// content blocks); imbot only consumes the result and renders it.
+type SegmentKind string
+
+const (
+	// SegmentBody is primary message content.
+	SegmentBody SegmentKind = "body"
+	// SegmentThinking is model reasoning, rendered collapsed/dimmed per the
+	// platform's ThinkingRender capability. Plain text only.
+	SegmentThinking SegmentKind = "thinking"
+	// Future kinds (quote, code, ...) are added here when actually needed.
+)
+
+// Segment is one ordered piece of a message.
+//
+// A body segment reuses the existing rich-format trio (Text/Entities/ParseMode),
+// the same fields SendMessageOptions already carries. A thinking segment is
+// plain text — its Text is rendered per the platform's ThinkingRender
+// capability, so Entities/ParseMode are ignored for non-body kinds.
+type Segment struct {
+	Kind      SegmentKind `json:"kind"`
+	Text      string      `json:"text"`
+	Entities  []Entity    `json:"entities,omitempty"`  // body segments only
+	ParseMode ParseMode   `json:"parseMode,omitempty"` // body segments only
+}
+
+// ThinkingRender declares how a platform can render a SegmentThinking segment.
+type ThinkingRender string
+
+const (
+	// ThinkingRenderCollapsed: native collapsible block (telegram rich text,
+	// feishu folding section). Falls back to Dimmed if unavailable at runtime.
+	ThinkingRenderCollapsed ThinkingRender = "collapsed"
+	// ThinkingRenderDimmed: quoted/greyed block inline with the body.
+	ThinkingRenderDimmed ThinkingRender = "dimmed"
+	// ThinkingRenderHidden: drop by default; surface a "show reasoning" action.
+	ThinkingRenderHidden ThinkingRender = "hidden"
+	// ThinkingRenderInline: no special handling, append as plain text.
+	ThinkingRenderInline ThinkingRender = "inline"
+)
+
 // ConnectionDetails represents connection details
 type ConnectionDetails struct {
 	Mode              ConnectionMode `json:"mode"`
@@ -118,11 +164,12 @@ func (c *ConnectionDetails) Time() time.Time {
 
 // PlatformCapabilities represents platform capabilities
 type PlatformCapabilities struct {
-	ChatTypes  []ChatType `json:"chatTypes"`
-	MediaTypes []string   `json:"mediaTypes,omitempty"`
-	Features   []string   `json:"features"`
-	TextLimit  int        `json:"textLimit,omitempty"`
-	RateLimit  int        `json:"rateLimit,omitempty"`
+	ChatTypes      []ChatType      `json:"chatTypes"`
+	MediaTypes     []string        `json:"mediaTypes,omitempty"`
+	Features       []string        `json:"features"`
+	TextLimit      int             `json:"textLimit,omitempty"`
+	RateLimit      int             `json:"rateLimit,omitempty"`
+	ThinkingRender ThinkingRender  `json:"thinkingRender,omitempty"`
 }
 
 // SupportsFeature checks if the platform supports a specific feature
@@ -165,6 +212,16 @@ func (p *PlatformCapabilities) SupportsInteraction() bool {
 		}
 	}
 	return false
+}
+
+// EffectiveThinkingRender returns the platform's thinking-render capability,
+// defaulting to ThinkingRenderDimmed when unset. The default keeps thinking
+// visually subdued on platforms that have not declared a stronger mode.
+func (p *PlatformCapabilities) EffectiveThinkingRender() ThinkingRender {
+	if p == nil || p.ThinkingRender == "" {
+		return ThinkingRenderDimmed
+	}
+	return p.ThinkingRender
 }
 
 // ReactionToken represents a platform-agnostic semantic reaction token.
