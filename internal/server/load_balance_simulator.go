@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	affinity2 "github.com/tingly-dev/tingly-box/internal/server/affinity"
+	affinity2 "github.com/tingly-dev/tingly-box/internal/protocolserver/affinity"
 
 	"github.com/tingly-dev/tingly-box/internal/clock"
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
-	"github.com/tingly-dev/tingly-box/internal/server/routing"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/routing"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/vmodel"
 )

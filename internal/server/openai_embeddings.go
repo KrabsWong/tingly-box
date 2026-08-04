@@ -11,7 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/tingly-dev/tingly-box/internal/protocol"
-	"github.com/tingly-dev/tingly-box/internal/server/forwarding"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/forwarding"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 

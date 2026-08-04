@@ -21,7 +21,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/protocol/transform"
 	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
-	"github.com/tingly-dev/tingly-box/internal/server/servertool"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/servertool"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 

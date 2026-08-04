@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/tingly-dev/tingly-box/internal/server/servertool"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/servertool"
 	coretool "github.com/tingly-dev/tingly-box/internal/tool"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )

@@ -14,7 +14,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
 	internalobs "github.com/tingly-dev/tingly-box/internal/obs"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
-	"github.com/tingly-dev/tingly-box/internal/server/recording"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/recording"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/pkg/obs"
 )

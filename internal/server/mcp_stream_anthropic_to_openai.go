@@ -7,11 +7,11 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gin-gonic/gin"
-	"github.com/tingly-dev/tingly-box/internal/server/recording"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/recording"
 
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/protocol/stream"
-	"github.com/tingly-dev/tingly-box/internal/server/forwarding"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/forwarding"
 	mcp "github.com/tingly-dev/tingly-box/internal/server/module/mcp"
 	coretool "github.com/tingly-dev/tingly-box/internal/tool"
 	"github.com/tingly-dev/tingly-box/internal/typ"

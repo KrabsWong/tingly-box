@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/protocol/transform"
-	servertransform "github.com/tingly-dev/tingly-box/internal/server/transform"
+	servertransform "github.com/tingly-dev/tingly-box/internal/protocolserver/transform"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/tingly-dev/tingly-box/internal/clock"
-	"github.com/tingly-dev/tingly-box/internal/server/routing"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/routing"
 )
 
 const (

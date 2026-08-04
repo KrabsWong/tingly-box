@@ -11,7 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
-	"github.com/tingly-dev/tingly-box/internal/server/affinity"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/affinity"
 
 	"github.com/tingly-dev/tingly-box/ai/oauth"
 	"github.com/tingly-dev/tingly-box/ai/quota"
@@ -26,7 +26,7 @@ import (
 	mcpruntime "github.com/tingly-dev/tingly-box/internal/mcp/runtime"
 	"github.com/tingly-dev/tingly-box/internal/obs"
 	"github.com/tingly-dev/tingly-box/internal/probe"
-	"github.com/tingly-dev/tingly-box/internal/server/advisortool"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/advisortool"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/server/hooks"
 	"github.com/tingly-dev/tingly-box/internal/server/middleware"
@@ -34,8 +34,8 @@ import (
 	oauthmodule "github.com/tingly-dev/tingly-box/internal/server/module/oauth"
 	providerQuotaModule "github.com/tingly-dev/tingly-box/internal/server/module/providerquota"
 	"github.com/tingly-dev/tingly-box/internal/server/module/tokenrefresh"
-	"github.com/tingly-dev/tingly-box/internal/server/routing"
-	"github.com/tingly-dev/tingly-box/internal/server/servertool"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/routing"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/servertool"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/internal/visionproxy"
 	"github.com/tingly-dev/tingly-box/pkg/auth"

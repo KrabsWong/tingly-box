@@ -5,14 +5,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
-	"github.com/tingly-dev/tingly-box/internal/server/recording"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/recording"
 
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/protocol/nonstream"
 	"github.com/tingly-dev/tingly-box/internal/protocol/stream"
 	"github.com/tingly-dev/tingly-box/internal/protocol/transform"
 	usagepkg "github.com/tingly-dev/tingly-box/internal/protocol/usage"
-	"github.com/tingly-dev/tingly-box/internal/server/forwarding"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/forwarding"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 

@@ -12,8 +12,8 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/client"
 	mcpruntime "github.com/tingly-dev/tingly-box/internal/mcp/runtime"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
-	"github.com/tingly-dev/tingly-box/internal/server/advisortool"
-	"github.com/tingly-dev/tingly-box/internal/server/servertool"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/advisortool"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/servertool"
 	coretool "github.com/tingly-dev/tingly-box/internal/tool"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )

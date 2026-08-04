@@ -10,7 +10,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	guardrailsadapter "github.com/tingly-dev/tingly-box/internal/guardrails/adapter"
 	"github.com/tingly-dev/tingly-box/internal/server/module/mcp"
-	"github.com/tingly-dev/tingly-box/internal/server/recording"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/recording"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
@@ -18,7 +18,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/protocol/stream"
 	"github.com/tingly-dev/tingly-box/internal/protocol/token"
 	"github.com/tingly-dev/tingly-box/internal/protocol/transform"
-	"github.com/tingly-dev/tingly-box/internal/server/forwarding"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/forwarding"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 

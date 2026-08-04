@@ -5,12 +5,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/openai/openai-go/v3"
-	"github.com/tingly-dev/tingly-box/internal/server/recording"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/recording"
 
 	mcpruntime "github.com/tingly-dev/tingly-box/internal/mcp/runtime"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/protocol/stream"
-	"github.com/tingly-dev/tingly-box/internal/server/forwarding"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/forwarding"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 
