@@ -21,7 +21,7 @@
 //
 // For AI-routed requests, the log entry is enriched with routing metadata after
 // the handler returns — these fields are written into the gin context by
-// SetTrackingContext (internal/server/tracking_context.go):
+// SetTrackingContext (internal/protocolserver/tracking_context.go):
 //
 //   - request_model   — model name the client requested
 //   - routed_model    — model name actually forwarded to the provider

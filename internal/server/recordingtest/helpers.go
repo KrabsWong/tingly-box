@@ -1,15 +1,15 @@
 // Package recordingtest provides shared test helpers for exercising
-// internal/server/recording's AttachRecorderHooks/ProtocolRecorder wiring
-// through the production *server.ProtocolHandler entry points.
+// internal/protocolserver/recording's AttachRecorderHooks/ProtocolRecorder
+// wiring through the production *protocolserver.ProtocolHandler entry points.
 //
 // This is a plain (non-_test.go) package rather than an external
 // recording_test file because its helpers must be importable both from
-// internal/server/recording's own tests and from internal/server's e2e
-// tests (anthropic_recording_e2e_test.go) — Go test files, even in an
-// external _test package, are never importable from another package.
-// Putting the helpers in a normal package that imports internal/server
-// avoids that restriction; it stays free of any import cycle because
-// internal/server's production code never imports recordingtest.
+// internal/protocolserver/recording's own tests and from internal/server's
+// e2e tests — Go test files, even in an external _test package, are never
+// importable from another package. Putting the helpers in a normal package
+// that imports internal/protocolserver avoids that restriction; it stays
+// free of any import cycle because protocolserver's production code never
+// imports recordingtest.
 package recordingtest
 
 import (
