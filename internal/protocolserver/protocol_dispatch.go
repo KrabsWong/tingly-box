@@ -12,6 +12,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/sirupsen/logrus"
+	mcp "github.com/tingly-dev/tingly-box/internal/mcpserver"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/protocol/nonstream"
 	"github.com/tingly-dev/tingly-box/internal/protocol/request"
@@ -21,7 +22,6 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/protocolserver/forwarding"
 	"github.com/tingly-dev/tingly-box/internal/protocolserver/recording"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
-	"github.com/tingly-dev/tingly-box/internal/server/module/mcp"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 

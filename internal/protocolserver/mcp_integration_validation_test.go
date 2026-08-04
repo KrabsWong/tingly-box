@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	mcp "github.com/tingly-dev/tingly-box/internal/mcpserver"
 	"github.com/tingly-dev/tingly-box/internal/protocolserver/forwarding"
-	"github.com/tingly-dev/tingly-box/internal/server/module/mcp"
 	coretool "github.com/tingly-dev/tingly-box/internal/tool"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )

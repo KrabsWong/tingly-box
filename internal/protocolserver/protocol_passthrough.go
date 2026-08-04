@@ -6,19 +6,18 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	anthropicstream "github.com/anthropics/anthropic-sdk-go/packages/ssestream"
+	"github.com/gin-gonic/gin"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	guardrailsadapter "github.com/tingly-dev/tingly-box/internal/guardrails/adapter"
-	"github.com/tingly-dev/tingly-box/internal/protocolserver/recording"
-	"github.com/tingly-dev/tingly-box/internal/server/module/mcp"
-
-	"github.com/gin-gonic/gin"
+	mcp "github.com/tingly-dev/tingly-box/internal/mcpserver"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/protocol/nonstream"
 	"github.com/tingly-dev/tingly-box/internal/protocol/stream"
 	"github.com/tingly-dev/tingly-box/internal/protocol/token"
 	"github.com/tingly-dev/tingly-box/internal/protocol/transform"
 	"github.com/tingly-dev/tingly-box/internal/protocolserver/forwarding"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver/recording"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 

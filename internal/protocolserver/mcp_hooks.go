@@ -8,8 +8,8 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/sirupsen/logrus"
 
+	mcp "github.com/tingly-dev/tingly-box/internal/mcpserver"
 	"github.com/tingly-dev/tingly-box/internal/protocol/stream"
-	"github.com/tingly-dev/tingly-box/internal/server/module/mcp"
 	coretool "github.com/tingly-dev/tingly-box/internal/tool"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )

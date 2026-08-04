@@ -1,4 +1,4 @@
-package mcp
+package mcpserver
 
 import (
 	"github.com/anthropics/anthropic-sdk-go"

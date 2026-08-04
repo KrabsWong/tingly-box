@@ -1,4 +1,4 @@
-package mcp
+package mcpserver
 
 import (
 	"github.com/tingly-dev/tingly-box/internal/mcp/runtime"
