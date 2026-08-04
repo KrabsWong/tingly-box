@@ -2,7 +2,6 @@ package feishu
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -24,21 +23,6 @@ func NewAdapter(config *core.Config) *Adapter {
 // Platform returns core.PlatformFeishu
 func (a *Adapter) Platform() core.Platform {
 	return core.PlatformFeishu
-}
-
-// AdaptWebhook converts a Feishu webhook event to core.Message
-func (a *Adapter) AdaptWebhook(ctx context.Context, body []byte) (*core.Message, error) {
-	var event MessageEvent
-	if err := json.Unmarshal(body, &event); err != nil {
-		return nil, fmt.Errorf("failed to parse webhook: %w", err)
-	}
-
-	// Only handle message events
-	if event.Header.EventType != "im.message.receive_v1" {
-		return nil, fmt.Errorf("unsupported event type: %s", event.Header.EventType)
-	}
-
-	return a.AdaptMessage(ctx, event.Event)
 }
 
 // AdaptMessage converts a Feishu message event to core.Message

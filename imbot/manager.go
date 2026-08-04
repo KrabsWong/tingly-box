@@ -499,17 +499,3 @@ func (m *Manager) handleReconnect(bot core.Bot, platform Platform) {
 		}
 	}()
 }
-
-// Target represents a message target
-type Target struct {
-	Platform Platform
-	Target   string
-}
-
-// NewTarget creates a new target
-func NewTarget(platform string, target string) Target {
-	return Target{
-		Platform: Platform(platform),
-		Target:   target,
-	}
-}

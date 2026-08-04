@@ -9,7 +9,6 @@ import (
 	"github.com/tingly-dev/tingly-box/imbot/core"
 	"github.com/tingly-dev/tingly-box/imbot/interaction"
 	platformreg "github.com/tingly-dev/tingly-box/imbot/platform"
-	"github.com/tingly-dev/tingly-box/imbot/platform/feishu"
 	"github.com/tingly-dev/tingly-box/imbot/platform/telegram"
 )
 
@@ -34,23 +33,6 @@ type TelegramBot interface {
 func AsTelegramBot(bot Bot) (TelegramBot, bool) {
 	if tgBot, ok := bot.(*telegram.Bot); ok {
 		return tgBot, true
-	}
-	return nil, false
-}
-
-// FeishuBot is an interface for Feishu/Lark-specific bot operations
-type FeishuBot interface {
-	Bot
-	// SetQuickActions sets the bot's quick actions (shown when typing /)
-	SetQuickActions(actions interface{}) error
-	// GetQuickActions gets the current quick actions configuration
-	GetQuickActions() (map[string]interface{}, error)
-}
-
-// AsFeishuBot attempts to cast a Bot to FeishuBot interface
-func AsFeishuBot(bot Bot) (FeishuBot, bool) {
-	if fsBot, ok := bot.(*feishu.Bot); ok {
-		return fsBot, true
 	}
 	return nil, false
 }
@@ -172,9 +154,6 @@ const (
 	ReactionLove     = core.ReactionLove
 	ReactionLaugh    = core.ReactionLaugh
 )
-
-// Version is the imbot package version
-const Version = "0.1.0"
 
 // Helper functions re-exported from core
 
@@ -322,36 +301,18 @@ func FormatDirButton(name string, maxLen int) string {
 	return interaction.FormatDirButton(name, maxLen)
 }
 
-// Interaction types re-exported from internal/interaction package
+// Interaction types re-exported from the interaction package
 
 // Interaction types
 type (
 	// ActionType represents the type of user action
 	ActionType = interaction.ActionType
 
-	// InteractionMode controls how interactions are presented
-	InteractionMode = interaction.InteractionMode
-
 	// Interaction represents a platform-agnostic interactive element
 	Interaction = interaction.Interaction
 
 	// Option represents a selectable option
 	Option = interaction.Option
-
-	// InteractionRequest represents a request for user interaction
-	InteractionRequest = interaction.InteractionRequest
-
-	// InteractionResponse represents the user's response
-	InteractionResponse = interaction.InteractionResponse
-
-	// Adapter converts platform-agnostic interactions to platform-specific format
-	Adapter = interaction.Adapter
-
-	// InteractionHandler manages interaction requests and responses
-	InteractionHandler = Handler
-
-	// InteractionBuilder builds platform-agnostic interactions
-	InteractionBuilder = interaction.Builder
 )
 
 // Interaction constants
@@ -364,23 +325,11 @@ const (
 	ActionInput    = interaction.ActionInput
 	ActionCustom   = interaction.ActionCustom
 
-	// Interaction modes
-	ModeAuto        = interaction.ModeAuto
-	ModeInteractive = interaction.ModeInteractive
-	ModeText        = interaction.ModeText
-
 	// Card action styles
 	CardActionStyleDefault = interaction.CardActionStyleDefault
 	CardActionStylePrimary = interaction.CardActionStylePrimary
 	CardActionStyleDanger  = interaction.CardActionStyleDanger
 )
-
-// Interaction constructors
-
-// NewInteractionBuilder creates a new interaction builder
-func NewInteractionBuilder() *interaction.Builder {
-	return interaction.NewBuilder()
-}
 
 // NewCard creates a new card builder.
 func NewCard(id string) *interaction.CardBuilder {
@@ -411,25 +360,6 @@ func CallbackCardAction(id, label, value string) *interaction.CardActionBuilder 
 func URLCardAction(id, label, url string) *interaction.CardActionBuilder {
 	return interaction.URLCardAction(id, label, url)
 }
-
-// NewInteractionHandler creates a new interaction handler
-func NewInteractionHandler(manager *Manager) *InteractionHandler {
-	return NewHandler(manager)
-}
-
-// Interaction errors
-var (
-	ErrNotInteraction         = interaction.ErrNotInteraction
-	ErrBotNotFound            = interaction.ErrBotNotFound
-	ErrNoAdapter              = interaction.ErrNoAdapter
-	ErrNotSupported           = interaction.ErrNotSupported
-	ErrRequestNotFound        = interaction.ErrRequestNotFound
-	ErrRequestExpired         = interaction.ErrRequestExpired
-	ErrInteractionTimeout     = interaction.ErrTimeout
-	ErrChannelClosed          = interaction.ErrChannelClosed
-	ErrInvalidMode            = interaction.ErrInvalidMode
-	ErrPendingRequestNotFound = interaction.ErrPendingRequestNotFound
-)
 
 // Command types re-exported from internal/command package
 
