@@ -26,7 +26,8 @@ func (a *Adapter) Platform() core.Platform {
 	return core.PlatformFeishu
 }
 
-// AdaptWebhook converts a Feishu webhook event to core.Message
+// AdaptWebhook converts a Feishu webhook event to core.Message (webhook
+// connection mode; reserved, see Bot.HandleWebhook).
 func (a *Adapter) AdaptWebhook(ctx context.Context, body []byte) (*core.Message, error) {
 	var event MessageEvent
 	if err := json.Unmarshal(body, &event); err != nil {

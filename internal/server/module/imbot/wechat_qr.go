@@ -1,4 +1,4 @@
-// Package imbotsettings provides handlers for ImBot settings management.
+// wechat_qr.go implements the Weixin QR-login HTTP session flow.
 package imbot
 
 import (

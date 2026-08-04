@@ -19,8 +19,6 @@ import (
 
 	"github.com/tingly-dev/tingly-box/agentboot"
 	"github.com/tingly-dev/tingly-box/imbot"
-	imbotfeishu "github.com/tingly-dev/tingly-box/imbot/platform/feishu"
-	imbottelegram "github.com/tingly-dev/tingly-box/imbot/platform/telegram"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
 	builtinserver "github.com/tingly-dev/tingly-box/internal/mcp/builtin_server"
 	"github.com/tingly-dev/tingly-box/internal/tbclient"
@@ -449,16 +447,7 @@ func runBotWithSettingsInternal(ctx context.Context, appManager *AppManager, set
 		platform := bot.PlatformInfo().ID
 		cmdRegistry := handler.GetCommandRegistry()
 
-		var err error
-		switch platform {
-		case imbot.PlatformTelegram:
-			err = imbottelegram.SetupMenuButton(bot, cmdRegistry)
-		case imbot.PlatformFeishu, imbot.PlatformLark:
-			err = imbotfeishu.SetupQuickActions(bot, cmdRegistry)
-		default:
-			// Other platforms don't support menu configuration
-			err = nil
-		}
+		err := imbot.SetupCommandMenu(bot, platform, cmdRegistry)
 
 		if err != nil {
 			// Log warning but don't fail startup

@@ -8,7 +8,7 @@ A unified, extensible framework for building IM bots that work across multiple m
 - **Type-Safe** - Full Go type safety with compile-time checks
 - **Extensible** - Easy to add new platforms via core interfaces
 - **Multi-Platform** - Manage multiple bots from different platforms in one manager
-- **Rich Interactions** - Inline keyboards, commands, menus, and custom interactions
+- **Rich Interactions** - Platform-neutral action sets, inline keyboards, and commands
 - **Markdown Support** - Cross-platform markdown conversion with entity handling
 - **Well-Tested** - Comprehensive test coverage including E2E tests
 - **Production Ready** - Used in tingly-box AI orchestrator
@@ -48,10 +48,10 @@ imbot/
 │   ├── discord/       # Discord bot implementation
 │   ├── slack/         # Slack bot implementation
 │   └── weixin/        # WeixinWork bot implementation
-├── interaction/       # Interactive elements (keyboards, buttons)
+├── interaction/       # Interactive elements (keyboards, cards)
 ├── command/           # Command registry and handling
-├── menu/              # Menu system (bot commands, quick actions)
 ├── markdown/          # Markdown parser and converter
+├── security/          # TOFU pairing-code manager
 ├── manager.go         # Multi-bot manager
 └── factory.go         # Bot factory for creating platform instances
 ```
@@ -527,10 +527,10 @@ make test-telegram-e2e
 
 - **core/** - Core abstractions, independent of platform implementations
 - **platform/** - Platform-specific bot implementations
-- **interaction/** - Interactive elements (keyboards, buttons, forms)
+- **interaction/** - Interactive elements (keyboards, cards)
 - **command/** - Command registry and handling system
-- **menu/** - Menu system for bot commands and quick actions
 - **markdown/** - Markdown parsing and cross-platform conversion
+- **security/** - TOFU pairing-code manager
 - **tests/** - E2E and integration tests
 
 ## Used In

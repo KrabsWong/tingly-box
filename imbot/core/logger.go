@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"log"
 	"os"
 	"time"
@@ -179,4 +180,13 @@ func (l *MultiLogger) Error(format string, args ...interface{}) {
 	for _, logger := range l.loggers {
 		logger.Error(format, args...)
 	}
+}
+
+// warn logs a warning through the package-wide logrus logger. This is for
+// diagnostics emitted by core helpers themselves (e.g. the Segments/Text
+// shadow migration warning) — not a replacement for the per-bot Logger
+// interface above, which stays injectable for bots. The logrus standard
+// logger is the same stream the rest of tingly-box watches.
+func warn(format string, args ...interface{}) {
+	logrus.Warnf(format, args...)
 }

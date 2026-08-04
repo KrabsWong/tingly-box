@@ -12,11 +12,6 @@ import (
 	"github.com/tingly-dev/tingly-box/imbot/platform/feishu"
 )
 
-// Platform constants
-const (
-	PlatformLark core.Platform = "lark"
-)
-
 // Bot is an alias to feishu.Bot with Lark domain preset
 type Bot struct {
 	*feishu.Bot
@@ -39,7 +34,7 @@ func NewBot(config *core.Config) (*Bot, error) {
 // All other core.Bot methods (Connect, SendMessage, React, StartReceiving, …)
 // are promoted from the embedded *feishu.Bot and need no explicit override.
 func (b *Bot) PlatformInfo() *core.PlatformInfo {
-	return core.NewPlatformInfoFor(PlatformLark)
+	return core.NewPlatformInfoFor(core.PlatformLark)
 }
 
 // GetWebhookURL returns the webhook URL for Lark. This differs from the

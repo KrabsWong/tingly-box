@@ -285,8 +285,8 @@ token 解析不到时（bot 重启，或被挤出），**明确告诉用户按�
 | **2b** | Seam 1 下半：按钮身份换 `Payload`、Telegram token 降级、补 64 字节校验、删索引导航与 NUL 编码；顺带把 Feishu 卡片回调接上 | ✅ 已落地 |
 | **3** | Seam 3 + Seam 4：能力表、`MessageRestater` | ✅ 已落地 |
 | **4** | Seam 2（回复上下文自动化）+ `FileResolver` | ⏳ |
-| **5** | `menu` 包归位：让它建立在新 seam 之上 / 降级 / 删除，三选一 | ⏳ |
-| **6** | 移除 `Metadata["replyMarkup"]` 兼容路径 | ⏳ **依赖 5** |
+| **5** | `menu` 包归位：让它建立在新 seam 之上 / 降级 / 删除，三选一 | ✅ 已落地（**删除**） |
+| **6** | 移除 `Metadata["replyMarkup"]` 兼容路径 | ⏳ 生产者仅剩 `examples/` |
 
 **2a / 2b 拆分的理由**：2b 是唯一触碰**回调协议**的一步，改错就是"按钮点了没反应"。
 拆开让 2a 的用户价值（Feishu 按钮可见）不被 2b 的风险绑架。
@@ -299,11 +299,18 @@ token 解析不到时（bot 重启，或被挤出），**明确告诉用户按�
 **Phase 5 刻意排在 seam 之后**：先让新 seam 的形状被真实使用验证过，再决定 `menu`
 该不该活，而不是反过来。
 
+**Phase 5 的决议（2026-08）：删除。** 依据：`imbot/menu` 的 Adapter/Registry 与三个
+平台 `menu.go` 在 imbot 之外零引用（仅自身单测），生产中的命令菜单路径
+（`SetupCommandMenu` → `platform/menu_setup.go`）从不经过它——它是被
+`command.CommandRegistry` 取代的第一版尝试。同批删除的还有同样零消费者的通用交互
+Handler（原 `imbot/interaction.go`：pending-request 状态机 + 5 个平台
+`interaction.go` 适配器 + 编号回复降级），生产中的交互一律走 `remote/interaction`
++ `core.ActionSet`，这条库内平行通道从未接入。
+
 **兼容路径的移除必须排在 Phase 5 之后**（原计划把它放在 Phase 4，顺序是错的）。
-`Metadata["replyMarkup"]` 至今仍有三个 in-repo 生产者：imbot 自己的通用交互
-Handler（`imbot/interaction.go:198`）、`menu` 包的 telegram/feishu 适配器
-（`telegram/menu.go:147`、`feishu/menu.go:170`）、以及 `examples/`。
-先删兼容路径会让 imbot 自身的交互路径哑掉——生产者迁完才轮到它。
+`Metadata["replyMarkup"]` 原有三个 in-repo 生产者；Phase 5 删除后仅剩 `examples/`。
+迁完 examples 即可移除各平台的 legacy 解码路径（`telegram/action_render.go`、
+`feishu/action_render.go` 的 `actionSetFromLegacyMarkup`、`tingly/adapter.go`）。
 
 **Phase 4 的两件事互不依赖**：`FileResolver` 自足且低风险，随时可单独做；
 Seam 2 则有个未决的设计选择（见下），且只影响本仓无法测试的 Weixin/WeCom，

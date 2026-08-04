@@ -523,7 +523,9 @@ func (b *Bot) HandleCardAction(ctx context.Context, eventReq *larkevent.EventReq
 	return nil, fmt.Errorf("card action handling not implemented")
 }
 
-// HandleWebhook handles an incoming webhook event (for webhook mode, alternative to WebSocket)
+// HandleWebhook handles an incoming webhook event (for webhook mode, the
+// reserved alternative to the WebSocket dispatcher; no server route consumes
+// this yet).
 func (b *Bot) HandleWebhook(body []byte) error {
 	coreMessage, err := b.adapter.AdaptWebhook(context.Background(), body)
 	if err != nil {

@@ -1,6 +1,6 @@
 package feishu
 
-// MessageEvent represents an incoming message event
+// MessageEvent represents an incoming message event (webhook envelope)
 type MessageEvent struct {
 	Header EventHeader        `json:"header"`
 	Event  MessageEventDetail `json:"event"`
