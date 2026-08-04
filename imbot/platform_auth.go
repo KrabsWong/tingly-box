@@ -258,15 +258,6 @@ func GetPlatformConfig(platform string) (PlatformAuthConfig, bool) {
 	return config, exists
 }
 
-// GetPlatformsByCategory returns platforms grouped by category
-func GetPlatformsByCategory() map[string][]PlatformAuthConfig {
-	result := make(map[string][]PlatformAuthConfig)
-	for _, config := range PlatformConfigs {
-		result[config.Category] = append(result[config.Category], config)
-	}
-	return result
-}
-
 // GetAllPlatforms returns all platform configurations as a slice
 func GetAllPlatforms() []PlatformAuthConfig {
 	platforms := make([]PlatformAuthConfig, 0, len(PlatformConfigs))
@@ -276,29 +267,11 @@ func GetAllPlatforms() []PlatformAuthConfig {
 	return platforms
 }
 
-// IsValidPlatform reports whether the platform has a settings/auth-config
-// entry (i.e. it can be configured from the UI). This is deliberately narrower
-// than core.IsValidPlatform, which reports whether the identifier is a known
-// platform at all — the latter also covers reserved platforms (signal,
-// googlechat, bluebubbles) that have no configuration form yet.
-func IsValidPlatform(platform string) bool {
-	_, exists := PlatformConfigs[platform]
-	return exists
-}
-
 // CategoryLabels provides display labels for categories
 var CategoryLabels = map[string]string{
 	"im":         "IM Platforms",
 	"enterprise": "Enterprise",
 	"business":   "Business",
-}
-
-// AuthTypeLabels provides display labels for auth types
-var AuthTypeLabels = map[string]string{
-	"token": "Token",
-	"oauth": "OAuth",
-	"qr":    "QR Code",
-	"basic": "Basic Auth",
 }
 
 // defaultAuthMapping is used for platforms with no entry in PlatformConfigs.

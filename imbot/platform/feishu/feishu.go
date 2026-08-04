@@ -523,28 +523,6 @@ func (b *Bot) HandleCardAction(ctx context.Context, eventReq *larkevent.EventReq
 	return nil, fmt.Errorf("card action handling not implemented")
 }
 
-// HandleWebhook handles an incoming webhook event (for webhook mode, alternative to WebSocket)
-func (b *Bot) HandleWebhook(body []byte) error {
-	coreMessage, err := b.adapter.AdaptWebhook(context.Background(), body)
-	if err != nil {
-		b.Logger().Error("Failed to adapt webhook: %v", err)
-		return err
-	}
-
-	b.EmitMessage(*coreMessage)
-	return nil
-}
-
-// GetWebhookURL returns the webhook path for this platform
-func (b *Bot) GetWebhookURL(webhookPath string) string {
-	return fmt.Sprintf("/webhook/%s/%s", b.domain, webhookPath)
-}
-
-// VerifyWebhook verifies webhook signature
-func (b *Bot) VerifyWebhook(signature, timestamp, body string) bool {
-	return true
-}
-
 // SendText sends a simple text message
 func (b *Bot) SendText(ctx context.Context, target string, text string) (*core.SendResult, error) {
 	return b.SendMessage(ctx, target, &core.SendMessageOptions{Text: text})

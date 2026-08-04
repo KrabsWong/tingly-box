@@ -10,7 +10,7 @@ package core
 //
 // Note the split of concerns: this table owns runtime/protocol metadata.
 // Settings-UI metadata (auth type, form fields, category) lives with the
-// consuming package in imbot/platform.go, which derives its display names from
+// consuming package in imbot/platform_auth.go, which derives its display names from
 // GetPlatformName so those cannot drift either.
 type PlatformDescriptor struct {
 	// ID is the platform identifier.
