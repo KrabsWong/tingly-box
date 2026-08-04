@@ -35,11 +35,10 @@ type errorDetail struct {
 
 // E2EResponse is the JSON envelope returned by POST /probe.
 type E2EResponse struct {
-	Success bool               `json:"success"`
-	Error   *errorDetail       `json:"error,omitempty"`
+	Success bool           `json:"success"`
+	Error   *errorDetail   `json:"error,omitempty"`
 	Data    *probe.E2EData `json:"data,omitempty"`
 }
-
 
 // LightweightResponse is the JSON envelope returned by POST /probe/lightweight.
 type LightweightResponse struct {

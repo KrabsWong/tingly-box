@@ -1,4 +1,4 @@
-package server
+package protocolserver
 
 import (
 	"net/http"
@@ -6,25 +6,25 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 
-// newAliasTestServer builds a Server whose config holds a single claude_code
-// profile (p1 named "mine"), enough to exercise profileAliasMiddleware.
-func newAliasTestServer() *Server {
-	return &Server{config: &config.Config{
+// newAliasTestServer builds a ProtocolHandler whose config holds a single
+// claude_code profile (p1 named "mine"), enough to exercise
+// profileAliasMiddleware.
+func newAliasTestServer() *ProtocolHandler {
+	return NewHandler(ProtocolHandlerDeps{Config: &config.Config{
 		Profiles: map[string][]typ.ProfileMeta{
 			"claude_code": {{ID: "p1", Name: "mine"}},
 		},
-	}}
+	}})
 }
 
 // invokeAliasMiddleware runs profileAliasMiddleware over a request whose
 // :scenario param is rawScenario and whose path embeds it, returning the
 // resulting param value and rewritten URL path.
-func invokeAliasMiddleware(t *testing.T, s *Server, rawScenario string) (param, path string) {
+func invokeAliasMiddleware(t *testing.T, ph *ProtocolHandler, rawScenario string) (param, path string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
@@ -32,7 +32,7 @@ func invokeAliasMiddleware(t *testing.T, s *Server, rawScenario string) (param, 
 	c.Request = httptest.NewRequest(http.MethodPost, "/tingly/"+rawScenario+"/v1/messages", nil)
 	c.Params = gin.Params{{Key: "scenario", Value: rawScenario}}
 
-	s.profileAliasMiddleware(c)
+	ph.profileAliasMiddleware(c)
 
 	return c.Param("scenario"), c.Request.URL.Path
 }
@@ -49,7 +49,7 @@ func TestProfileAliasMiddleware_RewritesNameToID(t *testing.T) {
 		t.Errorf("path = %q, want %q", path, "/tingly/claude_code:p1/v1/messages")
 	}
 	// The usage tracker derives the scenario from the (now rewritten) path.
-	if sc := protocolserver.ExtractScenarioFromPath(path); sc != "claude_code:p1" {
+	if sc := ExtractScenarioFromPath(path); sc != "claude_code:p1" {
 		t.Errorf("extractScenarioFromPath = %q, want %q", sc, "claude_code:p1")
 	}
 }

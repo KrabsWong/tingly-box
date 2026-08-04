@@ -1413,9 +1413,9 @@ func TestApplyCodexConfig_PrefsRejectInvalidEnumAndCannotClobberManaged(t *testi
 // read, enum values validated, and the bool normalized to "true"/"".
 func TestCodexPrefsFromConfig(t *testing.T) {
 	cfg := map[string]interface{}{
-		"model_reasoning_effort":            "high",
-		"model_reasoning_summary":           "detailed",
-		"model_verbosity":                   "low",
+		"model_reasoning_effort":             "high",
+		"model_reasoning_summary":            "detailed",
+		"model_verbosity":                    "low",
 		"model_supports_reasoning_summaries": true,
 		// Unrelated keys are ignored — they must not leak into prefs.
 		"model":            "tingly/codex",

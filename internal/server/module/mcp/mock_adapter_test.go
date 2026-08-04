@@ -12,17 +12,17 @@ import (
 // MockFormatAdapter is a mock implementation of FormatAdapter for testing
 type MockFormatAdapter struct {
 	// Mock data to return
-	ToolsToReturn      []Tool
-	EventsToReturn     []any
-	UsageToReturn      TokenUsage
-	RequestType        any
-	ResponseType       any
+	ToolsToReturn  []Tool
+	EventsToReturn []any
+	UsageToReturn  TokenUsage
+	RequestType    any
+	ResponseType   any
 
 	// Call tracking
-	ExtractToolsCalled    bool
-	BuildToolMessageCalled bool
-	AppendToolResultsCalled bool
-	FilterVirtualToolsCalled bool
+	ExtractToolsCalled         bool
+	BuildToolMessageCalled     bool
+	AppendToolResultsCalled    bool
+	FilterVirtualToolsCalled   bool
 	SplitVirtualExternalCalled bool
 
 	// Simulated behavior
@@ -156,19 +156,19 @@ func (m *MockFormatAdapter) RewriteEventIndex(event any, offset int) ([]byte, er
 	return nil, nil
 }
 
-	// Usage extraction
+// Usage extraction
 func (m *MockFormatAdapter) ExtractUsage(response any) (TokenUsage, error) {
-		return m.UsageToReturn, nil
-	}
+	return m.UsageToReturn, nil
+}
 
-	// Mock types
+// Mock types
 type MockResponse struct {
 	Tools []MockTool
 }
 
 type MockTool struct {
-	IDVal       string
-	NameVal     string
+	IDVal        string
+	NameVal      string
 	ArgumentsVal string
 }
 
@@ -191,9 +191,9 @@ type MockToolMessage struct {
 
 // MockStreamHandle is a mock StreamHandle for testing
 type MockStreamHandle struct {
-	Events     []any
-	CurrentIdx int
-	Closed     bool
+	Events        []any
+	CurrentIdx    int
+	Closed        bool
 	ErrorToReturn error
 }
 
@@ -272,11 +272,11 @@ func (m *MockServerOps) GetRecorder() ProtocolRecorder {
 
 // MockProtocolRecorder is a mock recorder for testing
 type MockProtocolRecorder struct {
-	ResponseSet       bool
-	ResponseRecorded  bool
-	ErrorRecorded     bool
-	LastResponse      any
-	LastError         error
+	ResponseSet      bool
+	ResponseRecorded bool
+	ErrorRecorded    bool
+	LastResponse     any
+	LastError        error
 }
 
 func NewMockProtocolRecorder() *MockProtocolRecorder {
