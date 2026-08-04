@@ -354,6 +354,11 @@ func (b *Bot) SendMessage(ctx context.Context, target string, opts *core.SendMes
 		return nil, err
 	}
 
+	// Segments authoritative when set: flatten to Text/ParseMode. Thinking
+	// segments render as a quoted block (Dimmed); Feishu's native folding card
+	// section is a future enhancement.
+	core.ResolveTextFromSegments(opts, core.GetPlatformCapabilities(core.PlatformFeishu).EffectiveThinkingRender())
+
 	// Handle text/card message
 	if opts.Text != "" {
 		return b.sendText(ctx, target, opts)

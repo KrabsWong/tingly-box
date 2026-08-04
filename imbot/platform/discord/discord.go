@@ -120,6 +120,10 @@ func (b *Bot) SendMessage(ctx context.Context, target string, opts *core.SendMes
 		return nil, err
 	}
 
+	// Segments (e.g. interleaved body + thinking) authoritative when set:
+	// flatten to Text/ParseMode. Thinking segments render as a quoted block.
+	core.ResolveTextFromSegments(opts, core.GetPlatformCapabilities(core.PlatformDiscord).EffectiveThinkingRender())
+
 	// Handle text message
 	if opts.Text != "" {
 		return b.sendText(ctx, target, opts)

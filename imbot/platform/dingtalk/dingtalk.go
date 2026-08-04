@@ -167,6 +167,10 @@ func (b *Bot) SendMessage(ctx context.Context, target string, opts *core.SendMes
 		return nil, err
 	}
 
+	// Segments authoritative when set: flatten to Text/ParseMode. Thinking
+	// segments render as a quoted block (Dimmed).
+	core.ResolveTextFromSegments(opts, core.GetPlatformCapabilities(core.PlatformDingTalk).EffectiveThinkingRender())
+
 	// Handle text message
 	if opts.Text != "" {
 		return b.sendText(ctx, target, opts)

@@ -157,6 +157,10 @@ func (b *Bot) SendMessage(ctx context.Context, target string, opts *core.SendMes
 		return nil, err
 	}
 
+	// Segments authoritative when set. WhatsApp declares ThinkingRenderHidden,
+	// so thinking segments are dropped and only body text is sent.
+	core.ResolveTextFromSegments(opts, core.GetPlatformCapabilities(core.PlatformWhatsApp).EffectiveThinkingRender())
+
 	// Handle text message
 	if opts.Text != "" {
 		return b.sendText(ctx, target, opts)
