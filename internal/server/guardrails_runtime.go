@@ -2,6 +2,7 @@ package server
 
 import (
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 
 	"github.com/tingly-dev/tingly-box/internal/guardrails"
@@ -61,16 +62,16 @@ func cloneGuardrailsRuntime(src *guardrails.Guardrails) *guardrails.Guardrails {
 // guardrailsEnabledForScenario centralizes feature-flag checks so protocol handlers
 // do not repeat scenario/global guardrails gating logic.
 func (s *Server) guardrailsEnabledForScenario(scenario string) bool {
-	return GuardrailsEnabledForScenario(s.config, s.currentGuardrailsRuntime(), scenario)
+	return protocolserver.GuardrailsEnabledForScenario(s.config, s.currentGuardrailsRuntime(), scenario)
 }
 
 func (s *Server) guardrailsSupportsScenario(scenario string) bool {
-	return GuardrailsSupportsScenario(scenario)
+	return protocolserver.GuardrailsSupportsScenario(scenario)
 }
 
 func (s *Server) getGuardrailsSupportedScenarios() []string {
-	out := make([]string, len(GuardrailsSupportedScenarios))
-	copy(out, GuardrailsSupportedScenarios)
+	out := make([]string, len(protocolserver.GuardrailsSupportedScenarios))
+	copy(out, protocolserver.GuardrailsSupportedScenarios)
 	return out
 }
 

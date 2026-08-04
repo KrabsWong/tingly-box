@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"strings"
 	"time"
 
@@ -46,11 +47,11 @@ type OpenAIChatCompletionResponse struct {
 // =============================================
 
 // ProbeProviderResponse represents the response from provider probing.
-// The wrapper stays here because it embeds *ErrorDetail (server's global
+// The wrapper stays here because it embeds *protocolserver.ErrorDetail (server's global
 // error model). The Data shape lives in internal/probe.
 type ProbeProviderResponse struct {
 	Success bool                             `json:"success" example:"true"`
-	Error   *ErrorDetail                     `json:"error,omitempty"`
+	Error   *protocolserver.ErrorDetail      `json:"error,omitempty"`
 	Data    *probe.ProbeProviderResponseData `json:"data,omitempty"`
 }
 
@@ -162,7 +163,7 @@ func GenerateCurlCommand(apiBase, apiStyle, token, model string) string {
 
 // ProbeResponse represents the overall probe response
 type ProbeResponse struct {
-	Success bool               `json:"success"`
-	Error   *ErrorDetail       `json:"error,omitempty"`
-	Data    *ProbeResponseData `json:"data,omitempty"`
+	Success bool                        `json:"success"`
+	Error   *protocolserver.ErrorDetail `json:"error,omitempty"`
+	Data    *ProbeResponseData          `json:"data,omitempty"`
 }

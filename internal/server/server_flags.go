@@ -9,6 +9,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/guardrails"
 	guardrailscore "github.com/tingly-dev/tingly-box/internal/guardrails/core"
 	guardrailsevaluate "github.com/tingly-dev/tingly-box/internal/guardrails/evaluate"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
@@ -23,7 +24,7 @@ func (s *Server) guardrailsEnabled() bool {
 
 // mcpEnabled checks if MCP feature is enabled via scenario flag
 func (s *Server) mcpEnabled() bool {
-	return MCPEnabled(s.config)
+	return protocolserver.MCPEnabled(s.config)
 }
 
 func (s *Server) initGuardrailsRuntime() {

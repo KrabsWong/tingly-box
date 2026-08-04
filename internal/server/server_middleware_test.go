@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
@@ -48,7 +49,7 @@ func TestProfileAliasMiddleware_RewritesNameToID(t *testing.T) {
 		t.Errorf("path = %q, want %q", path, "/tingly/claude_code:p1/v1/messages")
 	}
 	// The usage tracker derives the scenario from the (now rewritten) path.
-	if sc := ExtractScenarioFromPath(path); sc != "claude_code:p1" {
+	if sc := protocolserver.ExtractScenarioFromPath(path); sc != "claude_code:p1" {
 		t.Errorf("extractScenarioFromPath = %q, want %q", sc, "claude_code:p1")
 	}
 }

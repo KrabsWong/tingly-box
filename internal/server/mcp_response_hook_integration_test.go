@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,8 +21,8 @@ import (
 	mcpruntime "github.com/tingly-dev/tingly-box/internal/mcp/runtime"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/protocol/transform"
-	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/protocolserver/servertool"
+	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 
@@ -73,7 +74,7 @@ func newMCPEnabledTestServer(t *testing.T, cfg *typ.MCPRuntimeConfig) *Server {
 		mcpRuntime: rt,
 		config:     conf,
 	}
-	server.aiHandler = NewHandler(ProtocolHandlerDeps{
+	server.aiHandler = protocolserver.NewHandler(protocolserver.ProtocolHandlerDeps{
 		Config:                conf,
 		ClientPool:            cp,
 		MCPRuntime:            rt,
@@ -688,7 +689,7 @@ func TestDispatchAnthropicToAnthropicV1_Streaming_AdvisorSSEEndToEnd(t *testing.
 			anthropic.ToolUnionParamOfTool(anthropic.ToolInputSchemaParam{}, "tingly_box_mcp__builtin__advisor"),
 		},
 	}
-	require.True(t, HasDeclaredMCPAnthropicV1Tools(&req))
+	require.True(t, protocolserver.HasDeclaredMCPAnthropicV1Tools(&req))
 
 	reqCtx := transform.NewTransformContext(&req)
 	reqCtx.SourceAPI = protocol.TypeAnthropicV1
@@ -700,7 +701,7 @@ func TestDispatchAnthropicToAnthropicV1_Streaming_AdvisorSSEEndToEnd(t *testing.
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`))
 	rule := &typ.Rule{}
-	SetTrackingContext(c, rule, provider, reqCtx.RequestModel, reqCtx.ResponseModel, true)
+	protocolserver.SetTrackingContext(c, rule, provider, reqCtx.RequestModel, reqCtx.ResponseModel, true)
 
 	s.aiHandler.DispatchChainResult(c, reqCtx, rule, provider, true, nil)
 

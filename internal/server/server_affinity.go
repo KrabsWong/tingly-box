@@ -3,6 +3,7 @@ package server
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
@@ -15,9 +16,9 @@ func (s *Server) updateAffinityMessageID(c *gin.Context, rule *typ.Rule, message
 
 	// Use the partition-scoped affinity key set at selection time; fall back
 	// to the bare session for callers that predate the scoped keys.
-	key, exists := c.Get(ContextKeyAffinityKey)
+	key, exists := c.Get(protocolserver.ContextKeyAffinityKey)
 	if !exists {
-		key, exists = c.Get(ContextKeySessionID)
+		key, exists = c.Get(protocolserver.ContextKeySessionID)
 		if !exists {
 			return
 		}

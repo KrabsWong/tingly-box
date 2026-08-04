@@ -23,7 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tingly-dev/tingly-box/internal/obs"
-	"github.com/tingly-dev/tingly-box/internal/server"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 
 	"github.com/gin-gonic/gin"
@@ -69,17 +69,17 @@ func NewStreamableRecorder() *StreamableRecorder {
 
 func (s *StreamableRecorder) CloseNotify() <-chan bool { return s.closeCh }
 
-// NewRecordingTestHandler builds a *server.ProtocolHandler whose
+// NewRecordingTestHandler builds a *protocolserver.ProtocolHandler whose
 // GetOrCreateScenarioSink callback always returns the same in-memory-backed
 // sink for scenario, mirroring what root's *Server does via its
 // scenarioRecordSinks map.
-func NewRecordingTestHandler(t *testing.T, scenario typ.RuleScenario, mode obs.RecordMode) (*server.ProtocolHandler, *obs.Sink, *MemExporter) {
+func NewRecordingTestHandler(t *testing.T, scenario typ.RuleScenario, mode obs.RecordMode) (*protocolserver.ProtocolHandler, *obs.Sink, *MemExporter) {
 	t.Helper()
 	mem := &MemExporter{}
 	sink := obs.NewSink("", mode, obs.WithExporters(mem))
 	require.NotNil(t, sink, "obs.NewSink must succeed with WithExporters")
 
-	h := server.NewHandler(server.ProtocolHandlerDeps{
+	h := protocolserver.NewHandler(protocolserver.ProtocolHandlerDeps{
 		GetOrCreateScenarioSink: func(s typ.RuleScenario) *obs.Sink {
 			if s == scenario {
 				return sink

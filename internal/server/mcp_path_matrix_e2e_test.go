@@ -21,6 +21,7 @@ import (
 	mcpruntime "github.com/tingly-dev/tingly-box/internal/mcp/runtime"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/protocol/transform"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	coretool "github.com/tingly-dev/tingly-box/internal/tool"
 	"github.com/tingly-dev/tingly-box/internal/typ"
@@ -286,7 +287,7 @@ func runDispatch(
 	w := &closeNotifyRecorder{httptest.NewRecorder()}
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/test", strings.NewReader("{}"))
-	SetTrackingContext(c, rule, provider, reqCtx.RequestModel, reqCtx.ResponseModel, streaming)
+	protocolserver.SetTrackingContext(c, rule, provider, reqCtx.RequestModel, reqCtx.ResponseModel, streaming)
 
 	s.aiHandler.DispatchChainResult(c, reqCtx, rule, provider, streaming, nil)
 	return w.Code, w.Header(), w.Body.String()
@@ -344,7 +345,7 @@ func newMCPDisabledTestServer(t *testing.T) *Server {
 	require.NoError(t, conf.SetScenarioFlag(typ.ScenarioGlobal, "mcp", false))
 
 	s := &Server{clientPool: cp, mcpRuntime: rt, config: conf}
-	s.aiHandler = NewHandler(ProtocolHandlerDeps{
+	s.aiHandler = protocolserver.NewHandler(protocolserver.ProtocolHandlerDeps{
 		Config:     conf,
 		ClientPool: cp,
 		MCPRuntime: rt,

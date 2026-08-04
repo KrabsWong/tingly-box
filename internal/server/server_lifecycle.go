@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"log"
 	"net"
 	"net/http"
@@ -155,7 +156,7 @@ func (s *Server) GetRouter() *gin.Engine {
 }
 
 // GetLoadBalancer returns the load balancer instance
-func (s *Server) GetLoadBalancer() *LoadBalancer {
+func (s *Server) GetLoadBalancer() *protocolserver.LoadBalancer {
 	return s.loadBalancer
 }
 

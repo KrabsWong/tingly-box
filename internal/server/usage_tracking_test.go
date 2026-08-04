@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -80,7 +81,7 @@ func TestTrackUsageFromContext_DoesNotPanic(t *testing.T) {
 			setup: func(c *gin.Context) {
 				rule := &typ.Rule{UUID: "test-rule"}
 				provider := &typ.Provider{UUID: "test-provider", Name: "test"}
-				SetTrackingContext(c, rule, provider, "gpt-4", "gpt-4", false)
+				protocolserver.SetTrackingContext(c, rule, provider, "gpt-4", "gpt-4", false)
 			},
 			input:  100,
 			output: 50,
@@ -91,7 +92,7 @@ func TestTrackUsageFromContext_DoesNotPanic(t *testing.T) {
 			setup: func(c *gin.Context) {
 				rule := &typ.Rule{UUID: "test-rule"}
 				provider := &typ.Provider{UUID: "test-provider", Name: "test"}
-				SetTrackingContext(c, rule, provider, "gpt-4", "gpt-4", false)
+				protocolserver.SetTrackingContext(c, rule, provider, "gpt-4", "gpt-4", false)
 			},
 			input:  0,
 			output: 0,
@@ -109,7 +110,7 @@ func TestTrackUsageFromContext_DoesNotPanic(t *testing.T) {
 			setup: func(c *gin.Context) {
 				rule := &typ.Rule{UUID: "test-rule"}
 				provider := &typ.Provider{UUID: "test-provider", Name: "test"}
-				SetTrackingContext(c, rule, provider, "gpt-4", "gpt-4", false)
+				protocolserver.SetTrackingContext(c, rule, provider, "gpt-4", "gpt-4", false)
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
 				c.Request = &http.Request{}
@@ -156,7 +157,7 @@ func TestTrackUsageFromContext_ReportsEnterpriseRateLimit(t *testing.T) {
 
 	rule := &typ.Rule{UUID: "r1"}
 	provider := &typ.Provider{UUID: "p1", Name: "provider-1"}
-	SetTrackingContext(c, rule, provider, "tingly/cc", "tingly/cc", false)
+	protocolserver.SetTrackingContext(c, rule, provider, "tingly/cc", "tingly/cc", false)
 	c.Set(constant.CtxKeyEnterpriseKeyPrefix, "sk-tbe-12345678")
 	c.Set(constant.CtxKeyEnterpriseUserID, "u1")
 

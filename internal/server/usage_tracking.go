@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tingly-dev/tingly-box/internal/protocolserver"
+
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 
@@ -75,13 +77,13 @@ func reportEnterpriseRateLimitEvent(ctx context.Context, keyPrefix, providerID, 
 //   - outputTokens: Number of output/completion tokens consumed
 //   - err: Error if request failed, nil for success (context.Canceled maps to "canceled" status)
 func (s *Server) trackUsageFromContext(c *gin.Context, inputTokens, outputTokens int, err error) {
-	rule, provider, model, requestModel, scenario, streamed, startTime := GetTrackingContext(c)
+	rule, provider, model, requestModel, scenario, streamed, startTime := protocolserver.GetTrackingContext(c)
 
 	if rule == nil || provider == nil || model == "" {
 		return
 	}
 
-	latencyMs := CalculateLatencyFromStart(startTime)
+	latencyMs := protocolserver.CalculateLatencyFromStart(startTime)
 
 	// Determine status and error code from error
 	status, errorCode := "success", ""
@@ -96,9 +98,9 @@ func (s *Server) trackUsageFromContext(c *gin.Context, inputTokens, outputTokens
 	}
 
 	// Collect all metrics from context
-	ttftMs := CalculateTTFT(c)
-	cacheHit, _ := GetCacheHit(c) // Default false if not set
-	tps := CalculateTPS(c, outputTokens, streamed)
+	ttftMs := protocolserver.CalculateTTFT(c)
+	cacheHit, _ := protocolserver.GetCacheHit(c) // Default false if not set
+	tps := protocolserver.CalculateTPS(c, outputTokens, streamed)
 
 	// Build comprehensive metrics data
 	metrics := MetricsData{
@@ -164,7 +166,7 @@ func (s *Server) trackUsageFromContext(c *gin.Context, inputTokens, outputTokens
 //   - usage: Comprehensive token usage including cache and system tokens
 //   - err: Error if request failed, nil for success
 func (s *Server) trackUsageWithTokenUsage(c *gin.Context, usage *protocol.TokenUsage, err error) {
-	rule, provider, model, requestModel, scenario, streamed, startTime := GetTrackingContext(c)
+	rule, provider, model, requestModel, scenario, streamed, startTime := protocolserver.GetTrackingContext(c)
 
 	logrus.WithFields(logrus.Fields{
 		"has_rule":     rule != nil,
@@ -179,7 +181,7 @@ func (s *Server) trackUsageWithTokenUsage(c *gin.Context, usage *protocol.TokenU
 		return
 	}
 
-	latencyMs := CalculateLatencyFromStart(startTime)
+	latencyMs := protocolserver.CalculateLatencyFromStart(startTime)
 
 	// Determine status and error code from error
 	status, errorCode := "success", ""
@@ -210,12 +212,12 @@ func (s *Server) trackUsageWithTokenUsage(c *gin.Context, usage *protocol.TokenU
 	}).Debug("trackUsage: token usage recorded")
 
 	// Detect cache hit from usage data and set in context
-	cacheHit := DetectCacheHit(usage)
-	SetCacheHit(c, cacheHit)
+	cacheHit := protocolserver.DetectCacheHit(usage)
+	protocolserver.SetCacheHit(c, cacheHit)
 
 	// Collect all metrics from context and usage
-	ttftMs := CalculateTTFT(c)
-	tps := CalculateTPS(c, usage.OutputTokens, streamed)
+	ttftMs := protocolserver.CalculateTTFT(c)
+	tps := protocolserver.CalculateTPS(c, usage.OutputTokens, streamed)
 
 	// Build comprehensive metrics data
 	metrics := MetricsData{
@@ -353,7 +355,7 @@ func (s *Server) recordDetailedUsage(c *gin.Context, rule *typ.Rule, provider *t
 		return
 	}
 
-	ttftMs := CalculateTTFT(c)
+	ttftMs := protocolserver.CalculateTTFT(c)
 
 	record := &db.UsageRecord{
 		ProviderUUID: provider.UUID,
@@ -394,7 +396,7 @@ func (s *Server) recordDetailedUsageWithTokenUsage(c *gin.Context, rule *typ.Rul
 		return
 	}
 
-	ttftMs := CalculateTTFT(c)
+	ttftMs := protocolserver.CalculateTTFT(c)
 
 	record := &db.UsageRecord{
 		ProviderUUID:     provider.UUID,
