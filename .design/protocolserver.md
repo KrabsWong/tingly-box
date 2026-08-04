@@ -1,6 +1,6 @@
 # ProtocolServer — 模型服务面从 internal/server 独立
 
-Status: in progress (branch `refactor/protocolserver`)
+Status: steps 1–4 done (branch `refactor/protocolserver`, commits ae8dbfa9 → 4658b900)
 Date: 2026-08-04
 
 ## 动机
@@ -90,5 +90,14 @@ handler 类型 — **拆分对外部 API 零破坏**。
 
 - `load_balance_handler.go`（`LoadBalancerAPI`，管理面 HTTP 包装）与 `guardrails_handler.go`
   留在 server 侧（管理面），只消费 protocolserver 暴露的接口。
+- **`module/mcp` 位置待定**：protocolserver 大量依赖 `internal/server/module/mcp`
+  （adapter/forwarder/loop processor/stream interceptor —— 本质是 serving 端逻辑）。
+  这是目前唯一残留的 `protocolserver → server/module/*` 依赖；后续可将其迁为
+  `protocolserver/mcpconv`（或类似）以彻底单向化。
+- LB 模拟器（`load_balance_simulator.go`）与 serving 侧测试中若干仍构造 `&Server{}`
+  的用例留在 server 包（它们需要 unexported failover 入口经 aiHandler 走通）。
 - 拆完后可为依赖方向加 lint 规则（depguard / go vet 自定义）。
 - `swagger.go` 的 `GenerateOpenAPI` 只走管理面路由，不涉及 `/tingly`，不受影响。
+- 热重载：`servertoolPipeline` 仍经 `GetServertoolPipeline` 回调（config reload 原地重建
+  pipeline 的逻辑仍在 server 的 `registerAdviserFromConfig`）；如需彻底消掉，可把 adviser
+  注册也移入 protocolserver 并暴露 `Reload(cfg)`。
