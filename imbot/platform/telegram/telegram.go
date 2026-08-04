@@ -239,6 +239,12 @@ func (b *Bot) SendMessage(ctx context.Context, target string, opts *core.SendMes
 		return nil, err
 	}
 
+	// Segments (e.g. interleaved body + thinking) authoritative when set:
+	// flatten to Text/ParseMode so the existing text path renders them.
+	// Thinking segments render as a quoted block (Dimmed) — Telegram's native
+	// collapsible RichBlock is a future enhancement.
+	core.ResolveTextFromSegments(opts, core.GetPlatformCapabilities(core.PlatformTelegram).EffectiveThinkingRender())
+
 	// Parse target as chat ID
 	chatID, err := strconv.ParseInt(target, 10, 64)
 	if err != nil {

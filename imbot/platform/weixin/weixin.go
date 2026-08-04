@@ -167,6 +167,11 @@ func (b *Bot) SendMessage(ctx context.Context, target string, opts *core.SendMes
 		return nil, core.NewBotError(core.ErrConnectionFailed, "not connected", false)
 	}
 
+	// Segments authoritative when set: flatten to Text/ParseMode. Thinking
+	// segments render as a quoted block (Dimmed, the default for this basic
+	// platform — see core.PlatformWeixin capabilities).
+	core.ResolveTextFromSegments(opts, core.GetPlatformCapabilities(core.PlatformWeixin).EffectiveThinkingRender())
+
 	// Handle text message
 	if opts.Text != "" && len(opts.Media) == 0 {
 		return b.sendText(ctx, target, opts)

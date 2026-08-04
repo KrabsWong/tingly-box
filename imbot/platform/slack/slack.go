@@ -94,6 +94,11 @@ func (b *Bot) SendMessage(ctx context.Context, target string, opts *core.SendMes
 		return nil, err
 	}
 
+	// Segments (e.g. interleaved body + thinking) authoritative when set:
+	// flatten to Text/ParseMode. Thinking segments render as a quoted block
+	// (Dimmed); Slack's native plan/task_card blocks are a future enhancement.
+	core.ResolveTextFromSegments(opts, core.GetPlatformCapabilities(core.PlatformSlack).EffectiveThinkingRender())
+
 	// Handle text message
 	if opts.Text != "" {
 		return b.sendText(ctx, target, opts)
