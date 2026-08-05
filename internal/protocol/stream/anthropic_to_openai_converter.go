@@ -199,7 +199,7 @@ func (c *anthropicToOpenAIConverter) processEvent(event *anthropic.BetaRawMessag
 		}
 		chunk := c.newChunk(wire.ChatStreamDelta{}, &finishReason)
 		if !c.disableStreamUsage && c.acc.HasUsage() {
-			chunk.Usage = chatStreamUsageWire(c.acc.Result())
+			chunk.Usage = usagepkg.ToChatStreamUsageWire(c.acc.Result())
 		}
 		c.pending = append(c.pending, chunk)
 		c.done = true
@@ -221,28 +221,4 @@ func (c *anthropicToOpenAIConverter) newChunk(delta wire.ChatStreamDelta, finish
 			{Index: 0, Delta: delta, FinishReason: finishReason},
 		},
 	}
-}
-
-// chatStreamUsageWire converts normalized TokenUsage into the Chat Completions
-// stream usage wire shape. Same semantics as usagepkg.ChatUsage: prompt_tokens
-// is the TOTAL (uncached + cached + written), cached_tokens and
-// cache_write_tokens reported, disjoint subsets. Anthropic's
-// cache_creation_input_tokens lands in cache_write_tokens.
-func chatStreamUsageWire(u *protocol.TokenUsage) *wire.ChatStreamUsage {
-	totalInput := u.InputTokens + u.CacheReadTokens
-	su := &wire.ChatStreamUsage{
-		PromptTokens:     int64(totalInput),
-		CompletionTokens: int64(u.OutputTokens),
-		TotalTokens:      int64(totalInput + u.OutputTokens),
-	}
-	if u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-		su.PromptTokensDetails = &wire.ChatStreamPromptTokenDetails{
-			CachedTokens:     int64(u.CacheReadTokens),
-			CacheWriteTokens: int64(u.CacheWriteTokens),
-		}
-	}
-	if u.ReasoningTokens > 0 {
-		su.CompletionTokensDetails = &wire.ChatStreamOutputTokenDetails{ReasoningTokens: int64(u.ReasoningTokens)}
-	}
-	return su
 }

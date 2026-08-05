@@ -336,7 +336,8 @@ func (c *anthropicBetaToResponsesConverter) emitCompletionEvents() {
 		CreatedAt:   c.createdAt,
 		CompletedAt: c.createdAt,
 		Output:      output,
-		Usage:       responsesUsageWire(u),
+		Usage:       usagepkg.ToResponsesUsageWire(u),
+		Model:       c.responseModel,
 	}
 
 	if isIncomplete {

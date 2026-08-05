@@ -76,19 +76,3 @@ func sendResponsesErrorEvent(c *gin.Context, message string, errorType string, _
 	}
 	OpenAIResponsesEvent(c, errorEvent.EventType(), errorEvent)
 }
-
-func responsesUsageWire(u *protocol.TokenUsage) *wire.ResponsesUsageWire {
-	totalInput := int64(u.InputTokens + u.CacheReadTokens)
-	return &wire.ResponsesUsageWire{
-		InputTokens:  totalInput,
-		OutputTokens: int64(u.OutputTokens),
-		TotalTokens:  totalInput + int64(u.OutputTokens),
-		InputTokensDetails: wire.ResponsesInputTokensDetailsWire{
-			CachedTokens:     int64(u.CacheReadTokens),
-			CacheWriteTokens: int64(u.CacheWriteTokens),
-		},
-		OutputTokensDetails: wire.ResponsesOutputTokensDetailsWire{
-			ReasoningTokens: int64(u.ReasoningTokens),
-		},
-	}
-}

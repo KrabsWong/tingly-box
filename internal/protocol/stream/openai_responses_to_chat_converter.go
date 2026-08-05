@@ -181,6 +181,10 @@ func (c *responsesToChatConverter) processEvent(evt *responses.ResponseStreamEve
 		// response.completed so the terminal chunk preserves output + usage
 		// rather than falling through to the post-loop usage=0 fallback.
 		c.usage = protocolusage.FromOpenAIResponses(evt.Response.Usage)
+		// Override total_tokens with the value the upstream Responses stream
+		// actually reported (per .design/stream-usage-tracking.md — cover one
+		// key, do not fork the constructor), falling back to the computed
+		// input+cacheRead+output when the upstream did not report one.
 		if evt.Response.Usage.TotalTokens != 0 {
 			c.totalTokens = evt.Response.Usage.TotalTokens
 		} else {
@@ -287,12 +291,11 @@ func (c *responsesToChatConverter) toolCallDeltaChunk(index int, delta string) w
 func (c *responsesToChatConverter) finalChunk(finishReason string) wire.ChatStreamChunk {
 	chunk := c.newChunk(wire.ChatStreamDelta{}, &finishReason)
 	if !c.disableUsage {
-		// Same wire shape as the Anthropic→Chat path; only total_tokens differs,
-		// preferring the total the upstream Responses stream already reported.
-		usage := chatStreamUsageWire(c.Usage())
-		if c.totalTokens != 0 {
-			usage.TotalTokens = c.totalTokens
-		}
+		// Same wire shape as the Anthropic→Chat path; only total_tokens is
+		// overridden with the total the upstream Responses stream already
+		// reported (captured into c.totalTokens), per the cover-one-key rule.
+		usage := protocolusage.ToChatStreamUsageWire(c.Usage())
+		usage.TotalTokens = c.totalTokens
 		chunk.Usage = usage
 	}
 	return chunk

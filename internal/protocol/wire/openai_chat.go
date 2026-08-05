@@ -73,35 +73,36 @@ type ChatStreamError struct {
 
 // ChatCompletionWire is the OpenAI Chat Completions response wire format.
 type ChatCompletionWire struct {
-	ID      string                    `json:"id"`
-	Object  string                    `json:"object"`
-	Created int64                     `json:"created"`
-	Model   string                    `json:"model"`
+	ID      string                     `json:"id"`
+	Object  string                     `json:"object"`
+	Created int64                      `json:"created"`
+	Model   string                     `json:"model"`
 	Choices []ChatCompletionChoiceWire `json:"choices"`
-	Usage   ChatCompletionUsageWire   `json:"usage"`
+	Usage   ChatCompletionUsageWire    `json:"usage"`
 }
 
 // ToMap serializes to a generic map for callers that apply runtime transforms.
-func (r ChatCompletionWire) ToMap() map[string]interface{} {
+func (r ChatCompletionWire) ToMap() map[string]any {
 	raw, _ := json.Marshal(r)
-	var m map[string]interface{}
+	var m map[string]any
 	_ = json.Unmarshal(raw, &m)
 	return m
 }
 
 // ChatCompletionChoiceWire is a single choice in the OpenAI Chat Completions response.
 type ChatCompletionChoiceWire struct {
-	Index        int                      `json:"index"`
+	Index        int                       `json:"index"`
 	Message      ChatCompletionMessageWire `json:"message"`
-	FinishReason string                   `json:"finish_reason"`
+	FinishReason string                    `json:"finish_reason"`
 }
 
 // ChatCompletionMessageWire is the message inside a choice.
 type ChatCompletionMessageWire struct {
-	Role             string                      `json:"role"`
-	Content          string                      `json:"content,omitempty"`
+	Role             string                       `json:"role"`
+	Content          string                       `json:"content,omitempty"`
+	Refusal          string                       `json:"refusal,omitempty"`
 	ToolCalls        []ChatCompletionToolCallWire `json:"tool_calls,omitempty"`
-	ReasoningContent string                      `json:"reasoning_content,omitempty"`
+	ReasoningContent string                       `json:"reasoning_content,omitempty"`
 }
 
 // ChatCompletionToolCallWire is a single tool call inside a message.
@@ -121,10 +122,11 @@ type ChatCompletionFunctionWire struct {
 // prompt_tokens = TOTAL (uncached + cached + written); cached_tokens and
 // cache_write_tokens are reported, disjoint subsets of it.
 type ChatCompletionUsageWire struct {
-	PromptTokens        int64                            `json:"prompt_tokens"`
-	CompletionTokens    int64                            `json:"completion_tokens"`
-	TotalTokens         int64                            `json:"total_tokens"`
-	PromptTokensDetails *ChatCompletionPromptDetailsWire `json:"prompt_tokens_details,omitempty"`
+	PromptTokens            int64                            `json:"prompt_tokens"`
+	CompletionTokens        int64                            `json:"completion_tokens"`
+	TotalTokens             int64                            `json:"total_tokens"`
+	PromptTokensDetails     *ChatCompletionPromptDetailsWire `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *ChatCompletionOutputDetailsWire `json:"completion_tokens_details,omitempty"`
 }
 
 // ChatCompletionPromptDetailsWire breaks down prompt token categories.
@@ -132,4 +134,9 @@ type ChatCompletionUsageWire struct {
 type ChatCompletionPromptDetailsWire struct {
 	CachedTokens     int64 `json:"cached_tokens"`
 	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
+}
+
+// ChatCompletionOutputDetailsWire breaks down completion token categories.
+type ChatCompletionOutputDetailsWire struct {
+	ReasoningTokens int64 `json:"reasoning_tokens"`
 }
