@@ -9,6 +9,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/tingly-dev/tingly-box/agentboot"
+	"github.com/tingly-dev/tingly-box/agentboot/process"
 )
 
 // Driver implements agentboot.AgentDriver for Claude Code CLI.
@@ -96,7 +97,7 @@ func (d *Driver) SetCLIPath(path string) {
 }
 
 // Prepare builds a LaunchSpec for the given prompt and execution options.
-func (d *Driver) Prepare(ctx context.Context, prompt string, opts agentboot.ExecutionOptions) (*agentboot.LaunchSpec, error) {
+func (d *Driver) Prepare(ctx context.Context, prompt string, opts agentboot.ExecutionOptions) (*process.LaunchSpec, error) {
 	d.mu.RLock()
 	config := d.config
 	skipPerms := d.skipPerms
@@ -164,7 +165,7 @@ func (d *Driver) Prepare(ctx context.Context, prompt string, opts agentboot.Exec
 		workDir = opts.ProjectPath
 	}
 
-	return &agentboot.LaunchSpec{
+	return &process.LaunchSpec{
 		Command:      command,
 		Env:          env,
 		WorkDir:      workDir,
@@ -228,6 +229,22 @@ func (d *Driver) buildArgs(
 	// Auto-enable stdio permission protocol for stream-json mode.
 	if format == agentboot.OutputFormatStreamJSON && commonOpts.PermissionPromptTool == "" {
 		commonOpts.PermissionPromptTool = "stdio"
+	}
+
+	// When the stdio prompter is attached, AskUserQuestion must carry an ask
+	// rule or the CLI answers the question itself (see ensureInteractiveAskRules).
+	// The merge covers whichever settings source is active — per-run opts or
+	// config — and the merged document replaces both so exactly one --settings
+	// reaches the CLI.
+	if commonOpts.PermissionPromptTool == "stdio" {
+		base := commonOpts.SettingsPath
+		if base == "" {
+			base = config.SettingsPath
+		}
+		if merged := ensureInteractiveAskRules(base); merged != base {
+			commonOpts.SettingsPath = merged
+			config.SettingsPath = ""
+		}
 	}
 
 	// Session/resume handling.
