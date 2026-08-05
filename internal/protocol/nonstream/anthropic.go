@@ -13,9 +13,15 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/protocol/wire"
 )
 
-// HandleAnthropicBetaToOpenAIResponse converts an Anthropic BetaMessage to the
-// OpenAI Chat Completions wire format.
+// HandleAnthropicBetaToOpenAIResponse preserves the legacy conversion entry
+// point while delegating to the transport-neutral value converter.
 func HandleAnthropicBetaToOpenAIResponse(bm *anthropic.BetaMessage, responseModel string) wire.ChatCompletionWire {
+	return ConvertAnthropicBetaToOpenAIChat(bm, responseModel)
+}
+
+// ConvertAnthropicBetaToOpenAIChat converts an Anthropic Beta message to the
+// transport-neutral OpenAI Chat Completions wire value.
+func ConvertAnthropicBetaToOpenAIChat(bm *anthropic.BetaMessage, responseModel string) wire.ChatCompletionWire {
 	var toolCalls []wire.ChatCompletionToolCallWire
 	var textContent string
 	var thinking string
@@ -57,20 +63,7 @@ func HandleAnthropicBetaToOpenAIResponse(bm *anthropic.BetaMessage, responseMode
 	}
 
 	// OpenAI wire: prompt_tokens = total (uncached + cache_read + cache_creation).
-	promptTokens := bm.Usage.InputTokens +
-		bm.Usage.CacheReadInputTokens +
-		bm.Usage.CacheCreationInputTokens
-	usage := wire.ChatCompletionUsageWire{
-		PromptTokens:     promptTokens,
-		CompletionTokens: bm.Usage.OutputTokens,
-		TotalTokens:      promptTokens + bm.Usage.OutputTokens,
-	}
-	if bm.Usage.CacheReadInputTokens > 0 || bm.Usage.CacheCreationInputTokens > 0 {
-		usage.PromptTokensDetails = &wire.ChatCompletionPromptDetailsWire{
-			CachedTokens:     bm.Usage.CacheReadInputTokens,
-			CacheWriteTokens: bm.Usage.CacheCreationInputTokens,
-		}
-	}
+	usage := usage.ToChatUsageWire(usage.FromAnthropicBetaMessage(bm.Usage))
 
 	return wire.ChatCompletionWire{
 		ID:      bm.ID,

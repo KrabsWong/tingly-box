@@ -3,7 +3,6 @@ package nonstream
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/google/uuid"
@@ -29,8 +28,37 @@ func anthropicUsageWire(u *protocol.TokenUsage) wire.AnthropicUsageWire {
 }
 
 func HandleOpenAIChatToAnthropic(chat *openai.ChatCompletion, model string) *anthropic.BetaMessage {
-	wire := wire.AnthropicMsgWire{
-		ID:           fmt.Sprintf("msg_%d", time.Now().Unix()),
+	value, err := marshalOpenAIChatToAnthropic(chat, model)
+	if err != nil {
+		return &anthropic.BetaMessage{}
+	}
+	var msg anthropic.BetaMessage
+	if err := json.Unmarshal(value, &msg); err != nil {
+		return &anthropic.BetaMessage{}
+	}
+	return &msg
+}
+
+// ConvertOpenAIChatToAnthropicV1 converts an OpenAI Chat completion to a typed
+// Anthropic v1 response without writing it to an HTTP transport.
+func ConvertOpenAIChatToAnthropicV1(chat *openai.ChatCompletion, model string) (*anthropic.Message, error) {
+	value, err := marshalOpenAIChatToAnthropic(chat, model)
+	if err != nil {
+		return nil, err
+	}
+	var msg anthropic.Message
+	if err := json.Unmarshal(value, &msg); err != nil {
+		return nil, fmt.Errorf("decode Anthropic v1 response: %w", err)
+	}
+	return &msg, nil
+}
+
+func marshalOpenAIChatToAnthropic(chat *openai.ChatCompletion, model string) ([]byte, error) {
+	if chat == nil {
+		return nil, fmt.Errorf("convert OpenAI Chat response to Anthropic: response is nil")
+	}
+	result := wire.AnthropicMsgWire{
+		ID:           "msg_" + uuid.NewString(),
 		Type:         "message",
 		Role:         "assistant",
 		Content:      []interface{}{},
@@ -43,7 +71,7 @@ func HandleOpenAIChatToAnthropic(chat *openai.ChatCompletion, model string) *ant
 	// Preserve server_tool_use from ExtraFields if present
 	if chat.JSON.ExtraFields != nil {
 		if serverToolUse, exists := chat.JSON.ExtraFields["server_tool_use"]; exists && serverToolUse.Valid() {
-			wire.ServerToolUse = json.RawMessage(serverToolUse.Raw())
+			result.ServerToolUse = json.RawMessage(serverToolUse.Raw())
 		}
 	}
 
@@ -68,22 +96,38 @@ func HandleOpenAIChatToAnthropic(chat *openai.ChatCompletion, model string) *ant
 			contentBlocks = append(contentBlocks, anthropic.NewToolUseBlock(toolCall.ID, input, toolCall.Function.Name))
 		}
 		if choice.FinishReason == "tool_calls" {
-			wire.StopReason = "tool_use"
+			result.StopReason = "tool_use"
+		} else if choice.FinishReason == "length" {
+			result.StopReason = "max_tokens"
 		}
 		break
 	}
-	wire.Content = contentBlocks
+	result.Content = contentBlocks
 
-	jsonBytes, _ := json.Marshal(wire)
-	var msg anthropic.BetaMessage
-	json.Unmarshal(jsonBytes, &msg)
-	return &msg
+	jsonBytes, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("encode Anthropic response: %w", err)
+	}
+	return jsonBytes, nil
 }
 
 // HandleOpenAIChatToAnthropicBeta converts OpenAI response to Anthropic beta format
 func HandleOpenAIChatToAnthropicBeta(chat *openai.ChatCompletion, model string) anthropic.BetaMessage {
-	wire := wire.AnthropicMsgWire{
-		ID:           fmt.Sprintf("msg_%d", time.Now().Unix()),
+	msg, err := ConvertOpenAIChatToAnthropicBeta(chat, model)
+	if err != nil {
+		return anthropic.BetaMessage{}
+	}
+	return *msg
+}
+
+// ConvertOpenAIChatToAnthropicBeta converts an OpenAI Chat completion to a
+// typed Anthropic beta response without writing it to an HTTP transport.
+func ConvertOpenAIChatToAnthropicBeta(chat *openai.ChatCompletion, model string) (*anthropic.BetaMessage, error) {
+	if chat == nil {
+		return nil, fmt.Errorf("convert OpenAI Chat response to Anthropic beta: response is nil")
+	}
+	result := wire.AnthropicMsgWire{
+		ID:           "msg_" + uuid.NewString(),
 		Type:         "message",
 		Role:         "assistant",
 		Content:      []interface{}{},
@@ -95,7 +139,7 @@ func HandleOpenAIChatToAnthropicBeta(chat *openai.ChatCompletion, model string) 
 
 	if chat.JSON.ExtraFields != nil {
 		if serverToolUse, exists := chat.JSON.ExtraFields["server_tool_use"]; exists && serverToolUse.Valid() {
-			wire.ServerToolUse = json.RawMessage(serverToolUse.Raw())
+			result.ServerToolUse = json.RawMessage(serverToolUse.Raw())
 		}
 	}
 
@@ -120,16 +164,23 @@ func HandleOpenAIChatToAnthropicBeta(chat *openai.ChatCompletion, model string) 
 			contentBlocks = append(contentBlocks, anthropic.NewBetaToolUseBlock(toolCall.ID, input, toolCall.Function.Name))
 		}
 		if choice.FinishReason == "tool_calls" {
-			wire.StopReason = string(anthropic.BetaStopReasonToolUse)
+			result.StopReason = string(anthropic.BetaStopReasonToolUse)
+		} else if choice.FinishReason == "length" {
+			result.StopReason = string(anthropic.BetaStopReasonMaxTokens)
 		}
 		break
 	}
-	wire.Content = contentBlocks
+	result.Content = contentBlocks
 
-	jsonBytes, _ := json.Marshal(wire)
+	jsonBytes, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("encode Anthropic beta response: %w", err)
+	}
 	var msg anthropic.BetaMessage
-	json.Unmarshal(jsonBytes, &msg)
-	return msg
+	if err := json.Unmarshal(jsonBytes, &msg); err != nil {
+		return nil, fmt.Errorf("decode Anthropic beta response: %w", err)
+	}
+	return &msg, nil
 }
 
 // HandleResponsesToAnthropicBeta converts OpenAI Responses API response to Anthropic beta format
@@ -159,7 +210,7 @@ func HandleResponsesToAnthropicBeta(rs *responses.Response, model string) anthro
 			if err := json.Unmarshal([]byte(argsStr), &arguments); err != nil {
 				arguments = make(map[string]interface{})
 			}
-			contentBlocks = append(contentBlocks, anthropic.NewBetaToolUseBlock(output.ID, arguments, output.Name))
+			contentBlocks = append(contentBlocks, anthropic.NewBetaToolUseBlock(responsesToolCallID(output), arguments, output.Name))
 			wire.StopReason = string(anthropic.BetaStopReasonToolUse)
 		}
 	}
@@ -169,6 +220,13 @@ func HandleResponsesToAnthropicBeta(rs *responses.Response, model string) anthro
 			if content.Type == "reasoning_text" && content.Text != "" {
 				contentBlocks = append(contentBlocks, anthropic.NewBetaThinkingBlock("thinking-"+uuid.New().String()[0:6], content.Text))
 			}
+		}
+	}
+	if rs.Status == "incomplete" {
+		if rs.IncompleteDetails.Reason == "content_filter" {
+			wire.StopReason = string(anthropic.BetaStopReasonRefusal)
+		} else {
+			wire.StopReason = string(anthropic.BetaStopReasonMaxTokens)
 		}
 	}
 
@@ -216,7 +274,7 @@ func HandleResponsesToAnthropicV1(rs *responses.Response, model string) anthropi
 			if err := json.Unmarshal([]byte(argsStr), &arguments); err != nil {
 				arguments = make(map[string]interface{})
 			}
-			contentBlocks = append(contentBlocks, anthropic.NewToolUseBlock(output.ID, arguments, output.Name))
+			contentBlocks = append(contentBlocks, anthropic.NewToolUseBlock(responsesToolCallID(output), arguments, output.Name))
 			wire.StopReason = "tool_use"
 		}
 	}
@@ -226,6 +284,13 @@ func HandleResponsesToAnthropicV1(rs *responses.Response, model string) anthropi
 			if content.Type == "reasoning_text" && content.Text != "" {
 				contentBlocks = append(contentBlocks, anthropic.NewThinkingBlock("thinking-"+uuid.New().String()[0:6], content.Text))
 			}
+		}
+	}
+	if rs.Status == "incomplete" {
+		if rs.IncompleteDetails.Reason == "content_filter" {
+			wire.StopReason = "refusal"
+		} else {
+			wire.StopReason = "max_tokens"
 		}
 	}
 
@@ -244,6 +309,13 @@ func HandleResponsesToAnthropicV1(rs *responses.Response, model string) anthropi
 	var msg anthropic.Message
 	json.Unmarshal(jsonBytes, &msg)
 	return msg
+}
+
+func responsesToolCallID(output responses.ResponseOutputItemUnion) string {
+	if output.CallID != "" {
+		return output.CallID
+	}
+	return output.ID
 }
 
 // resolveResponsesArguments extracts the arguments string from a Responses API output item.

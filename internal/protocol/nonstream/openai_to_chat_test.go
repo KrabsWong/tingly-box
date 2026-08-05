@@ -51,9 +51,9 @@ func TestOpenAIResponsesToChatToolCalls(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	result, _, err := HandleResponsesToOpenAIChat(protocol.NewHandleContext(c, "proxy-model"), &resp)
 	require.NoError(t, err)
-	choices := result["choices"].([]map[string]any)
+	choices := asJSONMapSlice(t, result["choices"])
 	message := choices[0]["message"].(map[string]any)
-	toolCalls := message["tool_calls"].([]map[string]any)
+	toolCalls := asJSONMapSlice(t, message["tool_calls"])
 
 	assert.Equal(t, "tool_calls", choices[0]["finish_reason"])
 	assert.Equal(t, "assistant", message["role"])
@@ -112,8 +112,48 @@ func TestOpenAIResponsesToChatIncompleteReasons(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			result, _, err := HandleResponsesToOpenAIChat(protocol.NewHandleContext(c, "proxy-model"), &resp)
 			require.NoError(t, err)
-			choices := result["choices"].([]map[string]any)
+			choices := asJSONMapSlice(t, result["choices"])
 			assert.Equal(t, tt.expectedStop, choices[0]["finish_reason"])
 		})
 	}
+}
+
+func TestConvertResponsesToOpenAIChatPreservesTypedExtensions(t *testing.T) {
+	raw := []byte(`{
+		"id":"resp_extensions","created_at":1710000000,"model":"gpt-4.1",
+		"object":"response","status":"completed",
+		"output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"refusal","refusal":"cannot comply"}]}],
+		"usage":{"input_tokens":12,"output_tokens":7,"total_tokens":19,"input_tokens_details":{"cached_tokens":4},"output_tokens_details":{"reasoning_tokens":3}}
+	}`)
+	var resp responses.Response
+	require.NoError(t, json.Unmarshal(raw, &resp))
+
+	converted := ConvertResponsesToOpenAIChat(&resp, "public-model")
+	require.Len(t, converted.Choices, 1)
+	assert.Equal(t, "cannot comply", converted.Choices[0].Message.Refusal)
+	require.NotNil(t, converted.Usage.PromptTokensDetails)
+	assert.EqualValues(t, 4, converted.Usage.PromptTokensDetails.CachedTokens)
+	require.NotNil(t, converted.Usage.CompletionTokensDetails)
+	assert.EqualValues(t, 3, converted.Usage.CompletionTokensDetails.ReasoningTokens)
+
+	payload := converted.ToMap()
+	choices := asJSONMapSlice(t, payload["choices"])
+	message := choices[0]["message"].(map[string]any)
+	assert.Equal(t, "cannot comply", message["refusal"])
+	usage := payload["usage"].(map[string]any)
+	assert.EqualValues(t, 3, usage["completion_tokens_details"].(map[string]any)["reasoning_tokens"])
+}
+
+func asJSONMapSlice(t *testing.T, value any) []map[string]any {
+	t.Helper()
+	items, ok := value.([]any)
+	require.Truef(t, ok, "expected JSON array, got %T", value)
+
+	result := make([]map[string]any, len(items))
+	for i, item := range items {
+		mapped, ok := item.(map[string]any)
+		require.Truef(t, ok, "expected JSON object at index %d, got %T", i, item)
+		result[i] = mapped
+	}
+	return result
 }

@@ -1,10 +1,13 @@
 package nonstream
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/responses"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,6 +35,10 @@ func TestBuildResponsesPayloadFromChat_UsageDetails(t *testing.T) {
 	}
 
 	payload := BuildResponsesPayloadFromChat(resp, "gpt-x", "gpt-x")
+	typed := ConvertChatToResponsesWire(resp, "gpt-x", "gpt-x")
+	require.NotNil(t, typed.Usage)
+	assert.EqualValues(t, 30, typed.Usage.InputTokensDetails.CachedTokens)
+	assert.EqualValues(t, 12, typed.Usage.OutputTokensDetails.ReasoningTokens)
 	usage, _ := payload["usage"].(map[string]any)
 	require.NotNil(t, usage)
 
@@ -45,6 +52,83 @@ func TestBuildResponsesPayloadFromChat_UsageDetails(t *testing.T) {
 	outDetails, _ := usage["output_tokens_details"].(map[string]any)
 	require.NotNil(t, outDetails, "output_tokens_details must carry reasoning_tokens")
 	assert.EqualValues(t, 12, outDetails["reasoning_tokens"])
+}
+
+func TestConvertAnthropicBetaToResponsesWireToolCall(t *testing.T) {
+	resp := &anthropic.BetaMessage{
+		ID:   "msg_tool",
+		Role: "assistant",
+		Type: "message",
+		Content: []anthropic.BetaContentBlockUnion{
+			{Type: "text", Text: "checking"},
+			{
+				Type: "tool_use", ID: "call_1", Name: "lookup",
+				Input: json.RawMessage(`{"query":"typed wire"}`),
+			},
+		},
+		StopReason: "tool_use",
+	}
+
+	converted := ConvertAnthropicBetaToResponsesWire(resp, "public-model", "provider-model")
+	require.Len(t, converted.Output, 2)
+	assert.Equal(t, "message", converted.Output[0].Type)
+	item := converted.Output[1]
+	assert.Equal(t, "function_call", item.Type)
+	assert.Equal(t, "completed", item.Status)
+	assert.Equal(t, "call_1", item.CallID)
+	require.NotNil(t, item.Arguments)
+	assert.Contains(t, *item.Arguments, "typed wire")
+
+	encoded, err := json.Marshal(converted)
+	require.NoError(t, err)
+	assert.True(t, strings.Contains(string(encoded), `"arguments":"{\"query\":\"typed wire\"}"`), string(encoded))
+	assert.NotContains(t, string(encoded), `"output_index"`)
+}
+
+func TestConvertChatToResponsesWirePreservesToolCalls(t *testing.T) {
+	resp := &openai.ChatCompletion{
+		ID: "chatcmpl_tool",
+		Choices: []openai.ChatCompletionChoice{{
+			FinishReason: "tool_calls",
+			Message: openai.ChatCompletionMessage{ToolCalls: []openai.ChatCompletionMessageToolCallUnion{{
+				ID:   "call_chat_1",
+				Type: "function",
+				Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+					Name: "lookup", Arguments: `{"query":"typed wire"}`,
+				},
+			}}},
+		}},
+	}
+
+	converted := ConvertChatToResponsesWire(resp, "public-model", "provider-model")
+	require.Len(t, converted.Output, 1)
+	item := converted.Output[0]
+	assert.Equal(t, "function_call", item.Type)
+	assert.Equal(t, "call_chat_1", item.ID)
+	assert.Equal(t, "call_chat_1", item.CallID)
+	assert.Equal(t, "lookup", item.Name)
+	require.NotNil(t, item.Arguments)
+	assert.JSONEq(t, `{"query":"typed wire"}`, *item.Arguments)
+}
+
+func TestResponsesToAnthropicUsesCallIDForToolResultRoundTrip(t *testing.T) {
+	resp := &responses.Response{
+		ID: "resp_tool",
+		Output: []responses.ResponseOutputItemUnion{{
+			ID: "fc_item_1", Type: "function_call", CallID: "call_provider_1", Name: "lookup",
+			Arguments: responses.ResponseOutputItemUnionArguments{OfString: `{"query":"round trip"}`},
+		}},
+	}
+
+	beta := HandleResponsesToAnthropicBeta(resp, "public-model")
+	require.Len(t, beta.Content, 1)
+	assert.Equal(t, "tool_use", beta.Content[0].Type)
+	assert.Equal(t, "call_provider_1", beta.Content[0].ID)
+
+	v1 := HandleResponsesToAnthropicV1(resp, "public-model")
+	require.Len(t, v1.Content, 1)
+	assert.Equal(t, "tool_use", v1.Content[0].Type)
+	assert.Equal(t, "call_provider_1", v1.Content[0].ID)
 }
 
 // TestBuildResponsesPayloadFromAnthropicBeta_UsageDetails verifies that the
@@ -69,6 +153,10 @@ func TestBuildResponsesPayloadFromAnthropicBeta_UsageDetails(t *testing.T) {
 	}
 
 	payload := BuildResponsesPayloadFromAnthropicBeta(resp, "claude-x", "claude-x")
+	typed := ConvertAnthropicBetaToResponsesWire(resp, "claude-x", "claude-x")
+	require.NotNil(t, typed.Usage)
+	assert.EqualValues(t, 66, typed.Usage.InputTokens)
+	assert.EqualValues(t, 11, typed.Usage.InputTokensDetails.CachedTokens)
 	usage, _ := payload["usage"].(map[string]any)
 	require.NotNil(t, usage)
 
