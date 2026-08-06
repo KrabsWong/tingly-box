@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -34,7 +35,7 @@ func missingFields(entry protocoltest.RealModelEntry) []string {
 		miss = append(miss, "baseurl")
 	}
 	apiKey := strings.TrimSpace(entry.APIKey)
-	if apiKey == "" || apiKey == "YOUR_API_KEY" {
+	if apiKey == "" || apiKey == "YOUR_API_KEY" || looksLikeUnexpandedEnvRef(apiKey) {
 		miss = append(miss, "apikey")
 	}
 	model := strings.TrimSpace(entry.Model)
@@ -46,6 +47,19 @@ func missingFields(entry protocoltest.RealModelEntry) []string {
 		miss = append(miss, "api_style")
 	}
 	return miss
+}
+
+// looksLikeUnexpandedEnvRef reports whether s is a leftover ${VAR} or $VAR
+// reference whose environment variable was unset at config-load time (the
+// loader leaves such refs as-is). We treat these as missing so the entry is
+// skipped rather than sent upstream with a literal "${...}" token.
+var (
+	unexpandedBraced = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*\}$`)
+	unexpandedBare   = regexp.MustCompile(`^\$[A-Za-z_][A-Za-z0-9_]*$`)
+)
+
+func looksLikeUnexpandedEnvRef(s string) bool {
+	return unexpandedBraced.MatchString(s) || unexpandedBare.MatchString(s)
 }
 
 // loadProvidersConfig reads and parses a providers config file (YAML).
@@ -65,18 +79,20 @@ func loadProvidersConfig(path string) ([]protocoltest.RealModelEntry, error) {
 // --resume can pick up where a previous run left off. If filter is non-empty,
 // only entries whose name matches (case-insensitive) are considered; unknown
 // filter names are warned about but do not fail the run.
-func runRealAgentTests(agentName string, modelsFile string, prompt string, writer *summaryWriter, skip map[resumeKey]struct{}, filter []string) ([]*RealAgentTestResult, error) {
+func runRealAgentTests(agentName string, modelsFile string, prompt string, writer *summaryWriter, skip map[resumeKey]struct{}, only map[resumeKey]struct{}, filter []string) ([]*RealAgentTestResult, error) {
 	profileType := parseAgentType(agentName)
 	if profileType == "" {
 		return nil, fmt.Errorf("unknown agent: %q (available: claude, codex, opencode)", agentName)
 	}
 
-	if prompt == "" {
-		if p, ok := defaultPrompts[agentName]; ok {
-			prompt = p
-		} else {
-			prompt = "What is the capital of France?"
-		}
+	// Prompt priority: a non-empty CLI/positional `prompt` overrides everything
+	// (applies to all entries). Otherwise each entry's yaml `prompt` field is
+	// used, falling back to the agent default. The CLI override is captured here;
+	// the per-entry fallback is resolved in the loop.
+	cliPrompt := prompt
+	defaultPrompt := "What is the capital of France?"
+	if p, ok := defaultPrompts[agentName]; ok {
+		defaultPrompt = p
 	}
 
 	entries, err := loadProvidersConfig(modelsFile)
@@ -102,10 +118,14 @@ func runRealAgentTests(agentName string, modelsFile string, prompt string, write
 	var skipped []string
 	for _, entry := range entries {
 		if wanted != nil {
-			if _, ok := wanted[strings.ToLower(strings.TrimSpace(entry.Name))]; !ok {
+			// --filter matches by provider name (case-insensitive), so one filter
+			// value selects every model under that provider regardless of how many
+			// models it has (entry.Name would force provider-shortmodel for
+			// multi-model providers, which is unintuitive).
+			if _, ok := wanted[strings.ToLower(strings.TrimSpace(entry.Provider))]; !ok {
 				continue
 			}
-			matched[strings.ToLower(strings.TrimSpace(entry.Name))] = struct{}{}
+			matched[strings.ToLower(strings.TrimSpace(entry.Provider))] = struct{}{}
 		}
 		miss := missingFields(entry)
 		if len(miss) > 0 {
@@ -144,7 +164,11 @@ func runRealAgentTests(agentName string, modelsFile string, prompt string, write
 	}
 
 	fmt.Printf("🧪 Real Agent test: %s\n", agentName)
-	fmt.Printf("📝 Prompt: %s\n", prompt)
+	if cliPrompt != "" {
+		fmt.Printf("📝 Prompt: %s  (CLI override — applies to all entries)\n", cliPrompt)
+	} else {
+		fmt.Printf("📝 Prompt: <per-entry from yaml `prompt`, else default %q>\n", defaultPrompt)
+	}
 	fmt.Printf("📋 Models: %d runnable entries from %s\n\n", len(runnable), modelsFile)
 
 	results := make([]*RealAgentTestResult, 0, len(runnable))
@@ -153,8 +177,24 @@ func runRealAgentTests(agentName string, modelsFile string, prompt string, write
 			fmt.Printf("⏭  [%d/%d] %s — skip (resume)\n\n", i+1, len(runnable), entry.Name)
 			continue
 		}
+		// --only-failing: skip anything that isn't in the red set.
+		if only != nil {
+			if _, ok := only[resumeKey{Agent: agentName, Entry: entry.Name}]; !ok {
+				fmt.Printf("⏭  [%d/%d] %s — skip (only-failing)\n\n", i+1, len(runnable), entry.Name)
+				continue
+			}
+		}
+		// Resolve this entry's prompt: CLI override > yaml `prompt` > agent default.
+		entryPrompt := cliPrompt
+		if entryPrompt == "" {
+			if entry.Prompt != "" {
+				entryPrompt = entry.Prompt
+			} else {
+				entryPrompt = defaultPrompt
+			}
+		}
 		fmt.Printf("── [%d/%d] %s ──\n", i+1, len(runnable), entry.Name)
-		r := runOneRealAgentTest(profileType, entry, prompt)
+		r := runOneRealAgentTest(profileType, entry, entryPrompt)
 		results = append(results, r)
 		printRealAgentTestResult(r)
 		if writer != nil {
@@ -247,6 +287,22 @@ func runOneRealAgentTest(agentType protocoltest.AgentType, entry protocoltest.Re
 	result.Output = agentResult.Output
 	result.Error = agentResult.Error
 	result.ExitCode = agentResult.ExitCode
+
+	// Real upstreams aren't test-controlled, so exit 0 alone is a "fake green":
+	// a CLI may print an upstream error yet exit cleanly. Apply the content
+	// assertion on top of exit status — mirroring the mock path's
+	// VirtualMockAnswerMarker check. Timeouts skip this (their error is the
+	// timeout, already recorded).
+	if result.Success && !result.TimedOut {
+		if ok, rule := assertRealAgentContent(result.Output); !ok {
+			result.Success = false
+			if result.Error != "" {
+				result.Error = fmt.Sprintf("content assertion (%s); prior error: %s", rule, result.Error)
+			} else {
+				result.Error = fmt.Sprintf("content assertion: %s", rule)
+			}
+		}
+	}
 	return result
 }
 
