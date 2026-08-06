@@ -355,7 +355,7 @@ func (c *chatToResponsesConverter) wireResponse(status string, output []wire.Res
 		CreatedAt: c.createdAt,
 		Status:    status,
 		Output:    output,
-		Usage:     responsesUsageWire(c.Usage()),
+		Usage:     protocolusage.ToResponsesUsageWire(c.Usage()),
 		Model:     c.responseModel,
 	}
 }

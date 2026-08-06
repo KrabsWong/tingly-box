@@ -8,51 +8,67 @@ import (
 
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	usageconv "github.com/tingly-dev/tingly-box/internal/protocol/usage"
+	"github.com/tingly-dev/tingly-box/internal/protocol/wire"
 )
 
 type responsesToChatNonStreamState struct {
 	content   strings.Builder
 	refusal   strings.Builder
-	toolCalls []map[string]any
+	toolCalls []wire.ChatCompletionToolCallWire
 }
 
 // HandleResponsesToOpenAIChat writes a Responses API response as OpenAI Chat format.
 // Corresponds to stream.HandleResponsesToOpenAIChatStream.
 func HandleResponsesToOpenAIChat(hc *protocol.HandleContext, rs *responses.Response) (map[string]any, *protocol.TokenUsage, error) {
-	state := buildResponsesToChatNonStreamState(rs)
-	message := state.message()
-
-	choices := []map[string]any{
-		{
-			"index":         0,
-			"message":       message,
-			"finish_reason": mapResponsesFinishReason(rs, len(state.toolCalls) > 0),
-		},
-	}
-
-	// The canonical type owns the Chat usage shape; only total_tokens differs,
-	// preferring the value upstream actually reported when it sent one.
-	normalizedUsage := usageconv.FromOpenAIResponses(rs.Usage)
-	usage := normalizedUsage.ToOpenAIChatUsageMap()
-	if reported := int(rs.Usage.TotalTokens); reported != 0 {
-		usage["total_tokens"] = reported
-	}
-
-	chatResp := map[string]any{
-		"id":      rs.ID,
-		"object":  "chat.completion",
-		"created": int64(rs.CreatedAt),
-		"model":   hc.ResponseModel,
-		"choices": choices,
-		"usage":   usage,
-	}
+	chatResp := BuildOpenAIChatPayloadFromResponses(rs, hc.ResponseModel)
 	hc.GinContext.JSON(http.StatusOK, chatResp)
 	return chatResp, usageconv.FromOpenAIResponses(rs.Usage), nil
 }
 
+// BuildOpenAIChatPayloadFromResponses converts a complete Responses result to
+// the minimal Chat Completions wire shape without writing an HTTP response.
+func BuildOpenAIChatPayloadFromResponses(rs *responses.Response, responseModel string) map[string]any {
+	return ConvertResponsesToOpenAIChat(rs, responseModel).ToMap()
+}
+
+// ConvertResponsesToOpenAIChat builds the typed Chat Completions wire
+// contract without coupling protocol conversion to HTTP or generic maps.
+func ConvertResponsesToOpenAIChat(rs *responses.Response, responseModel string) wire.ChatCompletionWire {
+	state := buildResponsesToChatNonStreamState(rs)
+	message := wire.ChatCompletionMessageWire{
+		Role:      "assistant",
+		Content:   state.content.String(),
+		Refusal:   state.refusal.String(),
+		ToolCalls: state.toolCalls,
+	}
+
+	// The canonical wire type owns the Chat usage shape; only total_tokens is
+	// overridden with the value the upstream Responses API actually reported
+	// (per .design/stream-usage-tracking.md §"wire usage map" — cover one key,
+	// do not fork the constructor). Falls back to the computed value when the
+	// upstream did not report one.
+	usage := usageconv.ToChatUsageWire(usageconv.FromOpenAIResponses(rs.Usage))
+	if reported := rs.Usage.TotalTokens; reported != 0 {
+		usage.TotalTokens = reported
+	}
+
+	return wire.ChatCompletionWire{
+		ID:      rs.ID,
+		Object:  "chat.completion",
+		Created: int64(rs.CreatedAt),
+		Model:   responseModel,
+		Choices: []wire.ChatCompletionChoiceWire{{
+			Index:        0,
+			Message:      message,
+			FinishReason: mapResponsesFinishReason(rs, len(state.toolCalls) > 0),
+		}},
+		Usage: usage,
+	}
+}
+
 func buildResponsesToChatNonStreamState(rs *responses.Response) *responsesToChatNonStreamState {
 	state := &responsesToChatNonStreamState{
-		toolCalls: make([]map[string]any, 0),
+		toolCalls: make([]wire.ChatCompletionToolCallWire, 0),
 	}
 	if rs == nil {
 		return state
@@ -70,39 +86,18 @@ func buildResponsesToChatNonStreamState(rs *responses.Response) *responsesToChat
 				}
 			}
 		case "function_call", "custom_tool_call", "mcp_call":
-			state.toolCalls = append(state.toolCalls, map[string]any{
-				"id":   firstNonEmpty(output.CallID, output.ID),
-				"type": "function",
-				"function": map[string]any{
-					"name":      output.Name,
-					"arguments": output.Arguments.OfString,
+			state.toolCalls = append(state.toolCalls, wire.ChatCompletionToolCallWire{
+				ID:   firstNonEmpty(output.CallID, output.ID),
+				Type: "function",
+				Function: wire.ChatCompletionFunctionWire{
+					Name:      output.Name,
+					Arguments: output.Arguments.OfString,
 				},
 			})
 		}
 	}
 
 	return state
-}
-
-func (s *responsesToChatNonStreamState) message() map[string]any {
-	message := map[string]any{
-		"role": "assistant",
-	}
-	if s == nil {
-		return message
-	}
-
-	if content := s.content.String(); content != "" {
-		message["content"] = content
-	}
-	if refusal := s.refusal.String(); refusal != "" {
-		message["refusal"] = refusal
-	}
-	if len(s.toolCalls) > 0 {
-		message["tool_calls"] = s.toolCalls
-	}
-
-	return message
 }
 
 func mapResponsesFinishReason(rs *responses.Response, hasToolCalls bool) string {
