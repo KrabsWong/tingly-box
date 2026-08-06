@@ -1,13 +1,13 @@
 package stream
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/openai/openai-go/v3"
-	openaistream "github.com/openai/openai-go/v3/packages/ssestream"
 	"github.com/sirupsen/logrus"
 
 	"github.com/tingly-dev/tingly-box/internal/protocol"
@@ -23,10 +23,48 @@ type anthropicStreamEvent struct {
 	data      any
 }
 
+// AnthropicEvent is the transport-neutral view of an Anthropic stream event.
+// HTTP writers may keep using the internal representation; protocol stages use
+// this exported value to carry event name and data without taking over SSE
+// framing.
+type AnthropicEvent struct {
+	Type string
+	Data any
+}
+
+// RawJSON returns the protocol payload rather than the transport wrapper.
+// Protocol-owned assemblers use this to reconstruct converted streams without
+// mistaking the Type/Data carrier itself for an Anthropic wire event.
+func (e AnthropicEvent) RawJSON() string {
+	raw, err := json.Marshal(e.Data)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// AsAnthropicEvent exposes an event emitted by an Anthropic stream converter.
+func AsAnthropicEvent(event any) (AnthropicEvent, bool) {
+	value, ok := event.(anthropicStreamEvent)
+	if !ok {
+		return AnthropicEvent{}, false
+	}
+	return AnthropicEvent{Type: value.eventType, Data: value.data}, true
+}
+
+// OpenAIChatStream is the minimum iterator surface required by the Chat to
+// Anthropic state machine. The OpenAI SDK stream and stage stream adapters both
+// implement it.
+type OpenAIChatStream interface {
+	Next() bool
+	Current() openai.ChatCompletionChunk
+	Err() error
+}
+
 // openAIToAnthropicConverter is a stateful iterator that reads OpenAI Chat Completion
 // chunks and emits Anthropic SSE events (map-based).
 type openAIToAnthropicConverter struct {
-	stream          *openaistream.Stream[openai.ChatCompletionChunk]
+	stream          OpenAIChatStream
 	responseModel   string
 	req             *openai.ChatCompletionNewParams
 	hooks           *OpenAIToAnthropicMCPHooks
@@ -47,7 +85,7 @@ type openAIToAnthropicConverter struct {
 }
 
 func newOpenAIToAnthropicConverter(
-	stream *openaistream.Stream[openai.ChatCompletionChunk],
+	stream OpenAIChatStream,
 	responseModel string,
 	req *openai.ChatCompletionNewParams,
 	hooks *OpenAIToAnthropicMCPHooks,
@@ -94,9 +132,19 @@ func (c *openAIToAnthropicConverter) Next() (interface{}, bool, error) {
 
 	for {
 		if !c.stream.Next() {
+			streamErr := c.stream.Err()
 			if c.finishSeen && c.hookErr == nil {
-				// Upstream finished normally.
+				// Upstream delivered finish_reason, so the turn is semantically
+				// complete. The SDK keeps reading past [DONE] to physical EOF,
+				// where a provider that tears the connection down without a
+				// clean close surfaces a scanner error; treating that as fatal
+				// would discard a fully delivered response. Salvage it.
+				if streamErr != nil {
+					logrus.WithError(streamErr).Warn("openai stream errored after finish_reason; salvaging completed response")
+				}
 				c.emitTerminalEvents()
+			} else if streamErr != nil {
+				return nil, false, streamErr
 			} else if c.messageStarted && c.hookErr == nil {
 				// Upstream cut mid-stream after content started: surface an
 				// honest error event rather than fabricating a clean end_turn.
