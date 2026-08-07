@@ -12,12 +12,14 @@ import { useProviderDialog } from '@/hooks/useProviderDialog';
 import { Add, ListAlt, VpnKey } from '@/components/icons';
 import {
     Alert,
+    Box,
     Button,
     Chip,
     Dialog,
     DialogActions,
     DialogContent,
     DialogTitle,
+    Divider,
     Stack,
     Typography,
 } from '@mui/material';
@@ -158,60 +160,74 @@ const CredentialPage = () => {
                                 flexWrap: "wrap",
                                 justifyContent: { xs: 'flex-start', sm: 'flex-end' }
                             }}>
-                            <Button component={Link} to="/credentials/providers" variant="outlined" startIcon={<ListAlt />} size="small" sx={{ minWidth: 130 }}>Providers</Button>
+                            {/* The provider catalog now lives on Onboarding (browse + connect
+                                in one place); the standalone read-only ProviderListPage was
+                                redundant with it and has been removed. */}
+                            <Button component={Link} to="/onboarding" variant="outlined" startIcon={<ListAlt />} size="small" sx={{ minWidth: 130 }}>Providers</Button>
                             <Button variant="contained" startIcon={<Add />} onClick={handleConnectAIClick} size="small" sx={{ minWidth: 150 }}>Connect AI</Button>
                         </Stack>
                     }
                 />
 
-                {/* OAuth Section */}
+                {/* Both credential kinds share one card so the page reads as a
+                    single "Credentials" surface, not two unrelated panels — but
+                    each keeps its own table, since OAuth and API key credentials
+                    show different columns (issuer/expiry vs. base URL/key) that
+                    don't collapse into shared columns without losing detail. */}
                 <Surface padding={{ xs: 2, sm: 2.5 }}>
-                    <Stack
-                        direction="row"
-                        spacing={1}
-                        sx={{
-                            alignItems: "center",
-                            mb: 1.5
-                        }}>
-                        <Typography variant="subtitle1" sx={{
-                            fontWeight: 500
-                        }}>OAuth</Typography>
-                        <Chip label={credentialCounts.oauth} size="small" color="primary" variant="outlined" sx={{ height: 20, minWidth: 20, fontSize: '0.7rem' }}/>
-                    </Stack>
-                    {credentialCounts.oauth > 0 ? (
-                        <OAuthTable providers={oauthProviders} onEdit={handleEditProvider} onToggle={handleToggleProvider} onDelete={handleDeleteProvider} onRefreshToken={handleRefreshToken} onReauthorize={handleReauthorize} onNotification={showNotification} providerQuotas={quotaData} refreshingQuotas={refreshing} onQuotaRefresh={refreshQuota}/>
-                    ) : (
-                        <EmptyState
-                            title="No OAuth Providers Configured"
-                            description="Connect AI providers like Claude Code, Gemini CLI, Qwen, etc. via OAuth sign-in."
-                            primaryAction={{ label: 'Connect AI', onClick: handleConnectAIClick }}
-                        />
-                    )}
-                </Surface>
+                    <Stack spacing={3}>
+                        <Box>
+                            <Stack
+                                direction="row"
+                                spacing={1}
+                                sx={{
+                                    alignItems: "center",
+                                    mb: 1.5
+                                }}>
+                                <Typography variant="subtitle1" sx={{
+                                    fontWeight: 500
+                                }}>OAuth</Typography>
+                                <Chip label={credentialCounts.oauth} size="small" color="primary" variant="outlined" sx={{ height: 20, minWidth: 20, fontSize: '0.7rem' }}/>
+                            </Stack>
+                            {credentialCounts.oauth > 0 ? (
+                                <OAuthTable providers={oauthProviders} onEdit={handleEditProvider} onToggle={handleToggleProvider} onDelete={handleDeleteProvider} onRefreshToken={handleRefreshToken} onReauthorize={handleReauthorize} onNotification={showNotification} providerQuotas={quotaData} refreshingQuotas={refreshing} onQuotaRefresh={refreshQuota}/>
+                            ) : (
+                                <EmptyState
+                                    title="No OAuth Providers Configured"
+                                    description="Connect AI providers like Claude Code, Gemini CLI, Qwen, etc. via OAuth sign-in."
+                                    primaryAction={{ label: 'Connect AI', onClick: handleConnectAIClick }}
+                                    compact
+                                />
+                            )}
+                        </Box>
 
-                {/* API Keys Section */}
-                <Surface padding={{ xs: 2, sm: 2.5 }}>
-                    <Stack
-                        direction="row"
-                        spacing={1}
-                        sx={{
-                            alignItems: "center",
-                            mb: 1.5
-                        }}>
-                        <Typography variant="subtitle1" sx={{
-                            fontWeight: 500
-                        }}>API Keys</Typography>
-                        <Chip label={credentialCounts.apiKeys} size="small" color="primary" variant="outlined" sx={{ height: 20, minWidth: 20, fontSize: '0.7rem' }}/>
+                        <Divider />
+
+                        <Box>
+                            <Stack
+                                direction="row"
+                                spacing={1}
+                                sx={{
+                                    alignItems: "center",
+                                    mb: 1.5
+                                }}>
+                                <Typography variant="subtitle1" sx={{
+                                    fontWeight: 500
+                                }}>API Keys</Typography>
+                                <Chip label={credentialCounts.apiKeys} size="small" color="primary" variant="outlined" sx={{ height: 20, minWidth: 20, fontSize: '0.7rem' }}/>
+                            </Stack>
+                            {credentialCounts.apiKeys > 0 ? (
+                                <ApiKeyTable providers={apiKeyProviders} onEdit={handleEditProvider} onToggle={handleToggleProvider} onDelete={handleDeleteProvider} onNotification={showNotification} providerQuotas={quotaData} refreshingQuotas={refreshing} onQuotaRefresh={refreshQuota}/>
+                            ) : (
+                                <EmptyState
+                                    title="No API Keys Configured"
+                                    description="Connect AI providers like OpenAI, Anthropic, etc. via API key."
+                                    primaryAction={{ label: 'Connect AI', onClick: handleConnectAIClick }}
+                                    compact
+                                />
+                            )}
+                        </Box>
                     </Stack>
-                    {credentialCounts.apiKeys > 0 ? (
-                        <ApiKeyTable providers={apiKeyProviders} onEdit={handleEditProvider} onToggle={handleToggleProvider} onDelete={handleDeleteProvider} onNotification={showNotification} providerQuotas={quotaData} refreshingQuotas={refreshing} onQuotaRefresh={refreshQuota}/>
-                    ) : (
-                        <EmptyState
-                            title="No API Keys Configured"
-                            description="Connect AI providers like OpenAI, Anthropic, etc. via API key."
-                            primaryAction={{ label: 'Connect AI', onClick: handleConnectAIClick }}
-                        />
-                    )}
                 </Surface>
             </Stack>
             {/* Unified Connect AI add flow: picker + form/OAuth/paste/import dialogs
