@@ -90,7 +90,7 @@ if (fs.existsSync(targetPath)) {
     try { existing = JSON.parse(content); } catch (e) {}
 }
 
-const merged = settingsPath.includes("settings.json")
+const merged = targetPath.includes("settings.json")
     ? { ...existing, ...config }
     : { ...existing, ...config };
 
