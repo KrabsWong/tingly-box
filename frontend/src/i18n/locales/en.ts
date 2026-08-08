@@ -1222,6 +1222,133 @@ export default {
     "agentNav": {
       "title": "Quick Start",
       "description": "Select agent to start"
+    },
+    "overview": {
+      "title": "Usage Dashboard",
+      "provider": "Provider",
+      "model": "Model",
+      "identity": "Identity",
+      "allProviders": "All providers",
+      "allModels": "All models",
+      "allIdentities": "All identities",
+      "account": "Account",
+      "sharingKeys": "Sharing Keys",
+      "disabledSuffix": "(disabled)",
+      "clearFilters": "Clear all filters",
+      "auto": "Auto",
+      "refreshData": "Refresh data",
+      "mainAccount": "Main account",
+      "unnamedSharingKey": "Unnamed sharing key",
+      "range": {
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "3d": "3 days",
+        "7d": "7 days",
+        "30d": "30 days",
+        "90d": "90 days"
+      },
+      "authType": {
+        "apiKey": "API Key",
+        "bearerToken": "Bearer Token",
+        "basicAuth": "Basic Auth",
+        "vmodel": "Virtual Model",
+        "other": "Other"
+      },
+      "statCards": {
+        "totalRequests": "Total Requests",
+        "totalTokens": "Total Tokens",
+        "cacheHitRate": "Cache Hit Rate",
+        "errorRate": "Error Rate",
+        "streamedRate": "Streamed Rate",
+        "tokenBreakdown": "Input: {{input}} + Cache: {{cache}}\nOutput: {{output}}",
+        "errors": "{{count}} errors",
+        "streamed": "{{count}} streamed",
+        "cacheRead": "read",
+        "cacheWrite": "written"
+      },
+      "viewModes": {
+        "summary": "Summary",
+        "byRequest": "By Request",
+        "activity": "Activity"
+      }
+    },
+    "requestsView": {
+      "title": "Requests",
+      "total": "{{total}} total",
+      "all": "All",
+      "success": "Success",
+      "error": "Error",
+      "colTime": "Time",
+      "colModel": "Model",
+      "colScenario": "Scenario",
+      "colCacheRead": "Cache Read",
+      "colCacheWrite": "Cache Write",
+      "colInput": "Input",
+      "colOutput": "Output",
+      "colLatency": "Latency",
+      "colTTFT": "TTFT",
+      "colTPS": "TPS",
+      "colStatus": "Status",
+      "colStream": "Stream",
+      "empty": "No requests found",
+      "emptyHint": "Try changing the status filter",
+      "ok": "OK",
+      "err": "ERR",
+      "streamed": "Streamed",
+      "tpsFormula": "{{count}} decode intervals / {{ms}}ms after TTFT"
+    },
+    "performance": {
+      "title": "Response Performance",
+      "latency": "Latency",
+      "sampleCount": "n={{n}}"
+    },
+    "heatmap": {
+      "title": "Token Activity",
+      "lastMonths": "Last 12 months",
+      "fixedWindow": "Fixed {{days}}-day window — not affected by the range selector (the Provider / Model / Identity filters still apply).",
+      "empty": "No activity in the last {{days}} days.",
+      "totalTokens": "{{tokens}} total tokens",
+      "input": "Input",
+      "cache": "Cache",
+      "output": "Output",
+      "tokens": "tokens",
+      "activeDays": "active days",
+      "longestStreak": "longest streak",
+      "maxDay": "max/day",
+      "less": "Less",
+      "more": "More",
+      "weekdayMon": "Mon",
+      "weekdaySun": "Sun"
+    },
+    "usageByModel": {
+      "title": "Usage by Model",
+      "provider": "Provider",
+      "model": "Model",
+      "empty": "No usage data available",
+      "emptyHint": "Select a different time range or check back later"
+    },
+    "metricLabels": {
+      "requests": "Requests",
+      "total": "Total",
+      "cacheRead": "Cache Read",
+      "cacheWrite": "Cache Write",
+      "cacheHit": "Cache Hit",
+      "input": "Input Tokens",
+      "output": "Output Tokens",
+      "errorRate": "Error Rate"
+    },
+    "chart": {
+      "dailyTitle": "Token Usage Over Time (Daily)",
+      "hourlyTitle": "Token Usage Over Time (5-Min)",
+      "cacheRead": "Cache Read",
+      "input": "Input",
+      "output": "Output",
+      "inputTokens": "Input Tokens",
+      "outputTokens": "Output Tokens",
+      "cacheRatio": "Cache Ratio:",
+      "inclWritten": "(incl. {{n}} written)",
+      "noData": "No data available",
+      "noDataHint": "Select a different time range or check back later"
     }
   },
   "mcp": {
