@@ -1,9 +1,7 @@
 import { TableCell, Typography } from '@mui/material';
+import { useTranslation } from 'react-i18next';
 import { formatNumber, getCacheHitRate, getTotalTokens } from './chartStyles';
-import {
-    defaultUsageMetricLabels,
-    getUsageMetricColumns,
-} from './usageMetricColumns';
+import { getUsageMetricColumns } from './usageMetricColumns';
 import type {
     UsageMetricLabels,
     UsageMetricOptions,
@@ -11,11 +9,24 @@ import type {
 } from './usageMetricColumns';
 
 export function UsageMetricHeaderCells({
-    labels = defaultUsageMetricLabels,
+    labels,
     showTotal = false,
     showCacheWrite = false,
 }: UsageMetricOptions & { labels?: UsageMetricLabels }) {
-    return getUsageMetricColumns({ showTotal, showCacheWrite }, labels).map((column) => (
+    const { t } = useTranslation();
+    // Callers that localize themselves (e.g. UserUsagePage) pass labels in;
+    // otherwise fall back to the current i18n language.
+    const resolvedLabels = labels ?? {
+        requests: t('dashboard.metricLabels.requests', { defaultValue: 'Requests' }),
+        total: t('dashboard.metricLabels.total', { defaultValue: 'Total' }),
+        cacheRead: t('dashboard.metricLabels.cacheRead', { defaultValue: 'Cache Read' }),
+        cacheWrite: t('dashboard.metricLabels.cacheWrite', { defaultValue: 'Cache Write' }),
+        cacheHit: t('dashboard.metricLabels.cacheHit', { defaultValue: 'Cache Hit' }),
+        input: t('dashboard.metricLabels.input', { defaultValue: 'Input Tokens' }),
+        output: t('dashboard.metricLabels.output', { defaultValue: 'Output Tokens' }),
+        errorRate: t('dashboard.metricLabels.errorRate', { defaultValue: 'Error Rate' }),
+    };
+    return getUsageMetricColumns({ showTotal, showCacheWrite }, resolvedLabels).map((column) => (
         <TableCell key={column.key} align="right">
             {column.label}
         </TableCell>

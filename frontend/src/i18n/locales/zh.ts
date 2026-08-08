@@ -1222,6 +1222,132 @@ export default {
     "agentNav": {
       "title": "快速开始",
       "description": "开启智能应用"
+    },
+    "overview": {
+      "title": "用量仪表盘",
+      "provider": "提供商",
+      "model": "模型",
+      "identity": "账号",
+      "allProviders": "全部",
+      "allModels": "全部",
+      "allIdentities": "全部",
+      "sharingKeys": "共享密钥",
+      "disabledSuffix": "（已停用）",
+      "clearFilters": "清除全部筛选",
+      "auto": "自动",
+      "refreshData": "刷新数据",
+      "mainAccount": "主账号",
+      "unnamedSharingKey": "未命名共享密钥",
+      "range": {
+        "today": "今天",
+        "yesterday": "昨天",
+        "3d": "近 3 天",
+        "7d": "近 7 天",
+        "30d": "近 30 天",
+        "90d": "近 90 天"
+      },
+      "authType": {
+        "apiKey": "API Key",
+        "bearerToken": "Bearer Token",
+        "basicAuth": "Basic Auth",
+        "vmodel": "虚拟模型",
+        "other": "其他"
+      },
+      "statCards": {
+        "totalRequests": "总请求数",
+        "totalTokens": "总 Token",
+        "cacheHitRate": "缓存命中率",
+        "errorRate": "错误率",
+        "streamedRate": "流式占比",
+        "tokenBreakdown": "输入：{{input}} + 缓存：{{cache}}\n输出：{{output}}",
+        "errors": "{{count}} 个错误",
+        "streamed": "{{count}} 个流式",
+        "cacheRead": "读取",
+        "cacheWrite": "写入"
+      },
+      "viewModes": {
+        "summary": "概览",
+        "byRequest": "按请求",
+        "activity": "活动"
+      }
+    },
+    "requestsView": {
+      "title": "请求",
+      "total": "共 {{total}} 条",
+      "all": "全部",
+      "success": "成功",
+      "error": "错误",
+      "colTime": "时间",
+      "colModel": "模型",
+      "colScenario": "场景",
+      "colCacheRead": "缓存读取",
+      "colCacheWrite": "缓存写入",
+      "colInput": "输入",
+      "colOutput": "输出",
+      "colLatency": "延迟",
+      "colTTFT": "TTFT",
+      "colTPS": "TPS",
+      "colStatus": "状态",
+      "colStream": "流式",
+      "empty": "没有找到请求",
+      "emptyHint": "试试更改状态筛选",
+      "ok": "OK",
+      "err": "错误",
+      "streamed": "流式",
+      "tpsFormula": "{{count}} 个解码间隔 / TTFT 后 {{ms}}ms"
+    },
+    "performance": {
+      "title": "响应性能",
+      "latency": "Latency",
+      "sampleCount": "n={{n}}"
+    },
+    "heatmap": {
+      "title": "Token 活动",
+      "lastMonths": "最近 12 个月",
+      "fixedWindow": "固定 {{days}} 天窗口 — 不受范围选择器影响（提供商 / 模型 / 身份筛选仍然生效）。",
+      "empty": "最近 {{days}} 天内没有活动。",
+      "totalTokens": "共 {{tokens}} tokens",
+      "input": "输入",
+      "cache": "缓存",
+      "output": "输出",
+      "tokens": "tokens",
+      "activeDays": "活跃天数",
+      "longestStreak": "最长连续",
+      "maxDay": "单日峰值",
+      "less": "少",
+      "more": "多",
+      "weekdayMon": "周一",
+      "weekdaySun": "周日"
+    },
+    "usageByModel": {
+      "title": "按模型用量",
+      "provider": "提供商",
+      "model": "模型",
+      "empty": "暂无用量数据",
+      "emptyHint": "换个时间范围或稍后再试"
+    },
+    "metricLabels": {
+      "requests": "请求数",
+      "total": "总计",
+      "cacheRead": "缓存读取",
+      "cacheWrite": "缓存写入",
+      "cacheHit": "缓存命中",
+      "input": "输入 Token",
+      "output": "输出 Token",
+      "errorRate": "错误率"
+    },
+    "chart": {
+      "dailyTitle": "Token 用量随时间变化（按天）",
+      "hourlyTitle": "Token 用量随时间变化（5 分钟）",
+      "cacheRead": "缓存读取",
+      "input": "输入",
+      "output": "输出",
+      "inputTokens": "输入 Token",
+      "outputTokens": "输出 Token",
+      "cacheRatio": "缓存占比：",
+      "inclWritten": "（含 {{n}} 写入）",
+      "noData": "暂无数据",
+      "noDataHint": "换个时间范围或稍后再试"
     }
   },
   "mcp": {

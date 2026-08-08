@@ -1,6 +1,7 @@
 // Daily Token History Chart (Bar Chart) - for multi-day view
 
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Box } from '@mui/material';
 import {
     BarChart,
@@ -28,6 +29,7 @@ interface DailyTokenHistoryChartProps {
 
 export function DailyTokenHistoryChart({ data }: DailyTokenHistoryChartProps) {
     const theme = useTheme();
+    const { t } = useTranslation();
     const chartStyles = getThemeChartStyles(theme);
 
     const chartData = formatChartData(data, true);
@@ -62,24 +64,24 @@ export function DailyTokenHistoryChart({ data }: DailyTokenHistoryChartProps) {
     const hasData = chartData.length > 0;
 
     return (
-        <ChartWrapper title="Token Usage Over Time (Daily)" hasData={hasData}>
+        <ChartWrapper title={t('dashboard.chart.dailyTitle', { defaultValue: 'Token Usage Over Time (Daily)' })} hasData={hasData}>
             {hasData ? (
                 <>
                     <Box sx={{ display: 'flex', justifyContent: 'center', gap: 3, mb: 2 }}>
                         <LegendItem
-                            label="Cache Read"
+                            label={t('dashboard.chart.cacheRead', { defaultValue: 'Cache Read' })}
                             color={chartStyles.token.cache.main}
                             visible={visibleSeries.cache}
                             onToggle={() => toggleSeries('cache')}
                         />
                         <LegendItem
-                            label="Input"
+                            label={t('dashboard.chart.input', { defaultValue: 'Input' })}
                             color={chartStyles.token.input.main}
                             visible={visibleSeries.input}
                             onToggle={() => toggleSeries('input')}
                         />
                         <LegendItem
-                            label="Output"
+                            label={t('dashboard.chart.output', { defaultValue: 'Output' })}
                             color={chartStyles.token.output.main}
                             visible={visibleSeries.output}
                             onToggle={() => toggleSeries('output')}
@@ -133,7 +135,7 @@ export function DailyTokenHistoryChart({ data }: DailyTokenHistoryChartProps) {
                             />
                             <Bar
                                 dataKey="cacheTokens"
-                                name="Cache Read"
+                                name={t('dashboard.chart.cacheRead', { defaultValue: 'Cache Read' })}
                                 stackId="tokens"
                                 hide={!visibleSeries.cache}
                                 stroke={chartStyles.token.cache.main}
@@ -155,7 +157,7 @@ export function DailyTokenHistoryChart({ data }: DailyTokenHistoryChartProps) {
                             </Bar>
                             <Bar
                                 dataKey="inputTokens"
-                                name="Input Tokens"
+                                name={t('dashboard.chart.inputTokens', { defaultValue: 'Input Tokens' })}
                                 fill="url(#colorInput)"
                                 stroke={chartStyles.token.input.main}
                                 strokeWidth={0.5}
@@ -168,7 +170,7 @@ export function DailyTokenHistoryChart({ data }: DailyTokenHistoryChartProps) {
                             />
                             <Bar
                                 dataKey="outputTokens"
-                                name="Output Tokens"
+                                name={t('dashboard.chart.outputTokens', { defaultValue: 'Output Tokens' })}
                                 fill="url(#colorOutput)"
                                 stroke={chartStyles.token.output.main}
                                 strokeWidth={0.5}

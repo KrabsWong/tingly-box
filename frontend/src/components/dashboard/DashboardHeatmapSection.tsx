@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Box, Paper, Skeleton, Tooltip, Typography } from '@mui/material';
 import { Info as InfoIcon } from '@/components/icons';
 import { format } from 'date-fns';
@@ -39,6 +40,7 @@ interface DashboardHeatmapSectionProps {
 }
 
 export default function DashboardHeatmapSection({ provider, model = 'all', user = 'all', refreshKey = 0 }: DashboardHeatmapSectionProps) {
+    const { t } = useTranslation();
     const [dailyData, setDailyData] = useState<DailyUsage[]>([]);
     const [loading, setLoading] = useState(true);
     // Monotonic sequence to drop out-of-order responses when filters change
@@ -139,13 +141,16 @@ export default function DashboardHeatmapSection({ provider, model = 'all', user 
         >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 2 }}>
                 <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '0.9375rem' }}>
-                    Token Activity
+                    {t('dashboard.heatmap.title', { defaultValue: 'Token Activity' })}
                 </Typography>
                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                    · Last 12 months
+                    · {t('dashboard.heatmap.lastMonths', { defaultValue: 'Last 12 months' })}
                 </Typography>
                 <Tooltip
-                    title={`Fixed ${HEATMAP_DAYS}-day window — not affected by the range selector (the Provider / Model / Identity filters still apply).`}
+                    title={t('dashboard.heatmap.fixedWindow', {
+                        days: HEATMAP_DAYS,
+                        defaultValue: 'Fixed {{days}}-day window — not affected by the range selector (the Provider / Model / Identity filters still apply).',
+                    })}
                     arrow
                 >
                     <InfoIcon sx={{ fontSize: 15, color: 'text.disabled', cursor: 'default' }} />
@@ -160,7 +165,7 @@ export default function DashboardHeatmapSection({ provider, model = 'all', user 
                     <TokenHeatmap data={dailyData} />
                 ) : (
                     <Box sx={{ py: 6, color: 'text.secondary', textAlign: 'center' }}>
-                        <Typography variant="body2">No activity in the last {HEATMAP_DAYS} days.</Typography>
+                        <Typography variant="body2">{t('dashboard.heatmap.empty', { days: HEATMAP_DAYS })}</Typography>
                     </Box>
                 )}
             </Box>

@@ -13,6 +13,7 @@ import {
     useTheme,
 } from '@mui/material';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { hasCacheWrites } from './chartStyles';
 import {
     UsageMetricHeaderCells,
@@ -44,6 +45,7 @@ interface ServiceStatsTableProps {
 }
 
 export default function ServiceStatsTable({ stats }: ServiceStatsTableProps) {
+    const { t } = useTranslation();
     const showCacheWrite = hasCacheWrites(stats);
     const theme = useTheme();
     const [page, setPage] = useState(0);
@@ -95,7 +97,7 @@ export default function ServiceStatsTable({ stats }: ServiceStatsTableProps) {
                 }}
             >
                 <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
-                    Usage by Model
+                    {t('dashboard.usageByModel.title', { defaultValue: 'Usage by Model' })}
                 </Typography>
             </Box>
             <TableContainer sx={{ maxHeight: 600 }}>
@@ -116,8 +118,8 @@ export default function ServiceStatsTable({ stats }: ServiceStatsTableProps) {
                                 },
                             }}
                         >
-                            <TableCell sx={{ fontWeight: 600 }}>Provider</TableCell>
-                            <TableCell sx={{ fontWeight: 600 }}>Model</TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{t('dashboard.usageByModel.provider', { defaultValue: 'Provider' })}</TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{t('dashboard.usageByModel.model', { defaultValue: 'Model' })}</TableCell>
                             <UsageMetricHeaderCells showCacheWrite={showCacheWrite} />
                         </TableRow>
                     </TableHead>
@@ -152,7 +154,7 @@ export default function ServiceStatsTable({ stats }: ServiceStatsTableProps) {
                                         <Typography variant="body1" sx={{
                                             color: "text.secondary"
                                         }}>
-                                            No usage data available
+                                            {t('dashboard.usageByModel.empty', { defaultValue: 'No usage data available' })}
                                         </Typography>
                                         <Typography
                                             variant="caption"
@@ -160,7 +162,7 @@ export default function ServiceStatsTable({ stats }: ServiceStatsTableProps) {
                                                 color: "text.disabled",
                                                 mt: 0.5
                                             }}>
-                                            Select a different time range or check back later
+                                            {t('dashboard.usageByModel.emptyHint', { defaultValue: 'Select a different time range or check back later' })}
                                         </Typography>
                                     </Box>
                                 </TableCell>

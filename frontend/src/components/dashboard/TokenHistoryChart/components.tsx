@@ -1,6 +1,7 @@
 // Shared components for TokenHistoryChart
 
 import { Box, Typography, useTheme } from '@mui/material';
+import { useTranslation } from 'react-i18next';
 import { getThemeChartStyles } from '../chartStyles';
 import type { LegendItemProps, ChartDataPoint } from './types';
 
@@ -49,10 +50,12 @@ export function LegendItem({ label, color, visible, onToggle }: LegendItemProps)
     );
 }
 
-const SERIES_ORDER = ['Cache Read', 'Input Tokens', 'Output Tokens'];
+// Sort by dataKey (stable across translations), cache → input → output.
+const SERIES_ORDER = ['cacheTokens', 'inputTokens', 'outputTokens'];
 
 export function CustomTooltip({ active, payload }: any) {
     const theme = useTheme();
+    const { t } = useTranslation();
     const chartStyles = getThemeChartStyles(theme);
 
     if (!active || !payload || !payload.length) return null;
@@ -61,7 +64,7 @@ export function CustomTooltip({ active, payload }: any) {
 
     // Sort payload to ensure consistent order: cache → input → output
     const sortedPayload = [...payload].sort(
-        (a: any, b: any) => SERIES_ORDER.indexOf(a.name) - SERIES_ORDER.indexOf(b.name)
+        (a: any, b: any) => SERIES_ORDER.indexOf(a.dataKey) - SERIES_ORDER.indexOf(b.dataKey)
     );
 
     return (
@@ -110,9 +113,9 @@ export function CustomTooltip({ active, payload }: any) {
                         {/* Cache writes are part of the input tokens already plotted,
                             so they annotate the Input row instead of getting their own
                             series — a fourth stacked band would count them twice. */}
-                        {entry.name === 'Input Tokens' && data.cacheWriteTokens > 0 && (
+                        {entry.dataKey === 'inputTokens' && data.cacheWriteTokens > 0 && (
                             <Box component="span" sx={{ fontWeight: 400, color: 'text.secondary', ml: 0.5 }}>
-                                (incl. {data.cacheWriteTokens.toLocaleString()} written)
+                                {t('dashboard.chart.inclWritten', { n: data.cacheWriteTokens.toLocaleString() })}
                             </Box>
                         )}
                     </Typography>
@@ -131,7 +134,7 @@ export function CustomTooltip({ active, payload }: any) {
                 }}
             >
                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                    Cache Ratio:
+                    {t('dashboard.chart.cacheRatio', { defaultValue: 'Cache Ratio: ' })}
                 </Typography>
                 <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.primary' }}>
                     {(data.cacheRatio * 100).toFixed(1)}%
@@ -149,6 +152,7 @@ interface ChartWrapperProps {
 
 export function ChartWrapper({ title, hasData, children }: ChartWrapperProps) {
     const theme = useTheme();
+    const { t } = useTranslation();
     const chartStyles = getThemeChartStyles(theme);
 
     return (
@@ -215,7 +219,7 @@ export function ChartWrapper({ title, hasData, children }: ChartWrapperProps) {
                     <Typography variant="body1" sx={{
                         color: "text.secondary"
                     }}>
-                        No data available
+                        {t('dashboard.chart.noData', { defaultValue: 'No data available' })}
                     </Typography>
                     <Typography
                         variant="caption"
@@ -223,7 +227,7 @@ export function ChartWrapper({ title, hasData, children }: ChartWrapperProps) {
                             color: "text.disabled",
                             mt: 0.5
                         }}>
-                        Select a different time range or check back later
+                        {t('dashboard.chart.noDataHint', { defaultValue: 'Select a different time range or check back later' })}
                     </Typography>
                 </Box>
             ) : (
