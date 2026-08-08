@@ -309,7 +309,9 @@ function AppContent() {
 // Inner component that uses theme context
 function AppWithTheme() {
     const { effectiveMode } = useThemeMode();
-    const theme = useMemo(() => createAppTheme(effectiveMode), [effectiveMode]);
+    const { i18n } = useTranslation();
+    const language = i18n.language?.startsWith('zh') ? 'zh' : 'en';
+    const theme = useMemo(() => createAppTheme(effectiveMode, language), [effectiveMode, language]);
 
     return (
         <ThemeProvider theme={theme}>
