@@ -24,6 +24,7 @@ import { ToggleButtonGroup, ToggleButton } from '@mui/material';
 import PageHeader from '@/components/PageHeader';
 import { switchControlLabelStyle } from '@/styles/toggleStyles';
 import api from '../services/api';
+import { useTranslation } from 'react-i18next';
 
 interface Provider {
     uuid: string;
@@ -53,13 +54,13 @@ const shortenUserId = (userId: string): string => {
 
 type TimeRange = 'today' | 'yesterday' | '3d' | '7d' | '30d' | '90d';
 
-const TIME_RANGE_CONFIG: Record<TimeRange, { label: string; days: number; interval: string }> = {
-    today: { label: 'Today', days: 1, interval: 'minute' },
-    yesterday: { label: 'Yesterday', days: 1, interval: 'minute' },
-    '3d': { label: '3 Days', days: 3, interval: 'day' },
-    '7d': { label: '7 Days', days: 7, interval: 'day' },
-    '30d': { label: '30 Days', days: 30, interval: 'day' },
-    '90d': { label: '90 Days', days: 90, interval: 'day' },
+const TIME_RANGE_CONFIG: Record<TimeRange, { labelKey: string; days: number; interval: string }> = {
+    today: { labelKey: 'dashboard.overview.range.today', days: 1, interval: 'minute' },
+    yesterday: { labelKey: 'dashboard.overview.range.yesterday', days: 1, interval: 'minute' },
+    '3d': { labelKey: 'dashboard.overview.range.3d', days: 3, interval: 'day' },
+    '7d': { labelKey: 'dashboard.overview.range.7d', days: 7, interval: 'day' },
+    '30d': { labelKey: 'dashboard.overview.range.30d', days: 30, interval: 'day' },
+    '90d': { labelKey: 'dashboard.overview.range.90d', days: 90, interval: 'day' },
 };
 
 // Format date to local ISO string (with timezone offset)
@@ -109,6 +110,7 @@ const DashboardSkeleton = () => (
 );
 
 export default function DashboardPage() {
+    const { t } = useTranslation();
     const { timeRange: urlTimeRange } = useParams<{ timeRange: TimeRange }>();
     const navigate = useNavigate();
 
@@ -127,7 +129,7 @@ export default function DashboardPage() {
     const [timeSeries, setTimeSeries] = useState<TimeSeriesData[]>([]);
     const [providers, setProviders] = useState<Provider[]>([]);
     const [usageIdentities, setUsageIdentities] = useState<UsageIdentity[]>([
-        { userId: MAIN_ACCOUNT_USER_ID, label: 'Main account', type: 'owner', enabled: true },
+        { userId: MAIN_ACCOUNT_USER_ID, label: t('dashboard.overview.mainAccount', { defaultValue: 'Main account' }), type: 'owner', enabled: true },
     ]);
     const [selectedProvider, setSelectedProvider] = useState<string>('all');
     const [selectedModel, setSelectedModel] = useState<string>('all');
@@ -217,7 +219,7 @@ export default function DashboardPage() {
                     if (!token.user_id) return;
                     sharingKeysByUserId.set(token.user_id, {
                         userId: token.user_id,
-                        label: token.display_name?.trim() || 'Unnamed Sharing Key',
+                        label: token.display_name?.trim() || t('dashboard.overview.unnamedSharingKey', { defaultValue: 'Unnamed sharing key' }),
                         type: 'sharing_key',
                         enabled: token.enabled !== false,
                     });
@@ -225,7 +227,7 @@ export default function DashboardPage() {
                 const sharingKeys = Array.from(sharingKeysByUserId.values())
                     .sort((a, b) => a.label.localeCompare(b.label));
                 setUsageIdentities([
-                    { userId: MAIN_ACCOUNT_USER_ID, label: 'Main account', type: 'owner', enabled: true },
+                    { userId: MAIN_ACCOUNT_USER_ID, label: t('dashboard.overview.mainAccount', { defaultValue: 'Main account' }), type: 'owner', enabled: true },
                     ...sharingKeys,
                 ]);
             }
@@ -394,11 +396,11 @@ export default function DashboardPage() {
     const authTypeLabel = (authType: string): string => {
         switch (authType) {
             case 'oauth': return 'OAuth';
-            case 'api_key': return 'API Key';
-            case 'bearer_token': return 'Bearer Token';
-            case 'basic_auth': return 'Basic Auth';
-            case 'vmodel': return 'Virtual Model';
-            default: return authType || 'Other';
+            case 'api_key': return t('dashboard.overview.authType.apiKey', { defaultValue: 'API Key' });
+            case 'bearer_token': return t('dashboard.overview.authType.bearerToken', { defaultValue: 'Bearer Token' });
+            case 'basic_auth': return t('dashboard.overview.authType.basicAuth', { defaultValue: 'Basic Auth' });
+            case 'vmodel': return t('dashboard.overview.authType.vmodel', { defaultValue: 'Virtual Model' });
+            default: return authType || t('dashboard.overview.authType.other', { defaultValue: 'Other' });
         }
     };
 
@@ -463,9 +465,19 @@ export default function DashboardPage() {
 
     const hasActiveFilters = selectedProvider !== 'all' || selectedModel !== 'all' || selectedUser !== 'all';
 
+    // Owner label is rendered through t() so a live language switch updates it;
+    // sharing-key labels carry their own display name instead.
+    const identityLabel = (identity: UsageIdentity): string =>
+        identity.type === 'owner'
+            ? t('dashboard.overview.mainAccount', { defaultValue: 'Main account' })
+            : identity.label;
+
+    const selectedIdentity = usageIdentities.find((i) => i.userId === selectedUser);
     const selectedIdentityLabel = selectedUser === 'all'
-        ? 'All identities'
-        : usageIdentities.find((identity) => identity.userId === selectedUser)?.label || shortenUserId(selectedUser);
+        ? t('dashboard.overview.allIdentities', { defaultValue: 'All identities' })
+        : selectedIdentity
+            ? identityLabel(selectedIdentity)
+            : shortenUserId(selectedUser);
 
     const handleClearFilters = () => {
         setSelectedProvider('all');
@@ -480,17 +492,17 @@ export default function DashboardPage() {
     const headerActions = (
         <>
             <FormControl size="small" sx={{ minWidth: { xs: 140, sm: 160 } }}>
-                <InputLabel sx={{ fontWeight: 500, fontSize: '0.875rem' }}>Provider</InputLabel>
+                <InputLabel sx={{ fontWeight: 500, fontSize: '0.875rem' }}>{t('dashboard.overview.provider', { defaultValue: 'Provider' })}</InputLabel>
                 <Select
                     value={selectedProvider}
-                    label="Provider"
+                    label={t('dashboard.overview.provider', { defaultValue: 'Provider' })}
                     onChange={(e) => setSelectedProvider(e.target.value)}
                     sx={{
                         borderRadius: 2,
                         '& .MuiOutlinedInput-input': { py: 1 },
                     }}
                 >
-                    <MenuItem value="all">All Providers</MenuItem>
+                    <MenuItem value="all">{t('dashboard.overview.allProviders', { defaultValue: 'All providers' })}</MenuItem>
                     {groupedProviderOptions.map((group) => [
                         <ListSubheader
                             key={`header-${group.authType}`}
@@ -519,17 +531,17 @@ export default function DashboardPage() {
             </FormControl>
 
             <FormControl size="small" sx={{ minWidth: { xs: 140, sm: 160 } }}>
-                <InputLabel sx={{ fontWeight: 500, fontSize: '0.875rem' }}>Model</InputLabel>
+                <InputLabel sx={{ fontWeight: 500, fontSize: '0.875rem' }}>{t('dashboard.overview.model', { defaultValue: 'Model' })}</InputLabel>
                 <Select
                     value={selectedModel}
-                    label="Model"
+                    label={t('dashboard.overview.model', { defaultValue: 'Model' })}
                     onChange={(e) => setSelectedModel(e.target.value)}
                     sx={{
                         borderRadius: 2,
                         '& .MuiOutlinedInput-input': { py: 1 },
                     }}
                 >
-                    <MenuItem value="all">All Models</MenuItem>
+                    <MenuItem value="all">{t('dashboard.overview.allModels', { defaultValue: 'All models' })}</MenuItem>
                     {modelOptions.map((model) => (
                         <MenuItem key={model} value={model}>
                             {model}
@@ -539,10 +551,10 @@ export default function DashboardPage() {
             </FormControl>
 
             <FormControl size="small" sx={{ minWidth: { xs: 160, sm: 200 } }}>
-                <InputLabel sx={{ fontWeight: 500, fontSize: '0.875rem' }}>Identity</InputLabel>
+                <InputLabel sx={{ fontWeight: 500, fontSize: '0.875rem' }}>{t('dashboard.overview.identity', { defaultValue: 'Identity' })}</InputLabel>
                 <Select
                     value={selectedUser}
-                    label="Identity"
+                    label={t('dashboard.overview.identity', { defaultValue: 'Identity' })}
                     onChange={(e) => setSelectedUser(e.target.value)}
                     renderValue={() => selectedIdentityLabel}
                     sx={{
@@ -550,21 +562,21 @@ export default function DashboardPage() {
                         '& .MuiOutlinedInput-input': { py: 1 },
                     }}
                 >
-                    <MenuItem value="all">All identities</MenuItem>
-                    <ListSubheader>Account</ListSubheader>
+                    <MenuItem value="all">{t('dashboard.overview.allIdentities', { defaultValue: 'All identities' })}</MenuItem>
+                    <ListSubheader>{t('dashboard.overview.account', { defaultValue: 'Account' })}</ListSubheader>
                     {usageIdentities.filter((identity) => identity.type === 'owner').map((identity) => (
                         <MenuItem key={identity.userId} value={identity.userId}>
                             {identity.label}
                         </MenuItem>
                     ))}
                     {usageIdentities.some((identity) => identity.type === 'sharing_key') && (
-                        <ListSubheader>Sharing Keys</ListSubheader>
+                        <ListSubheader>{t('dashboard.overview.sharingKeys', { defaultValue: 'Sharing Keys' })}</ListSubheader>
                     )}
                     {usageIdentities.filter((identity) => identity.type === 'sharing_key').map((identity) => (
                         <MenuItem key={identity.userId} value={identity.userId}>
                             <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 2, width: '100%' }}>
                                 <Typography variant="body2" noWrap>
-                                    {identity.label}{!identity.enabled ? ' (disabled)' : ''}
+                                    {identityLabel(identity)}{!identity.enabled ? t('dashboard.overview.disabledSuffix', { defaultValue: ' (disabled)' }) : ''}
                                 </Typography>
                                 <Tooltip title={identity.userId} placement="right">
                                     <Typography
@@ -586,7 +598,7 @@ export default function DashboardPage() {
             {hasActiveFilters && (
                 <>
                     <Divider orientation="vertical" flexItem sx={{ mx: 0.5, display: { xs: 'none', sm: 'block' } }} />
-                    <Tooltip title="Clear all filters">
+                    <Tooltip title={t('dashboard.overview.clearFilters', { defaultValue: 'Clear all filters' })}>
                         <IconButton
                             size="small"
                             onClick={handleClearFilters}
@@ -613,10 +625,10 @@ export default function DashboardPage() {
                             color="primary"
                         />
                     }
-                    label={<Typography variant="body2">Auto</Typography>}
+                    label={<Typography variant="body2">{t('dashboard.overview.auto', { defaultValue: 'Auto' })}</Typography>}
                     sx={switchControlLabelStyle}
                 />
-                <Tooltip title="Refresh data">
+                <Tooltip title={t('dashboard.overview.refreshData', { defaultValue: 'Refresh data' })}>
                     <IconButton
                         size="small"
                         onClick={handleRefresh}
@@ -644,8 +656,8 @@ export default function DashboardPage() {
             }}
         >
             <PageHeader
-                title="Usage Dashboard"
-                subtitle={TIME_RANGE_CONFIG[timeRange].label}
+                title={t('dashboard.overview.title', { defaultValue: 'Usage Dashboard' })}
+                subtitle={t(TIME_RANGE_CONFIG[timeRange].labelKey)}
                 actions={headerActions}
             />
             {/* Main Content */}
@@ -654,9 +666,9 @@ export default function DashboardPage() {
                 <Grid container spacing={{ xs: 1.5, sm: 2 }}>
                     <Grid size={{ xs: 6, sm: 4, md: 2.4 }}>
                         <StatCard
-                            title="Total Requests"
+                            title={t('dashboard.overview.statCards.totalRequests', { defaultValue: 'Total Requests' })}
                             value={totalRequests.toLocaleString()}
-                            subtitle={TIME_RANGE_CONFIG[timeRange].label}
+                            subtitle={t(TIME_RANGE_CONFIG[timeRange].labelKey)}
                             icon={<CallMadeIcon />}
                             // Volume metric — no health judgment, so keep it neutral.
                             color="secondary"
@@ -664,9 +676,13 @@ export default function DashboardPage() {
                     </Grid>
                     <Grid size={{ xs: 6, sm: 4, md: 2.4 }}>
                         <StatCard
-                            title="Total Tokens"
+                            title={t('dashboard.overview.statCards.totalTokens', { defaultValue: 'Total Tokens' })}
                             value={formatNumber(totalTokens)}
-                            subtitle={`Input: ${formatNumber(totalInputTokens)} + Cache: ${formatNumber(totalCacheTokens)}\nOutput: ${formatNumber(totalOutputTokens)}`}
+                            subtitle={t('dashboard.overview.statCards.tokenBreakdown', {
+                                input: formatNumber(totalInputTokens),
+                                cache: formatNumber(totalCacheTokens),
+                                output: formatNumber(totalOutputTokens),
+                            })}
                             icon={<PaidIcon />}
                             // Volume metric — no health judgment, so keep it neutral.
                             color="secondary"
@@ -674,27 +690,30 @@ export default function DashboardPage() {
                     </Grid>
                     <Grid size={{ xs: 6, sm: 4, md: 2.4 }}>
                         <StatCard
-                            title="Cache Hit Rate"
+                            title={t('dashboard.overview.statCards.cacheHitRate', { defaultValue: 'Cache Hit Rate' })}
                             value={`${cacheHitRate.toFixed(1)}%`}
-                            subtitle={formatCacheBreakdown(totalCacheTokens, totalCacheWriteTokens, formatNumber)}
+                            subtitle={formatCacheBreakdown(totalCacheTokens, totalCacheWriteTokens, formatNumber, {
+                                read: t('dashboard.overview.statCards.cacheRead', { defaultValue: 'read' }),
+                                written: t('dashboard.overview.statCards.cacheWrite', { defaultValue: 'written' }),
+                            })}
                             icon={<CachedIcon />}
                             color={getCacheHitRateColor(cacheHitRate)}
                         />
                     </Grid>
                     <Grid size={{ xs: 6, sm: 4, md: 2.4 }}>
                         <StatCard
-                            title="Error Rate"
+                            title={t('dashboard.overview.statCards.errorRate', { defaultValue: 'Error Rate' })}
                             value={`${errorRate.toFixed(2)}%`}
-                            subtitle={`${totalErrors} errors`}
+                            subtitle={t('dashboard.overview.statCards.errors', { count: totalErrors })}
                             icon={<ErrorOutlineIcon />}
                             color={getErrorRateColor(errorRate)}
                         />
                     </Grid>
                     <Grid size={{ xs: 6, sm: 4, md: 2.4 }}>
                         <StatCard
-                            title="Streamed Rate"
+                            title={t('dashboard.overview.statCards.streamedRate', { defaultValue: 'Streamed Rate' })}
                             value={`${streamedRate.toFixed(1)}%`}
-                            subtitle={`${totalStreamed} streamed`}
+                            subtitle={t('dashboard.overview.statCards.streamed', { count: totalStreamed })}
                             icon={<StreamIcon />}
                             color="secondary"
                         />
@@ -721,9 +740,9 @@ export default function DashboardPage() {
                                 },
                             }}
                         >
-                            <ToggleButton value="summary">Summary</ToggleButton>
-                            {isHourlyRange && <ToggleButton value="requests">By Request</ToggleButton>}
-                            <ToggleButton value="activity">Activity</ToggleButton>
+                            <ToggleButton value="summary">{t('dashboard.overview.viewModes.summary', { defaultValue: 'Summary' })}</ToggleButton>
+                            {isHourlyRange && <ToggleButton value="requests">{t('dashboard.overview.viewModes.byRequest', { defaultValue: 'By Request' })}</ToggleButton>}
+                            <ToggleButton value="activity">{t('dashboard.overview.viewModes.activity', { defaultValue: 'Activity' })}</ToggleButton>
                         </ToggleButtonGroup>
                     </Box>
 

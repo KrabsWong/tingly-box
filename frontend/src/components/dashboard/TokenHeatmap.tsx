@@ -1,5 +1,6 @@
 import { Box, Tooltip, Typography, tooltipClasses } from '@mui/material';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { formatNumber } from './chartStyles';
 
 // Green color scale for GitHub-style heatmap (like GitHub's contribution graph).
@@ -102,17 +103,17 @@ const chunkByWeek = (days: (string | null)[]): (string | null)[][] => {
 };
 
 // Get month label for a week
-const getMonthLabel = (week: (string | null)[]): string | null => {
+const getMonthLabel = (week: (string | null)[], locale: string): string | null => {
     const lastDay = [...week].reverse().find(Boolean);
     if (!lastDay) return null;
-    return new Date(`${lastDay}T00:00:00`).toLocaleString('en-US', { month: 'short' });
+    return new Date(`${lastDay}T00:00:00`).toLocaleString(locale, { month: 'short' });
 };
 
 // Build month labels (show only when month changes)
-const buildMonthLabels = (weeks: (string | null)[][]): (string | null)[] => {
+const buildMonthLabels = (weeks: (string | null)[][], locale: string): (string | null)[] => {
     return weeks.map((week, i) => {
-        const label = getMonthLabel(week);
-        const previous = i > 0 ? getMonthLabel(weeks[i - 1]) : null;
+        const label = getMonthLabel(week, locale);
+        const previous = i > 0 ? getMonthLabel(weeks[i - 1], locale) : null;
         return label !== previous ? label : null;
     });
 };
@@ -128,6 +129,10 @@ const StatInline = ({ value, label }: { value: string; label: string }) => (
 );
 
 export const TokenHeatmap = ({ data }: TokenHeatmapProps) => {
+    const { t, i18n } = useTranslation();
+    // Match the MUI locale injected for TablePagination (see theme/index.ts).
+    const heatmapLocale = i18n.language?.startsWith('zh') ? 'zh-CN' : 'en-US';
+
     // Build lookup maps (data is already filled by parent)
     const {
         dayMap,
@@ -184,14 +189,14 @@ export const TokenHeatmap = ({ data }: TokenHeatmapProps) => {
         const days = data.map((d) => d.date);
         const padded = padToWeekStart(days);
         const weekChunks = chunkByWeek(padded);
-        const labels = buildMonthLabels(weekChunks);
+        const labels = buildMonthLabels(weekChunks, heatmapLocale);
 
         return {
             weeks: weekChunks,
             monthLabels: labels,
             allDays: days,
         };
-    }, [data]);
+    }, [data, heatmapLocale]);
 
     // Responsive cell size: fill the available width with the fixed number of
     // week columns, clamped to a sane range. Falls back to horizontal scroll
@@ -247,6 +252,11 @@ export const TokenHeatmap = ({ data }: TokenHeatmapProps) => {
                         {/* Day of week labels */}
                         {DAYS_OF_WEEK.map((day, dayIndex) => {
                             const showLabel = dayIndex === 0 || dayIndex === 6;
+                            const label = dayIndex === 0
+                                ? t('dashboard.heatmap.weekdayMon', { defaultValue: 'Mon' })
+                                : dayIndex === 6
+                                    ? t('dashboard.heatmap.weekdaySun', { defaultValue: 'Sun' })
+                                    : day;
                             return (
                                 <Typography
                                     key={day}
@@ -261,7 +271,7 @@ export const TokenHeatmap = ({ data }: TokenHeatmapProps) => {
                                         justifyContent: 'flex-end',
                                     }}
                                 >
-                                    {showLabel ? day : ''}
+                                    {showLabel ? label : ''}
                                 </Typography>
                             );
                         })}
@@ -330,7 +340,7 @@ export const TokenHeatmap = ({ data }: TokenHeatmapProps) => {
                                                         color: '#ffffff',
                                                     }}
                                                 >
-                                                    {new Date(`${day}T00:00:00`).toLocaleDateString('en-US', {
+                                                    {new Date(`${day}T00:00:00`).toLocaleDateString(heatmapLocale, {
                                                         weekday: 'short',
                                                         month: 'short',
                                                         day: 'numeric',
@@ -345,7 +355,7 @@ export const TokenHeatmap = ({ data }: TokenHeatmapProps) => {
                                                         mb: 0.5,
                                                     }}
                                                 >
-                                                    {formatTokenTotal(value)} total tokens
+                                                    {t('dashboard.heatmap.totalTokens', { tokens: formatTokenTotal(value) })}
                                                 </Typography>
                                                 {dayData && (dayData.inputTokens > 0 || dayData.outputTokens > 0 || (dayData.cacheTokens ?? 0) > 0) && (
                                                     <Typography
@@ -355,8 +365,8 @@ export const TokenHeatmap = ({ data }: TokenHeatmapProps) => {
                                                             mt: 0.5,
                                                         }}
                                                     >
-                                                        Input: {formatTokenTotal(dayData.inputTokens)} | Cache:{' '}
-                                                        {formatTokenTotal(dayData.cacheTokens ?? 0)} | Output:{' '}
+                                                        {t('dashboard.heatmap.input', { defaultValue: 'Input' })}: {formatTokenTotal(dayData.inputTokens)} | {t('dashboard.heatmap.cache', { defaultValue: 'Cache' })}:{' '}
+                                                        {formatTokenTotal(dayData.cacheTokens ?? 0)} | {t('dashboard.heatmap.output', { defaultValue: 'Output' })}:{' '}
                                                         {formatTokenTotal(dayData.outputTokens)}
                                                     </Typography>
                                                 )}
@@ -417,7 +427,7 @@ export const TokenHeatmap = ({ data }: TokenHeatmapProps) => {
                                                 },
                                                 p: 0,
                                             }}
-                                            aria-label={`${day}: ${value} total tokens`}
+                                            aria-label={`${day}: ${t('dashboard.heatmap.totalTokens', { tokens: formatTokenTotal(value) })}`}
                                         />
                                     </Tooltip>
                                 );
@@ -439,16 +449,16 @@ export const TokenHeatmap = ({ data }: TokenHeatmapProps) => {
                     }}
                 >
                     <Box sx={{ display: 'flex', alignItems: 'baseline', columnGap: 2, rowGap: 0.5, flexWrap: 'wrap' }}>
-                        <StatInline value={formatTokenTotal(totalTokens)} label="tokens" />
-                        <StatInline value={`${activeDays}/${allDays.length}`} label="active days" />
-                        <StatInline value={`${longestStreak}d`} label="longest streak" />
-                        <StatInline value={formatTokenTotal(maxValue)} label="max/day" />
+                        <StatInline value={formatTokenTotal(totalTokens)} label={t('dashboard.heatmap.tokens', { defaultValue: 'tokens' })} />
+                        <StatInline value={`${activeDays}/${allDays.length}`} label={t('dashboard.heatmap.activeDays', { defaultValue: 'active days' })} />
+                        <StatInline value={`${longestStreak}d`} label={t('dashboard.heatmap.longestStreak', { defaultValue: 'longest streak' })} />
+                        <StatInline value={formatTokenTotal(maxValue)} label={t('dashboard.heatmap.maxDay', { defaultValue: 'max/day' })} />
                     </Box>
 
                     {/* Legend */}
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
                         <Typography sx={{ fontSize: '0.625rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'text.secondary' }}>
-                            Less
+                            {t('dashboard.heatmap.less', { defaultValue: 'Less' })}
                         </Typography>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.375 }}>
                             {HEATMAP_COLORS.map((color, index) => (
@@ -465,7 +475,7 @@ export const TokenHeatmap = ({ data }: TokenHeatmapProps) => {
                             ))}
                         </Box>
                         <Typography sx={{ fontSize: '0.625rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'text.secondary' }}>
-                            More
+                            {t('dashboard.heatmap.more', { defaultValue: 'More' })}
                         </Typography>
                     </Box>
                 </Box>

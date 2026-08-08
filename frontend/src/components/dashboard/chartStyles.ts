@@ -160,10 +160,11 @@ export const formatCacheBreakdown = (
     cacheReadTokens: number,
     cacheWriteTokens: number,
     format: (n: number) => string,
+    labels: { read: string; written: string } = { read: 'read', written: 'written' },
 ): string =>
     cacheWriteTokens > 0
-        ? `${format(cacheReadTokens)} read \u00b7 ${format(cacheWriteTokens)} written`
-        : `${format(cacheReadTokens)} read`;
+        ? `${format(cacheReadTokens)} ${labels.read} \u00b7 ${format(cacheWriteTokens)} ${labels.written}`
+        : `${format(cacheReadTokens)} ${labels.read}`;
 
 // Whether any row carries a cache write, i.e. whether the write dimension is
 // worth showing at all. Owns the "omit when there is nothing to attribute"

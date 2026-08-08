@@ -1,6 +1,7 @@
 // Hourly Token History Chart (Area Chart) - for single day view
 
 import {useState} from 'react';
+import {useTranslation} from 'react-i18next';
 import {Box} from '@mui/material';
 import {Area, CartesianGrid, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis,} from 'recharts';
 import {useTheme} from '@mui/material/styles';
@@ -15,6 +16,7 @@ interface HourlyTokenHistoryChartProps {
 
 export function HourlyTokenHistoryChart({data}: HourlyTokenHistoryChartProps) {
     const theme = useTheme();
+    const {t} = useTranslation();
     const chartStyles = getThemeChartStyles(theme);
 
     const aggregatedData = aggregateTo5MinBuckets(data);
@@ -34,24 +36,24 @@ export function HourlyTokenHistoryChart({data}: HourlyTokenHistoryChartProps) {
     const hasData = chartData.length > 0;
 
     return (
-        <ChartWrapper title="Token Usage Over Time (5-Min)" hasData={hasData}>
+        <ChartWrapper title={t('dashboard.chart.hourlyTitle', {defaultValue: 'Token Usage Over Time (5-Min)'})} hasData={hasData}>
             {hasData ? (
                 <>
                     <Box sx={{display: 'flex', justifyContent: 'center', gap: 3, mb: 2}}>
                         <LegendItem
-                            label="Cache Read"
+                            label={t('dashboard.chart.cacheRead', {defaultValue: 'Cache Read'})}
                             color={chartStyles.token.cache.main}
                             visible={visibleSeries.cache}
                             onToggle={() => toggleSeries('cache')}
                         />
                         <LegendItem
-                            label="Input"
+                            label={t('dashboard.chart.input', {defaultValue: 'Input'})}
                             color={chartStyles.token.input.main}
                             visible={visibleSeries.input}
                             onToggle={() => toggleSeries('input')}
                         />
                         <LegendItem
-                            label="Output"
+                            label={t('dashboard.chart.output', {defaultValue: 'Output'})}
                             color={chartStyles.token.output.main}
                             visible={visibleSeries.output}
                             onToggle={() => toggleSeries('output')}
@@ -101,7 +103,7 @@ export function HourlyTokenHistoryChart({data}: HourlyTokenHistoryChartProps) {
                             <Area
                                 type="monotone"
                                 dataKey="cacheTokens"
-                                name="Cache Read"
+                                name={t('dashboard.chart.cacheRead', {defaultValue: 'Cache Read'})}
                                 stackId="1"
                                 stroke={chartStyles.token.cache.main}
                                 strokeWidth={1}
@@ -115,7 +117,7 @@ export function HourlyTokenHistoryChart({data}: HourlyTokenHistoryChartProps) {
                             <Area
                                 type="monotone"
                                 dataKey="inputTokens"
-                                name="Input Tokens"
+                                name={t('dashboard.chart.inputTokens', {defaultValue: 'Input Tokens'})}
                                 stackId="1"
                                 stroke={chartStyles.token.input.main}
                                 strokeWidth={2}
@@ -129,7 +131,7 @@ export function HourlyTokenHistoryChart({data}: HourlyTokenHistoryChartProps) {
                             <Area
                                 type="monotone"
                                 dataKey="outputTokens"
-                                name="Output Tokens"
+                                name={t('dashboard.chart.outputTokens', {defaultValue: 'Output Tokens'})}
                                 stackId="1"
                                 stroke={chartStyles.token.output.main}
                                 strokeWidth={2}

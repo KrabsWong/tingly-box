@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
     Box,
     Paper,
@@ -68,10 +70,10 @@ const getTokensPerSecond = (record: UsageRecord) => {
     return (record.output_tokens - 1) * 1000 / decodeMs;
 };
 
-const getTPSFormula = (record: UsageRecord) => {
+const getTPSFormula = (record: UsageRecord, t: TFunction) => {
     const decodeMs = record.latency_ms - (record.ttft_ms ?? 0);
     if (getTokensPerSecond(record) <= 0) return '';
-    return `${record.output_tokens - 1} decode intervals / ${decodeMs}ms after TTFT`;
+    return t('dashboard.requestsView.tpsFormula', { count: record.output_tokens - 1, ms: decodeMs });
 };
 
 const fmtTime = (ts: string) =>
@@ -99,6 +101,7 @@ interface TableSectionProps {
 
 function RequestTable({ records, total, page, rowsPerPage, statusFilter, loading, onStatusFilterChange, onPageChange, onRowsPerPageChange }: TableSectionProps) {
     const theme = useTheme();
+    const { t } = useTranslation();
     const showCacheWrite = hasCacheWrites(records);
 
     return (
@@ -106,9 +109,9 @@ function RequestTable({ records, total, page, rowsPerPage, statusFilter, loading
             {/* Header */}
             <Box sx={{ px: 2.5, py: 1.5, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
                 <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>
-                    Requests
+                    {t('dashboard.requestsView.title', { defaultValue: 'Requests' })}
                     <Typography component="span" variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
-                        {!loading && `${total.toLocaleString()} total`}
+                        {!loading && t('dashboard.requestsView.total', { total: total.toLocaleString() })}
                     </Typography>
                 </Typography>
                 <ToggleButtonGroup
@@ -116,9 +119,9 @@ function RequestTable({ records, total, page, rowsPerPage, statusFilter, loading
                     onChange={(_, v) => v && onStatusFilterChange(v)}
                     sx={{ '& .MuiToggleButton-root': { px: 1.5, py: 0.375, fontSize: '0.75rem', textTransform: 'none' } }}
                 >
-                    <ToggleButton value="all">All</ToggleButton>
-                    <ToggleButton value="success">Success</ToggleButton>
-                    <ToggleButton value="error">Error</ToggleButton>
+                    <ToggleButton value="all">{t('dashboard.requestsView.all', { defaultValue: 'All' })}</ToggleButton>
+                    <ToggleButton value="success">{t('dashboard.requestsView.success', { defaultValue: 'Success' })}</ToggleButton>
+                    <ToggleButton value="error">{t('dashboard.requestsView.error', { defaultValue: 'Error' })}</ToggleButton>
                 </ToggleButtonGroup>
             </Box>
             {/* Table */}
@@ -131,18 +134,18 @@ function RequestTable({ records, total, page, rowsPerPage, statusFilter, loading
                 <Table stickyHeader size="small" sx={{ tableLayout: 'auto' }}>
                     <TableHead>
                         <TableRow sx={{ '& .MuiTableCell-root': { fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'text.secondary', py: 1, borderBottom: '1px solid', borderColor: 'divider', backgroundColor: 'background.paper', whiteSpace: 'nowrap' } }}>
-                            <TableCell>Time</TableCell>
-                            <TableCell>Model</TableCell>
-                            <TableCell>Scenario</TableCell>
-                            <TableCell align="right" sx={{ minWidth: 96 }}>Cache Read</TableCell>
-                            {showCacheWrite && <TableCell align="right">Cache Write</TableCell>}
-                            <TableCell align="right">Input</TableCell>
-                            <TableCell align="right">Output</TableCell>
-                            <TableCell align="right">Latency</TableCell>
-                            <TableCell align="right">TTFT</TableCell>
-                            <TableCell align="right">TPS</TableCell>
-                            <TableCell align="center">Status</TableCell>
-                            <TableCell align="center">Stream</TableCell>
+                            <TableCell>{t('dashboard.requestsView.colTime', { defaultValue: 'Time' })}</TableCell>
+                            <TableCell>{t('dashboard.requestsView.colModel', { defaultValue: 'Model' })}</TableCell>
+                            <TableCell>{t('dashboard.requestsView.colScenario', { defaultValue: 'Scenario' })}</TableCell>
+                            <TableCell align="right" sx={{ minWidth: 96 }}>{t('dashboard.requestsView.colCacheRead', { defaultValue: 'Cache Read' })}</TableCell>
+                            {showCacheWrite && <TableCell align="right">{t('dashboard.requestsView.colCacheWrite', { defaultValue: 'Cache Write' })}</TableCell>}
+                            <TableCell align="right">{t('dashboard.requestsView.colInput', { defaultValue: 'Input' })}</TableCell>
+                            <TableCell align="right">{t('dashboard.requestsView.colOutput', { defaultValue: 'Output' })}</TableCell>
+                            <TableCell align="right">{t('dashboard.requestsView.colLatency', { defaultValue: 'Latency' })}</TableCell>
+                            <TableCell align="right">{t('dashboard.requestsView.colTTFT', { defaultValue: 'TTFT' })}</TableCell>
+                            <TableCell align="right">{t('dashboard.requestsView.colTPS', { defaultValue: 'TPS' })}</TableCell>
+                            <TableCell align="center">{t('dashboard.requestsView.colStatus', { defaultValue: 'Status' })}</TableCell>
+                            <TableCell align="center">{t('dashboard.requestsView.colStream', { defaultValue: 'Stream' })}</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
@@ -151,10 +154,10 @@ function RequestTable({ records, total, page, rowsPerPage, statusFilter, loading
                                 <TableCell colSpan={11 + (showCacheWrite ? 1 : 0)} align="center" sx={{ py: 5 }}>
                                     <Typography variant="body2" sx={{
                                         color: "text.secondary"
-                                    }}>No requests found</Typography>
+                                    }}>{t('dashboard.requestsView.empty', { defaultValue: 'No requests found' })}</Typography>
                                     <Typography variant="caption" sx={{
                                         color: "text.disabled"
-                                    }}>Try changing the status filter</Typography>
+                                    }}>{t('dashboard.requestsView.emptyHint', { defaultValue: 'Try changing the status filter' })}</Typography>
                                 </TableCell>
                             </TableRow>
                         ) : records.map(r => (
@@ -243,7 +246,7 @@ function RequestTable({ records, total, page, rowsPerPage, statusFilter, loading
 
                                 {/* Per-request output TPS after TTFT */}
                                 <TableCell align="right">
-                                    <Tooltip title={getTPSFormula(r)} placement="top">
+                                    <Tooltip title={getTPSFormula(r, t)} placement="top">
                                         <Typography sx={{ fontFamily: 'monospace', fontSize: '0.75rem', color: getTokensPerSecond(r) > 0 ? 'text.primary' : 'text.disabled', cursor: getTokensPerSecond(r) > 0 ? 'help' : 'default' }}>
                                             {getTokensPerSecond(r) > 0 ? getTokensPerSecond(r).toFixed(1) : '-'}
                                         </Typography>
@@ -253,10 +256,10 @@ function RequestTable({ records, total, page, rowsPerPage, statusFilter, loading
                                 {/* Status */}
                                 <TableCell align="center">
                                     {r.status === 'success' ? (
-                                        <Chip label="OK" size="small" sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700, backgroundColor: SUCCESS_COLOR, color: '#fff', '& .MuiChip-label': { px: 0.75 } }} />
+                                        <Chip label={t('dashboard.requestsView.ok', { defaultValue: 'OK' })} size="small" sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700, backgroundColor: SUCCESS_COLOR, color: '#fff', '& .MuiChip-label': { px: 0.75 } }} />
                                     ) : (
                                         <Tooltip title={r.error_code || r.status} placement="top">
-                                            <Chip label="ERR" size="small" sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700, backgroundColor: ERROR_COLOR, color: '#fff', '& .MuiChip-label': { px: 0.75 } }} />
+                                            <Chip label={t('dashboard.requestsView.err', { defaultValue: 'ERR' })} size="small" sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700, backgroundColor: ERROR_COLOR, color: '#fff', '& .MuiChip-label': { px: 0.75 } }} />
                                         </Tooltip>
                                     )}
                                 </TableCell>
@@ -264,7 +267,7 @@ function RequestTable({ records, total, page, rowsPerPage, statusFilter, loading
                                 {/* Stream */}
                                 <TableCell align="center">
                                     {r.streamed && (
-                                        <Tooltip title="Streamed">
+                                        <Tooltip title={t('dashboard.requestsView.streamed', { defaultValue: 'Streamed' })}>
                                             <Box sx={{ display: 'inline-flex', color: 'primary.main' }}>
                                                 <StreamIcon sx={{ fontSize: '0.95rem' }} />
                                             </Box>
