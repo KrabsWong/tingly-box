@@ -1231,7 +1231,6 @@ export default {
       "allProviders": "All providers",
       "allModels": "All models",
       "allIdentities": "All identities",
-      "account": "Account",
       "sharingKeys": "Sharing Keys",
       "disabledSuffix": "(disabled)",
       "clearFilters": "Clear all filters",

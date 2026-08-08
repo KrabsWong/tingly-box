@@ -1231,7 +1231,6 @@ export default {
       "allProviders": "全部提供商",
       "allModels": "全部模型",
       "allIdentities": "全部",
-      "account": "账号",
       "sharingKeys": "共享密钥",
       "disabledSuffix": "（已停用）",
       "clearFilters": "清除全部筛选",

@@ -563,7 +563,6 @@ export default function DashboardPage() {
                     }}
                 >
                     <MenuItem value="all">{t('dashboard.overview.allIdentities', { defaultValue: 'All identities' })}</MenuItem>
-                    <ListSubheader>{t('dashboard.overview.account', { defaultValue: 'Account' })}</ListSubheader>
                     {usageIdentities.filter((identity) => identity.type === 'owner').map((identity) => (
                         <MenuItem key={identity.userId} value={identity.userId}>
                             {identity.label}
