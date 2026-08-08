@@ -1,13 +1,17 @@
 import react from '@vitejs/plugin-react-swc';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import { visualizer } from 'rollup-plugin-visualizer';
 import path from 'path';
 
 // Web-only Vite configuration
 // For Wails builds, use vite.config.wails.ts instead
 export default defineConfig(({ mode }) => {
-    // Check if we should use mock data
-    const useMock = process.env.USE_MOCK === 'true'
+    // Check if we should use mock data. Read from the mode's .env file
+    // (`.env.mock` sets USE_MOCK=true) via loadEnv so it works on any shell —
+    // a `USE_MOCK=true vite ...` prefix is POSIX-only and breaks on Windows.
+    // A real `USE_MOCK` env var still overrides it (loadEnv merges process.env).
+    const env = loadEnv(mode, process.cwd(), '');
+    const useMock = env.USE_MOCK === 'true';
     console.log("use mock", useMock)
 
     return {

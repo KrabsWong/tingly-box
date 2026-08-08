@@ -6,7 +6,7 @@
   "packageManager": "pnpm@10.33.4",
   "scripts": {
     "dev": "vite --mode development --port 9245",
-    "dev:mock": "USE_MOCK=true vite --mode mock",
+    "dev:mock": "vite --mode mock",
     "dev:real": "vite --mode production",
     "build:dev": "vite build --minify false --mode development",
     "build:dev:wails": "vite build --minify false --mode development-wails --config vite.config.wails.ts",
