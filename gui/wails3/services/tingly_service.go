@@ -14,7 +14,6 @@ import (
 
 	"github.com/tingly-dev/tingly-box/internal/command"
 	exportpkg "github.com/tingly-dev/tingly-box/internal/dataio"
-	"github.com/tingly-dev/tingly-box/internal/server"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 
@@ -22,42 +21,7 @@ import (
 type TinglyService struct {
 	appManager    *command.AppManager
 	serverManager *command.ServerManager
-	httpServer    *server.Server
-	shutdownChan  chan struct{}
-	isRunning     bool
 	app           *application.App
-}
-
-// NewTinglyService creates a new UI service instance
-func NewTinglyService(configDir string, port int, debug bool) (*TinglyService, error) {
-	// Create AppManager
-	appManager, err := command.NewAppManager(configDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create app manager: %w", err)
-	}
-
-	// Set port
-	if err := appManager.SetServerPort(port); err != nil {
-		return nil, fmt.Errorf("failed to set server port: %w", err)
-	}
-
-	serverManager := command.NewServerManager(
-		appManager.AppConfig(),
-		server.WithDebug(debug),
-		server.WithUI(true),
-		server.WithOpenBrowser(false), // GUI doesn't need browser auto-open
-	)
-
-	res := &TinglyService{
-		appManager:    appManager,
-		serverManager: serverManager,
-		shutdownChan:  make(chan struct{}),
-		isRunning:     false,
-	}
-
-	log.Printf("config file: %s\n", appManager.AppConfig().GetGlobalConfig().ConfigFile)
-
-	return res, nil
 }
 
 // NewTinglyServiceWithServerManager creates a new UI service instance with a pre-configured ServerManager
@@ -65,8 +29,6 @@ func NewTinglyServiceWithServerManager(appManager *command.AppManager, serverMan
 	res := &TinglyService{
 		appManager:    appManager,
 		serverManager: serverManager,
-		shutdownChan:  make(chan struct{}),
-		isRunning:     false,
 	}
 
 	log.Printf("config file: %s\n", appManager.AppConfig().GetGlobalConfig().ConfigFile)
@@ -83,22 +45,6 @@ func (s *TinglyService) Start(ctx context.Context) error {
 		}
 	}()
 	return nil
-}
-
-// Stop stops the UI service gracefully
-func (s *TinglyService) Stop() error {
-	if !s.isRunning {
-		return nil
-	}
-
-	fmt.Println("Stopping UI service...")
-	err := s.serverManager.Stop()
-	s.isRunning = false
-
-	// Close shutdown channel to notify any waiting goroutines
-	close(s.shutdownChan)
-
-	return err
 }
 
 func (s *TinglyService) GetGinEngine() *gin.Engine {

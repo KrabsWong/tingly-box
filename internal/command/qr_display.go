@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 )
 
 // QRDisplay represents the QR code display
@@ -132,21 +131,6 @@ func (d *QRDisplay) openBrowser() {
 	exec.Command(cmd, args...).Start()
 }
 
-// DisplaySpinnerASCII returns a simple ASCII spinner
-func DisplaySpinnerASCII(step int) string {
-	spinners := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	return spinners[step%len(spinners)]
-}
-
-// DisplayStatus displays a status message with optional spinner
-func DisplayStatus(message string, showSpinner bool, step int) {
-	if showSpinner {
-		fmt.Printf("\r%s %s", DisplaySpinnerASCII(step), message)
-	} else {
-		fmt.Printf("\r%s", message)
-	}
-}
-
 // ClearLine clears the current line in terminal
 func ClearLine() {
 	fmt.Print("\r\033[K")
@@ -174,16 +158,4 @@ func PrintInfo(message string) {
 func PrintWarning(message string) {
 	ClearLine()
 	fmt.Printf("⚠ %s\n", message)
-}
-
-// TruncateString truncates a string to fit within max width
-func TruncateString(s string, maxWidth int) string {
-	if len(s) <= maxWidth {
-		return s
-	}
-	// Try to truncate at word boundary
-	if idx := strings.LastIndex(s[:maxWidth], " "); idx > 0 {
-		return s[:idx] + "..."
-	}
-	return s[:maxWidth-3] + "..."
 }

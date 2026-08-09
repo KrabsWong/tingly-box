@@ -646,30 +646,3 @@ func startServerWithHook(appManager *AppManager, opts options.StartServerOptions
 		return serverManager.Stop()
 	}
 }
-
-// CreateAppManagerForDir creates a new AppManager for the specified config directory.
-// This is used when a command specifies a different config directory than the global one.
-func CreateAppManagerForDir(configDir string) (*AppManager, error) {
-	// Create app config for the specified directory
-	appConfig, err := config.NewAppConfig(config.WithConfigDir(configDir))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create app config for directory %s: %w", configDir, err)
-	}
-	return NewAppManagerWithConfig(appConfig), nil
-}
-
-// doStopServerWithFileLock stops the server using the provided file lock
-func doStopServerWithFileLock(fileLock *lock.FileLock) error {
-	if !fileLock.IsLocked() {
-		fmt.Println("Server is not running")
-		return nil
-	}
-
-	fmt.Println("Stopping server...")
-	if err := stopServerWithFileLock(fileLock); err != nil {
-		return fmt.Errorf("failed to stop server: %w", err)
-	}
-
-	fmt.Println("Server stopped successfully")
-	return nil
-}
