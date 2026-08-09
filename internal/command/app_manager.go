@@ -6,7 +6,6 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/config"
 	exportpkg "github.com/tingly-dev/tingly-box/internal/dataio"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
-	"github.com/tingly-dev/tingly-box/internal/server"
 	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/internal/usecase"
@@ -17,8 +16,7 @@ import (
 // lifecycle, plus a small compatibility surface still consumed by Wails.
 // Domain behavior belongs in internal/usecase rather than growing here.
 type AppManager struct {
-	appConfig     *config.AppConfig
-	serverManager *ServerManager
+	appConfig *config.AppConfig
 }
 
 // NewAppManager creates a new AppManager with the given config directory.
@@ -54,37 +52,13 @@ func (am *AppManager) GetGlobalConfig() *serverconfig.Config {
 // Server Management
 // ============
 
-// SetupServer initializes the server manager with the given port and options.
-func (am *AppManager) SetupServer(port int, opts ...server.ServerOption) error {
-	am.serverManager = NewServerManager(am.appConfig, opts...)
-	return am.serverManager.Setup(port)
-}
-
-// SetupServerWithPort initializes the server manager with just a port (no options).
-// This is a convenience method for the TUI wizard.
-func (am *AppManager) SetupServerWithPort(port int) error {
-	return am.SetupServer(port)
-}
-
 // StartServerAt initializes and starts the in-process server used by the TUI.
 func (am *AppManager) StartServerAt(port int) error {
-	if err := am.SetupServer(port); err != nil {
+	serverManager := NewServerManager(am.appConfig)
+	if err := serverManager.Setup(port); err != nil {
 		return err
 	}
-	return am.StartServer()
-}
-
-// GetServerManager returns the server manager instance.
-func (am *AppManager) GetServerManager() *ServerManager {
-	return am.serverManager
-}
-
-// StartServer starts the server if it has been set up.
-func (am *AppManager) StartServer() error {
-	if am.serverManager == nil {
-		return fmt.Errorf("server manager not initialized - call SetupServer first")
-	}
-	return am.serverManager.Start()
+	return serverManager.Start()
 }
 
 // ============
@@ -132,11 +106,6 @@ func (am *AppManager) GetProvider(uuid string) (*typ.Provider, error) {
 	return am.appConfig.GetProviderByUUID(uuid)
 }
 
-// GetProviderByName returns a provider by name, or nil if not found.
-func (am *AppManager) GetProviderByName(name string) (*typ.Provider, error) {
-	return am.appConfig.GetProviderByName(name)
-}
-
 // ============
 // Rule Management
 // ============
@@ -148,18 +117,6 @@ func (am *AppManager) GetProviderByName(name string) (*typ.Provider, error) {
 func (am *AppManager) ListRules() []typ.Rule {
 	uc := usecase.NewRuleUseCase(am.appConfig.GetGlobalConfig())
 	return uc.List().Rules
-}
-
-// GetRuleByRequestModelAndScenario returns a rule by request model and scenario.
-func (am *AppManager) GetRuleByRequestModelAndScenario(requestModel string, scenario typ.RuleScenario) *typ.Rule {
-	globalConfig := am.appConfig.GetGlobalConfig()
-	return globalConfig.GetRuleByRequestModelAndScenario(requestModel, scenario)
-}
-
-// GetRuleByUUID returns the rule for the given UUID, or nil if not found.
-func (am *AppManager) GetRuleByUUID(uuid string) *typ.Rule {
-	globalConfig := am.appConfig.GetGlobalConfig()
-	return globalConfig.GetRuleByUUID(uuid)
 }
 
 // ============
@@ -188,24 +145,9 @@ func (am *AppManager) GetRuntimeServerPort() int {
 	return am.appConfig.GetServerPort()
 }
 
-// SetServerPort sets the server port.
-func (am *AppManager) SetServerPort(port int) error {
-	return am.appConfig.SetServerPort(port)
-}
-
 // GetUserToken returns the user authentication token.
 func (am *AppManager) GetUserToken() string {
 	return am.appConfig.GetGlobalConfig().GetUserToken()
-}
-
-// GetModelToken returns the model API token.
-func (am *AppManager) GetModelToken() string {
-	return am.appConfig.GetGlobalConfig().GetModelToken()
-}
-
-// HasModelToken returns true if a model token is configured.
-func (am *AppManager) HasModelToken() bool {
-	return am.appConfig.GetGlobalConfig().HasModelToken()
 }
 
 // ============

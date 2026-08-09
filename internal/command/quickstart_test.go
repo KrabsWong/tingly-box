@@ -30,7 +30,7 @@ func TestQuickstartProviderLookup(t *testing.T) {
 
 	// Test 1: GetProviderByName should return nil for non-existent provider
 	t.Run("GetProviderByName returns nil for non-existent provider", func(t *testing.T) {
-		provider, err := appManager.GetProviderByName("non-existent")
+		provider, err := appManager.GetGlobalConfig().GetProviderByName("non-existent")
 		if err == nil {
 			t.Error("Expected error for non-existent provider, got nil")
 		}
@@ -333,7 +333,7 @@ func TestQuickstartConfigPersistence(t *testing.T) {
 			t.Fatalf("Failed to create app manager: %v", err)
 		}
 
-		provider, err := appManager2.GetProviderByName("persist-test")
+		provider, err := appManager2.GetGlobalConfig().GetProviderByName("persist-test")
 		if err != nil {
 			t.Errorf("Failed to get persisted provider: %v", err)
 		}

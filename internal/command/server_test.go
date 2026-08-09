@@ -100,7 +100,7 @@ func TestServerPortConfiguration(t *testing.T) {
 		}
 
 		testPort := 12580
-		err = appManager.SetServerPort(testPort)
+		err = appManager.AppConfig().SetServerPort(testPort)
 		if err != nil {
 			t.Fatalf("Failed to set server port: %v", err)
 		}
@@ -156,7 +156,7 @@ func TestServerPortConfiguration(t *testing.T) {
 		}
 
 		testPort := 12582
-		err = appManager1.SetServerPort(testPort)
+		err = appManager1.AppConfig().SetServerPort(testPort)
 		if err != nil {
 			t.Fatalf("Failed to set server port: %v", err)
 		}

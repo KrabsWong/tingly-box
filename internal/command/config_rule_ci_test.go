@@ -96,7 +96,7 @@ func TestRunRuleAddCI(t *testing.T) {
 		}
 	})
 
-	rule := am.GetRuleByRequestModelAndScenario("gpt-4o", typ.ScenarioOpenAI)
+	rule := am.GetGlobalConfig().GetRuleByRequestModelAndScenario("gpt-4o", typ.ScenarioOpenAI)
 	if rule == nil {
 		t.Fatalf("rule not persisted")
 	}
