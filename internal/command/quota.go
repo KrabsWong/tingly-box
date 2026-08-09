@@ -13,6 +13,7 @@ import (
 	"github.com/tingly-dev/tingly-box/ai/quota"
 	"github.com/tingly-dev/tingly-box/internal/constant"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // ============== Kong Command Structures ==============
@@ -65,7 +66,7 @@ func runQuotaShowAll(appManager *AppManager, refresh bool) error {
 		return fmt.Errorf("failed to get quota data: %w", err)
 	}
 
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 	if len(providers) == 0 {
 		fmt.Println("No providers configured.")
 		return nil
@@ -111,7 +112,7 @@ func runQuotaShowProvider(appManager *AppManager, providerName string, refresh b
 
 // runQuotaInteractive runs interactive mode for provider selection
 func runQuotaInteractive(appManager *AppManager, refresh bool) error {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 
 	if len(providers) == 0 {
 		fmt.Println("❌ No providers configured.")
@@ -153,7 +154,7 @@ func runQuotaInteractive(appManager *AppManager, refresh bool) error {
 
 // findProvider finds a provider by name or UUID (exact match).
 func findProvider(appManager *AppManager, nameOrUUID string) (*typ.Provider, error) {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 	for _, p := range providers {
 		if p.Name == nameOrUUID || p.UUID == nameOrUUID {
 			return p, nil
@@ -173,7 +174,7 @@ func createQuotaManager(appManager *AppManager) (*quota.Manager, error) {
 
 	// Create quota manager with default config
 	qConfig := quota.DefaultConfig()
-	qm := quota.NewManager(qConfig, store, appManager, logrus.StandardLogger())
+	qm := quota.NewManager(qConfig, store, appManager.GetGlobalConfig(), logrus.StandardLogger())
 
 	// Register all built-in fetchers
 	fetcher.RegisterAll(qm, logrus.StandardLogger())

@@ -238,7 +238,7 @@ func promptForAgentTypeChoice(reader *bufio.Reader) (agent.AgentType, error) {
 
 // promptForAgentConfig prompts user for provider and model selection
 func promptForAgentConfig(reader *bufio.Reader, appManager *AppManager, req *agent.ApplyAgentRequest) error {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 	if len(providers) == 0 {
 		return fmt.Errorf("no providers configured. Please add a provider first using 'tingly-box config provider add'")
 	}
@@ -311,7 +311,7 @@ func resolveAgentConfigFromRules(appManager *AppManager, req *agent.ApplyAgentRe
 	fmt.Fprintln(os.Stderr,
 		"Config files will still be applied. Run 'tingly-box tui' to set up routing rules later.")
 
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 	if len(providers) == 0 || !isStdinTTY() {
 		// Nothing to prompt for, or stdin is non-interactive — proceed
 		// without provider/model. applyClaudeCode/applyOpenCode handles
@@ -483,7 +483,7 @@ func showPreview(appManager *AppManager, req *agent.ApplyAgentRequest) error {
 
 		// Get provider info
 		if req.Provider != "" {
-			if provider, err := appManager.GetProvider(req.Provider); err == nil && provider != nil {
+			if provider, err := appManager.GetGlobalConfig().GetProviderByUUID(req.Provider); err == nil && provider != nil {
 				fmt.Printf("  Provider:  %s\n", provider.Name)
 			}
 		}

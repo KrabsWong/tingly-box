@@ -21,6 +21,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/obs"
 	"github.com/tingly-dev/tingly-box/internal/server"
 	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 	"github.com/tingly-dev/tingly-box/pkg/daemon"
 	"github.com/tingly-dev/tingly-box/pkg/lock"
 	"github.com/tingly-dev/tingly-box/pkg/network"
@@ -222,7 +223,7 @@ func newKongShimCmd(debugSet bool) *cobra.Command {
 
 // runStatusCmd extracts status logic
 func runStatusCmd(appManager *AppManager) error {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 	appConfig := appManager.AppConfig()
 	fileLock := lock.NewFileLock(appConfig.ConfigDir())
 	serverRunning := fileLock.IsLocked()
