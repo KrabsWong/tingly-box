@@ -32,7 +32,7 @@ func TestPersistQuickstartProvider_ReentryUpdatesSameProvider(t *testing.T) {
 		t.Fatalf("second persist: %v", err)
 	}
 
-	providers := configuredProviders(mgr)
+	providers := configuredProviders(mgr.GetGlobalConfig())
 	if len(providers) != 1 {
 		t.Fatalf("providers = %d, want 1", len(providers))
 	}

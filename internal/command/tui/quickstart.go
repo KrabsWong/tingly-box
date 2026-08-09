@@ -19,16 +19,11 @@ import (
 // AppManager). Defined here as an interface so this package stays a leaf.
 // It covers Quickstart, Provider, Rule, and Agent modes.
 type TUIManager interface {
-	// Config + server lifecycle are the only host-owned capabilities. Provider,
+	// Config + server startup are the only host-owned capabilities. Provider,
 	// rule, profile, and agent operations are reached through internal/usecase.
 	GetGlobalConfig() *serverconfig.Config
-	GetServerPort() int
-	SetupServerWithPort(port int) error
-	StartServer() error
+	StartServerAt(port int) error
 }
-
-// QuickstartManager is kept as an alias for backward compatibility.
-type QuickstartManager = TUIManager
 
 // quickstartState is the wizard's accumulated state.
 type quickstartState struct {
@@ -88,12 +83,16 @@ func RunQuickstart(mgr TUIManager) error {
 
 // ---------- skip predicates ----------
 
-func qsHasNoProviders(s quickstartState) bool { return len(configuredProviders(s.mgr)) == 0 }
-func qsHasProviders(s quickstartState) bool   { return len(configuredProviders(s.mgr)) > 0 }
-func qsUsingExisting(s quickstartState) bool  { return s.useExisting }
+func qsHasNoProviders(s quickstartState) bool {
+	return len(configuredProviders(s.mgr.GetGlobalConfig())) == 0
+}
+func qsHasProviders(s quickstartState) bool {
+	return len(configuredProviders(s.mgr.GetGlobalConfig())) > 0
+}
+func qsUsingExisting(s quickstartState) bool { return s.useExisting }
 
-func configuredProviders(mgr TUIManager) []*typ.Provider {
-	return usecase.NewProviderUseCase(mgr.GetGlobalConfig()).List().Providers
+func configuredProviders(cfg *serverconfig.Config) []*typ.Provider {
+	return usecase.NewProviderUseCase(cfg).List().Providers
 }
 
 // ---------- steps ----------
@@ -117,7 +116,7 @@ func qsWelcome(ctx StepContext, s quickstartState) (quickstartState, StepResult,
 }
 
 func qsCredential(ctx StepContext, s quickstartState) (quickstartState, StepResult, error) {
-	providers := configuredProviders(s.mgr)
+	providers := configuredProviders(s.mgr.GetGlobalConfig())
 
 	items := []SelectItem[string]{
 		{Title: "Add new credential", Description: "Configure a fresh AI provider", Value: "new"},
@@ -327,7 +326,7 @@ func qsDetails(ctx StepContext, s quickstartState) (quickstartState, StepResult,
 
 	var existing *typ.Provider
 	if !s.providerCreated {
-		for _, provider := range configuredProviders(s.mgr) {
+		for _, provider := range configuredProviders(s.mgr.GetGlobalConfig()) {
 			if provider.Name == s.providerName {
 				existing = provider
 				break
@@ -637,7 +636,7 @@ func qsShowToken(ctx StepContext, s quickstartState) (quickstartState, StepResul
 		return s, StepContinue, nil
 	}
 
-	port := s.mgr.GetServerPort()
+	port := s.mgr.GetGlobalConfig().GetServerPort()
 	if port == 0 {
 		port = 12580
 	}
@@ -766,7 +765,7 @@ func agentItemDescription(info agent.AgentInfo) string {
 }
 
 func qsDone(ctx StepContext, s quickstartState) (quickstartState, StepResult, error) {
-	port := s.mgr.GetServerPort()
+	port := s.mgr.GetGlobalConfig().GetServerPort()
 	if port == 0 {
 		port = 12580
 	}
@@ -837,14 +836,11 @@ func isRuleConfigured(rule *typ.Rule, cfg *serverconfig.Config) bool {
 }
 
 func startServer(mgr TUIManager) error {
-	port := mgr.GetServerPort()
+	port := mgr.GetGlobalConfig().GetServerPort()
 	if port == 0 {
 		port = 12580
 	}
-	if err := mgr.SetupServerWithPort(port); err != nil {
-		return fmt.Errorf("failed to setup server: %w", err)
-	}
-	if err := mgr.StartServer(); err != nil {
+	if err := mgr.StartServerAt(port); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
 	}
 	fmt.Println(successStyle.Render(fmt.Sprintf("Server started at http://localhost:%d", port)))

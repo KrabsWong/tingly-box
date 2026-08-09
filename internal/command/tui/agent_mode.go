@@ -5,22 +5,23 @@ import (
 	"strings"
 
 	"github.com/tingly-dev/tingly-box/internal/agent"
+	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // RunAgentMode is the entry point for the Agent mode loop. Users pick an
 // agent type (from ListAgentInfo, so every supported scenario is listed)
 // and then choose Apply, Show, or Restore for that agent.
-func RunAgentMode(mgr TUIManager) error {
+func RunAgentMode(cfg *serverconfig.Config) error {
 	for {
-		info, err := pickAgent(mgr)
+		info, err := pickAgent(cfg)
 		if err != nil {
 			return err
 		}
 		if info == nil {
 			return nil
 		}
-		if err := runAgentSubmenu(mgr, *info); err != nil && err != ErrCancelled {
+		if err := runAgentSubmenu(cfg, *info); err != nil && err != ErrCancelled {
 			fmt.Println(errorStyle.Render(fmt.Sprintf("✗ %v", err)))
 		}
 	}
@@ -28,7 +29,7 @@ func RunAgentMode(mgr TUIManager) error {
 
 // pickAgent renders the list of all agents from ListAgentInfo, annotating
 // each with whether a routing rule is currently wired up for it.
-func pickAgent(mgr TUIManager) (*agent.AgentInfo, error) {
+func pickAgent(cfg *serverconfig.Config) (*agent.AgentInfo, error) {
 	infos := agent.ListAgentInfo()
 	if len(infos) == 0 {
 		fmt.Println(descStyle.Render("No agents registered."))
@@ -40,7 +41,7 @@ func pickAgent(mgr TUIManager) (*agent.AgentInfo, error) {
 	for _, info := range infos {
 		items = append(items, SelectItem[agent.AgentType]{
 			Title:       info.Name,
-			Description: agentStatusLabel(mgr, info),
+			Description: agentStatusLabel(cfg, info),
 			Value:       info.Type,
 		})
 	}
@@ -63,8 +64,7 @@ func pickAgent(mgr TUIManager) (*agent.AgentInfo, error) {
 	return nil, nil
 }
 
-func agentStatusLabel(mgr TUIManager, info agent.AgentInfo) string {
-	cfg := mgr.GetGlobalConfig()
+func agentStatusLabel(cfg *serverconfig.Config, info agent.AgentInfo) string {
 	if cfg == nil {
 		return info.Description
 	}
@@ -88,7 +88,7 @@ func agentStatusLabel(mgr TUIManager, info agent.AgentInfo) string {
 	return "not configured"
 }
 
-func runAgentSubmenu(mgr TUIManager, info agent.AgentInfo) error {
+func runAgentSubmenu(cfg *serverconfig.Config, info agent.AgentInfo) error {
 	for {
 		items := []SelectItem[string]{
 			{Title: "Apply", Description: "Pick provider + model and write config files", Value: "apply"},
@@ -111,11 +111,11 @@ func runAgentSubmenu(mgr TUIManager, info agent.AgentInfo) error {
 		var opErr error
 		switch r.Value {
 		case "apply":
-			opErr = agentApply(mgr, info)
+			opErr = agentApply(cfg, info)
 		case "show":
-			opErr = agentShow(mgr, info)
+			opErr = agentShow(cfg, info)
 		case "restore":
-			opErr = agentRestore(mgr, info)
+			opErr = agentRestore(cfg, info)
 		}
 		if opErr != nil && opErr != ErrCancelled {
 			fmt.Println(errorStyle.Render(fmt.Sprintf("✗ %v", opErr)))
@@ -123,7 +123,7 @@ func runAgentSubmenu(mgr TUIManager, info agent.AgentInfo) error {
 	}
 }
 
-func agentApply(mgr TUIManager, info agent.AgentInfo) error {
+func agentApply(cfg *serverconfig.Config, info agent.AgentInfo) error {
 	// Apply is fundamentally "point the agent CLI at tb" — it writes the
 	// agent's config files (e.g. ~/.claude/settings.json) so the agent
 	// talks to this box. Picking provider+model is a separate concern:
@@ -147,11 +147,11 @@ func agentApply(mgr TUIManager, info agent.AgentInfo) error {
 	}
 
 	if wireRule.Value {
-		p, err := pickProvider(mgr, "Provider for "+info.Name+":")
+		p, err := pickProvider(cfg, "Provider for "+info.Name+":")
 		if err != nil || p == nil {
 			return err
 		}
-		model, err := pickProviderModel(mgr, p, "Model for "+info.Name+":")
+		model, err := pickProviderModel(cfg, p, "Model for "+info.Name+":")
 		if err != nil || model == "" {
 			return err
 		}
@@ -180,7 +180,7 @@ func agentApply(mgr TUIManager, info agent.AgentInfo) error {
 	}
 
 	res, err := WithSpinner(fmt.Sprintf("Applying %s configuration", info.Name), func() (*agent.ApplyAgentResult, error) {
-		return usecase.NewAgentUseCase(mgr.GetGlobalConfig(), "localhost").Apply(req)
+		return usecase.NewAgentUseCase(cfg, "localhost").Apply(req)
 	})
 	if err != nil {
 		return err
@@ -196,8 +196,7 @@ func agentApply(mgr TUIManager, info agent.AgentInfo) error {
 	return nil
 }
 
-func agentShow(mgr TUIManager, info agent.AgentInfo) error {
-	cfg := mgr.GetGlobalConfig()
+func agentShow(cfg *serverconfig.Config, info agent.AgentInfo) error {
 	if cfg == nil {
 		return fmt.Errorf("global config not available")
 	}
@@ -226,7 +225,7 @@ func agentShow(mgr TUIManager, info agent.AgentInfo) error {
 	return nil
 }
 
-func agentRestore(mgr TUIManager, info agent.AgentInfo) error {
+func agentRestore(cfg *serverconfig.Config, info agent.AgentInfo) error {
 	fmt.Println(descStyle.Render("Files restored from their most recent backup:"))
 	for _, f := range info.ConfigFiles {
 		fmt.Println(descStyle.Render("  - " + f))
@@ -235,7 +234,7 @@ func agentRestore(mgr TUIManager, info agent.AgentInfo) error {
 	if err != nil || !cfm.IsConfirm() || !cfm.Value {
 		return nil
 	}
-	res, err := usecase.NewAgentUseCase(mgr.GetGlobalConfig(), "localhost").Restore(&agent.RestoreAgentRequest{
+	res, err := usecase.NewAgentUseCase(cfg, "localhost").Restore(&agent.RestoreAgentRequest{
 		AgentType: info.Type,
 		Force:     true,
 	})

@@ -78,40 +78,24 @@ untouched and remain the CI path.
 
 ## 4. The TUIManager interface
 
-Modes need more host surface than the wizard did. Rather than passing
-`*AppManager` directly (which would couple the TUI package to the
-command package), we widened the host interface — kept the
-`QuickstartManager` name as a type alias for back-compat:
+Only the top-level menu and QuickStart need a host abstraction. Rather than
+passing `*AppManager` directly (which would couple the TUI package to the
+command package), they depend on the two host-owned capabilities that cannot
+be provided by `serverconfig.Config` itself:
 
 ```go
 type TUIManager interface {
-    // Providers
-    ListProviders() []*typ.Provider
-    GetProvider(name string) (*typ.Provider, error)
-    AddProvider(name, apiBase, token string, apiStyle protocol.APIStyle) (string, error)
-    UpdateProviderByUUID(uuid string, provider *typ.Provider) error
-    DeleteProviderByUUID(uuid string) error
-    FetchAndSaveProviderModels(providerUUID string) error
-
-    // Rules
-    ListRules() []typ.Rule
-    GetRuleByUUID(uuid string) *typ.Rule
-    AddRule(rule typ.Rule) error
-    UpdateRule(uuid string, rule typ.Rule) error
-    DeleteRule(uuid string) error
-
-    // Config + server
-    SaveConfig() error
     GetGlobalConfig() *serverconfig.Config
-    GetServerPort() int
-    SetupServerWithPort(port int) error
-    StartServer() error
+    StartServerAt(port int) error
 }
 ```
 
-Everything on this interface already existed on `AppManager` — the TUI
-doesn't drive any new business logic, it just composes the existing
-methods.
+Provider, Rule, and Agent modes take `*serverconfig.Config` directly and
+construct their concrete use-cases from it. They do not depend on server
+lifecycle. QuickStart reads the configured port from that config and invokes
+one atomic `StartServerAt` operation; setup/start intermediate state is kept
+inside the command host. There is deliberately no `QuickstartManager` alias:
+the single interface has one meaning and one name.
 
 ---
 

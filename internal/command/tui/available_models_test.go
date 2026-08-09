@@ -22,9 +22,7 @@ type tuiHarnessManager struct {
 }
 
 func (m *tuiHarnessManager) GetGlobalConfig() *serverconfig.Config { return m.ac.GetGlobalConfig() }
-func (m *tuiHarnessManager) GetServerPort() int                    { return 0 }
-func (m *tuiHarnessManager) SetupServerWithPort(int) error         { return nil }
-func (m *tuiHarnessManager) StartServer() error                    { return nil }
+func (m *tuiHarnessManager) StartServerAt(int) error               { return nil }
 
 // newTUIHarness builds a TUIManager backed by a real AppConfig so the
 // model-lookup cascade can be exercised end-to-end without a server. The
@@ -75,7 +73,7 @@ func TestAvailableModels_PrefersDBOverTemplate(t *testing.T) {
 		t.Fatalf("SaveModels: %v", err)
 	}
 
-	got := availableModels(mgr, p)
+	got := availableModels(mgr.GetGlobalConfig(), p)
 	if len(got) != 2 || got[0] != "dbm-1" || got[1] != "dbm-2" {
 		t.Errorf("expected DB models, got %v", got)
 	}
@@ -89,7 +87,7 @@ func TestAvailableModels_FallsBackToTemplate(t *testing.T) {
 	mgr := newTUIHarness(t)
 	p := addTestProvider(t, mgr, "anthropic", "https://api.anthropic.com", protocol.APIStyleAnthropic)
 
-	got := availableModels(mgr, p)
+	got := availableModels(mgr.GetGlobalConfig(), p)
 	if len(got) == 0 {
 		t.Fatalf("expected template fallback to provide Anthropic models, got empty list")
 	}
@@ -102,7 +100,7 @@ func TestAvailableModels_EmptyWhenNoSource(t *testing.T) {
 	mgr := newTUIHarness(t)
 	p := addTestProvider(t, mgr, "custom", "https://api.totally-made-up-vendor.example/v1", protocol.APIStyleOpenAI)
 
-	if got := availableModels(mgr, p); len(got) != 0 {
+	if got := availableModels(mgr.GetGlobalConfig(), p); len(got) != 0 {
 		t.Errorf("expected empty list for unknown provider, got %v", got)
 	}
 }

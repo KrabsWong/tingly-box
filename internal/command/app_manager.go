@@ -66,6 +66,14 @@ func (am *AppManager) SetupServerWithPort(port int) error {
 	return am.SetupServer(port)
 }
 
+// StartServerAt initializes and starts the in-process server used by the TUI.
+func (am *AppManager) StartServerAt(port int) error {
+	if err := am.SetupServer(port); err != nil {
+		return err
+	}
+	return am.StartServer()
+}
+
 // GetServerManager returns the server manager instance.
 func (am *AppManager) GetServerManager() *ServerManager {
 	return am.serverManager

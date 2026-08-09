@@ -9,6 +9,7 @@ import (
 // and is dropped into that mode. After a mode returns, the menu is
 // shown again until the user exits.
 func RunTUI(mgr TUIManager) error {
+	cfg := mgr.GetGlobalConfig()
 	for {
 		items := []SelectItem[string]{
 			{
@@ -56,15 +57,15 @@ func RunTUI(mgr TUIManager) error {
 				printModeError("QuickStart", err)
 			}
 		case "provider":
-			if err := RunProviderMode(mgr); err != nil {
+			if err := RunProviderMode(cfg); err != nil {
 				printModeError("Provider", err)
 			}
 		case "rule":
-			if err := RunRuleMode(mgr); err != nil {
+			if err := RunRuleMode(cfg); err != nil {
 				printModeError("Rule", err)
 			}
 		case "agent":
-			if err := RunAgentMode(mgr); err != nil {
+			if err := RunAgentMode(cfg); err != nil {
 				printModeError("Agent", err)
 			}
 		case "exit":

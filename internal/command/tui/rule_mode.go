@@ -5,12 +5,13 @@ import (
 	"fmt"
 
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
+	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // RunRuleMode is the entry point for the Rule mode loop.
-func RunRuleMode(mgr TUIManager) error {
+func RunRuleMode(cfg *serverconfig.Config) error {
 	for {
 		items := []SelectItem[string]{
 			{Title: "List", Description: "Show all routing rules", Value: "list"},
@@ -34,13 +35,13 @@ func RunRuleMode(mgr TUIManager) error {
 		var opErr error
 		switch r.Value {
 		case "list":
-			opErr = ruleList(mgr)
+			opErr = ruleList(cfg)
 		case "add":
-			opErr = ruleAdd(mgr)
+			opErr = ruleAdd(cfg)
 		case "edit":
-			opErr = ruleEdit(mgr)
+			opErr = ruleEdit(cfg)
 		case "delete":
-			opErr = ruleDelete(mgr)
+			opErr = ruleDelete(cfg)
 		}
 		if opErr != nil && opErr != ErrCancelled {
 			fmt.Println(errorStyle.Render(fmt.Sprintf("✗ %v", opErr)))
@@ -48,8 +49,8 @@ func RunRuleMode(mgr TUIManager) error {
 	}
 }
 
-func ruleList(mgr TUIManager) error {
-	rules := usecase.NewRuleUseCase(mgr.GetGlobalConfig()).List().Rules
+func ruleList(cfg *serverconfig.Config) error {
+	rules := usecase.NewRuleUseCase(cfg).List().Rules
 	if len(rules) == 0 {
 		fmt.Println(descStyle.Render("No rules configured."))
 		Pause("")
@@ -59,7 +60,7 @@ func ruleList(mgr TUIManager) error {
 	fmt.Println(promptStyle.Render(fmt.Sprintf("%d rule(s):", len(rules))))
 	for i := range rules {
 		r := &rules[i]
-		svc := formatRuleService(mgr, r)
+		svc := formatRuleService(cfg, r)
 		fmt.Printf("  %d. %s  %s\n",
 			i+1,
 			valueStyle.Render(r.RequestModel),
@@ -72,13 +73,13 @@ func ruleList(mgr TUIManager) error {
 	return nil
 }
 
-func formatRuleService(mgr TUIManager, r *typ.Rule) string {
+func formatRuleService(cfg *serverconfig.Config, r *typ.Rule) string {
 	if len(r.Services) == 0 {
 		return "(none)"
 	}
 	s := r.Services[0]
 	label := s.Provider
-	if result, err := usecase.NewProviderUseCase(mgr.GetGlobalConfig()).Get(usecase.GetProviderRequest{UUID: s.Provider}); err == nil {
+	if result, err := usecase.NewProviderUseCase(cfg).Get(usecase.GetProviderRequest{UUID: s.Provider}); err == nil {
 		label = result.Provider.Name
 	}
 	extra := ""
@@ -88,7 +89,7 @@ func formatRuleService(mgr TUIManager, r *typ.Rule) string {
 	return fmt.Sprintf("%s:%s%s", label, s.Model, extra)
 }
 
-func ruleAdd(mgr TUIManager) error {
+func ruleAdd(cfg *serverconfig.Config) error {
 	scn, ok, err := pickScenario(typ.ScenarioOpenAI)
 	if err != nil || !ok {
 		return err
@@ -99,18 +100,18 @@ func ruleAdd(mgr TUIManager) error {
 		return nil
 	}
 
-	svc, err := pickRuleService(mgr)
+	svc, err := pickRuleService(cfg)
 	if err != nil || svc == nil {
 		return err
 	}
 
 	cfm, err := Confirm("Save this rule?", ConfirmOptions{DefaultYes: true, CanGoBack: true,
-		Description: fmt.Sprintf("%s · %s → %s:%s", rmR.Value, scn, providerName(mgr, svc.Provider), svc.Model)})
+		Description: fmt.Sprintf("%s · %s → %s:%s", rmR.Value, scn, providerName(cfg, svc.Provider), svc.Model)})
 	if err != nil || !cfm.IsConfirm() || !cfm.Value {
 		return nil
 	}
 
-	ruleUC := usecase.NewRuleUseCase(mgr.GetGlobalConfig())
+	ruleUC := usecase.NewRuleUseCase(cfg)
 	res, err := ruleUC.Create(usecase.CreateRuleRequest{
 		Scenario:     scn,
 		RequestModel: rmR.Value,
@@ -129,25 +130,25 @@ func ruleAdd(mgr TUIManager) error {
 	return nil
 }
 
-func ruleEdit(mgr TUIManager) error {
-	rule, err := pickRule(mgr, "Select rule to edit:")
+func ruleEdit(cfg *serverconfig.Config) error {
+	rule, err := pickRule(cfg, "Select rule to edit:")
 	if err != nil || rule == nil {
 		return err
 	}
-	fmt.Println(descStyle.Render(fmt.Sprintf("Current service: %s", formatRuleService(mgr, rule))))
+	fmt.Println(descStyle.Render(fmt.Sprintf("Current service: %s", formatRuleService(cfg, rule))))
 
-	svc, err := pickRuleService(mgr)
+	svc, err := pickRuleService(cfg)
 	if err != nil || svc == nil {
 		return err
 	}
 
 	cfm, err := Confirm("Apply update?", ConfirmOptions{DefaultYes: true, CanGoBack: true,
-		Description: fmt.Sprintf("new service: %s:%s", providerName(mgr, svc.Provider), svc.Model)})
+		Description: fmt.Sprintf("new service: %s:%s", providerName(cfg, svc.Provider), svc.Model)})
 	if err != nil || !cfm.IsConfirm() || !cfm.Value {
 		return nil
 	}
 
-	ruleUC := usecase.NewRuleUseCase(mgr.GetGlobalConfig())
+	ruleUC := usecase.NewRuleUseCase(cfg)
 	if _, err := ruleUC.UpdateService(usecase.UpdateServiceRequest{
 		UUID:     rule.UUID,
 		Services: []*loadbalance.Service{svc},
@@ -159,8 +160,8 @@ func ruleEdit(mgr TUIManager) error {
 	return nil
 }
 
-func ruleDelete(mgr TUIManager) error {
-	rule, err := pickRule(mgr, "Select rule to delete:")
+func ruleDelete(cfg *serverconfig.Config) error {
+	rule, err := pickRule(cfg, "Select rule to delete:")
 	if err != nil || rule == nil {
 		return err
 	}
@@ -171,7 +172,7 @@ func ruleDelete(mgr TUIManager) error {
 		return nil
 	}
 
-	ruleUC := usecase.NewRuleUseCase(mgr.GetGlobalConfig())
+	ruleUC := usecase.NewRuleUseCase(cfg)
 	if err := ruleUC.Delete(usecase.DeleteRuleRequest{UUID: rule.UUID}); err != nil {
 		return err
 	}
@@ -180,8 +181,8 @@ func ruleDelete(mgr TUIManager) error {
 	return nil
 }
 
-func pickRule(mgr TUIManager, prompt string) (*typ.Rule, error) {
-	ruleUC := usecase.NewRuleUseCase(mgr.GetGlobalConfig())
+func pickRule(cfg *serverconfig.Config, prompt string) (*typ.Rule, error) {
+	ruleUC := usecase.NewRuleUseCase(cfg)
 	rules := ruleUC.List().Rules
 	if len(rules) == 0 {
 		fmt.Println(descStyle.Render("No rules configured."))
@@ -193,7 +194,7 @@ func pickRule(mgr TUIManager, prompt string) (*typ.Rule, error) {
 		r := &rules[i]
 		items = append(items, SelectItem[string]{
 			Title:       r.RequestModel,
-			Description: fmt.Sprintf("%s · %s", r.Scenario, formatRuleService(mgr, r)),
+			Description: fmt.Sprintf("%s · %s", r.Scenario, formatRuleService(cfg, r)),
 			Value:       r.UUID,
 		})
 	}
@@ -211,12 +212,12 @@ func pickRule(mgr TUIManager, prompt string) (*typ.Rule, error) {
 	return &result.Rule, nil
 }
 
-func pickRuleService(mgr TUIManager) (*loadbalance.Service, error) {
-	p, err := pickProvider(mgr, "Provider for this rule:")
+func pickRuleService(cfg *serverconfig.Config) (*loadbalance.Service, error) {
+	p, err := pickProvider(cfg, "Provider for this rule:")
 	if err != nil || p == nil {
 		return nil, err
 	}
-	model, err := pickProviderModel(mgr, p, "Model on "+p.Name+":")
+	model, err := pickProviderModel(cfg, p, "Model on "+p.Name+":")
 	if err != nil || model == "" {
 		return nil, err
 	}
@@ -233,14 +234,14 @@ func pickRuleService(mgr TUIManager) (*loadbalance.Service, error) {
 // user gets a picker rather than a free-form Input. The list still
 // includes a "Custom…" escape hatch for vendors that don't return a
 // listable catalog. Returns ("", nil) on cancel.
-func pickProviderModel(mgr TUIManager, p *typ.Provider, prompt string) (string, error) {
-	models := availableModels(mgr, p)
+func pickProviderModel(cfg *serverconfig.Config, p *typ.Provider, prompt string) (string, error) {
+	models := availableModels(cfg, p)
 	if len(models) == 0 {
 		_, _ = WithSpinner("Fetching models from "+p.Name, func() (struct{}, error) {
-			_, err := usecase.NewProviderUseCase(mgr.GetGlobalConfig()).RefreshModels(usecase.RefreshModelsRequest{UUID: p.UUID})
+			_, err := usecase.NewProviderUseCase(cfg).RefreshModels(usecase.RefreshModelsRequest{UUID: p.UUID})
 			return struct{}{}, err
 		})
-		models = availableModels(mgr, p)
+		models = availableModels(cfg, p)
 	}
 
 	if len(models) == 0 {
@@ -285,8 +286,7 @@ func pickProviderModel(mgr TUIManager, p *typ.Provider, prompt string) (string, 
 //
 // Without the second step the UI shows an empty list for providers whose
 // catalogs only exist as build-time data — exactly the case the user hit.
-func availableModels(mgr TUIManager, p *typ.Provider) []string {
-	cfg := mgr.GetGlobalConfig()
+func availableModels(cfg *serverconfig.Config, p *typ.Provider) []string {
 	if cfg == nil {
 		return nil
 	}
@@ -303,8 +303,8 @@ func availableModels(mgr TUIManager, p *typ.Provider) []string {
 	return nil
 }
 
-func providerName(mgr TUIManager, uuid string) string {
-	if result, err := usecase.NewProviderUseCase(mgr.GetGlobalConfig()).Get(usecase.GetProviderRequest{UUID: uuid}); err == nil {
+func providerName(cfg *serverconfig.Config, uuid string) string {
+	if result, err := usecase.NewProviderUseCase(cfg).Get(usecase.GetProviderRequest{UUID: uuid}); err == nil {
 		return result.Provider.Name
 	}
 	return uuid

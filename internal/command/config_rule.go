@@ -32,7 +32,7 @@ type ConfigRuleCmdKong struct {
 type ConfigRuleInteractiveCmdKong struct{}
 
 func (c *ConfigRuleInteractiveCmdKong) Run(appManager *AppManager) error {
-	return tui.RunRuleMode(appManager)
+	return tui.RunRuleMode(appManager.GetGlobalConfig())
 }
 
 // ConfigRuleAddCmdKong adds a rule. The flag form is the CI path: provide
