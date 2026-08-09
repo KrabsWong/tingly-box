@@ -11,6 +11,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // tuiHarnessManager satisfies TUIManager by delegating to an AppConfig. It
@@ -20,45 +21,10 @@ type tuiHarnessManager struct {
 	ac *config.AppConfig
 }
 
-func (m *tuiHarnessManager) ListProviders() []*typ.Provider { return m.ac.ListProviders() }
-func (m *tuiHarnessManager) GetProvider(id string) (*typ.Provider, error) {
-	return m.ac.GetProviderByUUID(id)
-}
-func (m *tuiHarnessManager) AddProvider(name, apiBase, token string, apiStyle protocol.APIStyle) (string, error) {
-	p := &typ.Provider{
-		Name: name, APIBase: apiBase, Token: token, APIStyle: apiStyle,
-		AuthType: typ.AuthTypeAPIKey, Enabled: true,
-	}
-	if err := m.ac.AddProvider(p); err != nil {
-		return "", err
-	}
-	return p.UUID, nil
-}
-func (m *tuiHarnessManager) UpdateProviderByUUID(uuid string, p *typ.Provider) error {
-	return m.ac.GetGlobalConfig().UpdateProvider(uuid, p)
-}
-func (m *tuiHarnessManager) DeleteProviderByUUID(uuid string) error {
-	return m.ac.GetGlobalConfig().DeleteProvider(uuid)
-}
-func (m *tuiHarnessManager) FetchAndSaveProviderModels(uuid string) error {
-	return m.ac.FetchAndSaveProviderModels(uuid)
-}
-func (m *tuiHarnessManager) ListRules() []typ.Rule { return m.ac.GetGlobalConfig().Rules }
-func (m *tuiHarnessManager) GetRuleByUUID(uuid string) *typ.Rule {
-	return m.ac.GetGlobalConfig().GetRuleByUUID(uuid)
-}
-func (m *tuiHarnessManager) AddRule(r typ.Rule) error { return m.ac.GetGlobalConfig().AddRule(r) }
-func (m *tuiHarnessManager) UpdateRule(uuid string, r typ.Rule) error {
-	return m.ac.GetGlobalConfig().UpdateRule(uuid, r)
-}
-func (m *tuiHarnessManager) DeleteRule(uuid string) error {
-	return m.ac.GetGlobalConfig().DeleteRule(uuid)
-}
-func (m *tuiHarnessManager) SaveConfig() error                          { return m.ac.Save() }
-func (m *tuiHarnessManager) GetGlobalConfig() *serverconfig.Config       { return m.ac.GetGlobalConfig() }
-func (m *tuiHarnessManager) GetServerPort() int                          { return 0 }
-func (m *tuiHarnessManager) SetupServerWithPort(int) error               { return nil }
-func (m *tuiHarnessManager) StartServer() error                          { return nil }
+func (m *tuiHarnessManager) GetGlobalConfig() *serverconfig.Config { return m.ac.GetGlobalConfig() }
+func (m *tuiHarnessManager) GetServerPort() int                    { return 0 }
+func (m *tuiHarnessManager) SetupServerWithPort(int) error         { return nil }
+func (m *tuiHarnessManager) StartServer() error                    { return nil }
 
 // newTUIHarness builds a TUIManager backed by a real AppConfig so the
 // model-lookup cascade can be exercised end-to-end without a server. The
@@ -87,19 +53,23 @@ func newTUIHarness(t *testing.T) TUIManager {
 	return &tuiHarnessManager{ac: ac}
 }
 
+func addTestProvider(t *testing.T, mgr TUIManager, name, apiBase string, apiStyle protocol.APIStyle) *typ.Provider {
+	t.Helper()
+	result, err := usecase.NewProviderUseCase(mgr.GetGlobalConfig()).Add(usecase.CreateProviderRequest{
+		Name: name, APIBase: apiBase, Token: "tok", APIStyle: apiStyle,
+	})
+	if err != nil {
+		t.Fatalf("ProviderUseCase.Add: %v", err)
+	}
+	return result.Provider
+}
+
 // TestAvailableModels_PrefersDBOverTemplate: when the DB has fresh models
 // from a /v1/models call, they win over the embedded template list. We
 // must not silently return template defaults when fresh API data exists.
 func TestAvailableModels_PrefersDBOverTemplate(t *testing.T) {
 	mgr := newTUIHarness(t)
-	uuid, err := mgr.AddProvider("openai", "https://api.openai.com", "tok", protocol.APIStyleOpenAI)
-	if err != nil {
-		t.Fatalf("AddProvider: %v", err)
-	}
-	p, err := mgr.GetProvider(uuid)
-	if err != nil {
-		t.Fatalf("GetProvider: %v", err)
-	}
+	p := addTestProvider(t, mgr, "openai", "https://api.openai.com", protocol.APIStyleOpenAI)
 
 	if err := mgr.GetGlobalConfig().GetModelManager().SaveModels(p, []string{"dbm-1", "dbm-2"}, db.ModelSourceAPI); err != nil {
 		t.Fatalf("SaveModels: %v", err)
@@ -117,14 +87,7 @@ func TestAvailableModels_PrefersDBOverTemplate(t *testing.T) {
 // success but no DB write → caller had to read template itself).
 func TestAvailableModels_FallsBackToTemplate(t *testing.T) {
 	mgr := newTUIHarness(t)
-	uuid, err := mgr.AddProvider("anthropic", "https://api.anthropic.com", "tok", protocol.APIStyleAnthropic)
-	if err != nil {
-		t.Fatalf("AddProvider: %v", err)
-	}
-	p, err := mgr.GetProvider(uuid)
-	if err != nil {
-		t.Fatalf("GetProvider: %v", err)
-	}
+	p := addTestProvider(t, mgr, "anthropic", "https://api.anthropic.com", protocol.APIStyleAnthropic)
 
 	got := availableModels(mgr, p)
 	if len(got) == 0 {
@@ -137,14 +100,7 @@ func TestAvailableModels_FallsBackToTemplate(t *testing.T) {
 // decide between a Select and a free-form Input.
 func TestAvailableModels_EmptyWhenNoSource(t *testing.T) {
 	mgr := newTUIHarness(t)
-	uuid, err := mgr.AddProvider("custom", "https://api.totally-made-up-vendor.example/v1", "tok", protocol.APIStyleOpenAI)
-	if err != nil {
-		t.Fatalf("AddProvider: %v", err)
-	}
-	p, err := mgr.GetProvider(uuid)
-	if err != nil {
-		t.Fatalf("GetProvider: %v", err)
-	}
+	p := addTestProvider(t, mgr, "custom", "https://api.totally-made-up-vendor.example/v1", protocol.APIStyleOpenAI)
 
 	if got := availableModels(mgr, p); len(got) != 0 {
 		t.Errorf("expected empty list for unknown provider, got %v", got)

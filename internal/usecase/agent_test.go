@@ -180,6 +180,31 @@ func TestAgentUseCase_ResolveRouting(t *testing.T) {
 		if res.ServiceUsable {
 			t.Error("expected ServiceUsable=false when the service has no model")
 		}
+		if res.ProviderUUID != provider.UUID {
+			t.Errorf("ProviderUUID = %q, want unusable service identity %q", res.ProviderUUID, provider.UUID)
+		}
+	})
+
+	t.Run("rule without services is still found", func(t *testing.T) {
+		rule := cfg.GetRuleByRequestModelAndScenario("tingly-codex", typ.ScenarioCodex)
+		if rule == nil {
+			t.Fatal("expected migrated Codex rule")
+		}
+		rule.Services = nil
+		if err := cfg.UpdateRule(rule.UUID, *rule); err != nil {
+			t.Fatalf("UpdateRule: %v", err)
+		}
+
+		res, err := uc.ResolveRouting(ResolveRoutingRequest{AgentType: agent.AgentTypeCodex})
+		if err != nil {
+			t.Fatalf("ResolveRouting: %v", err)
+		}
+		if !res.RuleFound {
+			t.Fatal("expected RuleFound=true for an existing empty rule")
+		}
+		if res.ServiceUsable {
+			t.Error("expected ServiceUsable=false for an empty rule")
+		}
 	})
 }
 

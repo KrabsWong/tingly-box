@@ -537,34 +537,27 @@ func listAgentTypes() error {
 
 // showAgentConfig shows current configuration for an agent type
 func showAgentConfig(appManager *AppManager, agentType agent.AgentType) error {
-	globalConfig := appManager.GetGlobalConfig()
-
-	info, ok := agent.GetAgentInfo(agentType)
-	if !ok {
-		return fmt.Errorf("unknown agent type: %s", agentType)
-	}
-
-	fmt.Printf("Agent:  %s\n", info.Name)
-	fmt.Printf("Scenario:  %s\n", info.Scenario)
-	fmt.Println()
-
-	requestModel, _, err := usecase.NewAgentUseCase(globalConfig, "localhost").RoutingKey(agentType)
+	result, err := usecase.NewAgentUseCase(appManager.GetGlobalConfig(), "localhost").Show(usecase.ShowRequest{
+		AgentType: agentType,
+	})
 	if err != nil {
 		return err
 	}
 
-	rule := globalConfig.GetRuleByRequestModelAndScenario(requestModel, typ.RuleScenario(info.Scenario))
-	if rule != nil {
+	fmt.Printf("Agent:  %s\n", result.Info.Name)
+	fmt.Printf("Scenario:  %s\n", result.Info.Scenario)
+	fmt.Println()
+
+	if result.Routing.RuleFound {
 		fmt.Println("Routing rule:")
-		fmt.Printf("  Request Model:  %s\n", rule.RequestModel)
-		fmt.Printf("  Response Model:  %s\n", rule.ResponseModel)
-		fmt.Printf("  Active:  %v\n", rule.Active)
-		if len(rule.Services) > 0 {
-			service := rule.Services[0]
-			if provider, err := globalConfig.GetProviderByUUID(service.Provider); err == nil && provider != nil {
-				fmt.Printf("  Provider:  %s\n", provider.Name)
-			}
-			fmt.Printf("  Model:  %s\n", service.Model)
+		fmt.Printf("  Request Model:  %s\n", result.Routing.RequestModel)
+		fmt.Printf("  Response Model:  %s\n", result.Routing.ResponseModel)
+		fmt.Printf("  Active:  %v\n", result.Routing.RuleActive)
+		if result.Routing.ProviderName != "" {
+			fmt.Printf("  Provider:  %s\n", result.Routing.ProviderName)
+		}
+		if result.Routing.Model != "" {
+			fmt.Printf("  Model:  %s\n", result.Routing.Model)
 		}
 	} else {
 		fmt.Println("No routing rule configured.")
@@ -572,7 +565,7 @@ func showAgentConfig(appManager *AppManager, agentType agent.AgentType) error {
 
 	fmt.Println()
 	fmt.Println("Config files:")
-	for _, f := range info.ConfigFiles {
+	for _, f := range result.Info.ConfigFiles {
 		fmt.Printf("  - %s\n", f)
 	}
 

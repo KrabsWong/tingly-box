@@ -320,7 +320,7 @@ func TestQuickstartConfigPersistence(t *testing.T) {
 			t.Fatalf("Failed to add provider: %v", err)
 		}
 
-		err = appManager1.SaveConfig()
+		err = appManager1.AppConfig().Save()
 		if err != nil {
 			t.Fatalf("Failed to save config: %v", err)
 		}

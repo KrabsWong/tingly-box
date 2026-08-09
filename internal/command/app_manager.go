@@ -13,9 +13,9 @@ import (
 	"github.com/tingly-dev/tingly-box/pkg/lock"
 )
 
-// AppManager manages all application state and operations.
-// It serves as the single source of truth for business logic that can be
-// used by both CLI (cobra commands) and GUI (Wails services).
+// AppManager is the command process host: it owns AppConfig and server
+// lifecycle, plus a small compatibility surface still consumed by Wails.
+// Domain behavior belongs in internal/usecase rather than growing here.
 type AppManager struct {
 	appConfig     *config.AppConfig
 	serverManager *ServerManager
@@ -45,21 +45,9 @@ func (am *AppManager) AppConfig() *config.AppConfig {
 	return am.appConfig
 }
 
-// SaveConfig saves the current configuration to disk.
-func (am *AppManager) SaveConfig() error {
-	return am.appConfig.Save()
-}
-
 // GetGlobalConfig returns the global configuration manager.
 func (am *AppManager) GetGlobalConfig() *serverconfig.Config {
 	return am.appConfig.GetGlobalConfig()
-}
-
-// FetchAndSaveProviderModels fetches models from a provider and saves them.
-func (am *AppManager) FetchAndSaveProviderModels(providerUUID string) error {
-	uc := usecase.NewProviderUseCase(am.appConfig.GetGlobalConfig())
-	_, err := uc.RefreshModels(usecase.RefreshModelsRequest{UUID: providerUUID})
-	return err
 }
 
 // ============
@@ -95,11 +83,8 @@ func (am *AppManager) StartServer() error {
 // Provider Management
 // ============
 //
-// AddProvider/DeleteProviderByUUID/UpdateProviderByUUID delegate to
-// usecase.ProviderUseCase (internal/usecase/provider.go) for the same
-// reason as the Rule methods above: kept for tui.TUIManager and
-// gui/wails3/services/tingly_service.go compatibility, logic lives in the
-// use-case now.
+// The Wails compatibility service still consumes this small read/add surface.
+// CLI and TUI workflows construct ProviderUseCase directly.
 
 // AddProvider adds a new AI provider with the given configuration.
 // Note: Provider name is not used as a unique identifier - multiple providers
@@ -120,29 +105,6 @@ func (am *AppManager) AddProvider(name, apiBase, token string, apiStyle protocol
 func (am *AppManager) DeleteProvider(name string) error {
 	if err := am.appConfig.DeleteProvider(name); err != nil {
 		return fmt.Errorf("failed to delete provider: %w", err)
-	}
-	return nil
-}
-
-// DeleteProviderByUUID removes an AI provider by UUID.
-func (am *AppManager) DeleteProviderByUUID(uuid string) error {
-	uc := usecase.NewProviderUseCase(am.appConfig.GetGlobalConfig())
-	if err := uc.Delete(usecase.DeleteProviderRequest{UUID: uuid}); err != nil {
-		return fmt.Errorf("failed to delete provider: %w", err)
-	}
-	return nil
-}
-
-// UpdateProviderByUUID updates an existing provider by UUID (full replace —
-// matches usecase.ProviderUseCase.Update's semantics).
-func (am *AppManager) UpdateProviderByUUID(uuid string, provider *typ.Provider) error {
-	uc := usecase.NewProviderUseCase(am.appConfig.GetGlobalConfig())
-	_, err := uc.Update(usecase.UpdateProviderRequest{
-		UUID: uuid, Name: provider.Name, APIBase: provider.APIBase,
-		Token: provider.Token, APIStyle: provider.APIStyle, ProxyURL: provider.ProxyURL,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to update provider: %w", err)
 	}
 	return nil
 }
@@ -171,29 +133,8 @@ func (am *AppManager) GetProviderByName(name string) (*typ.Provider, error) {
 // Rule Management
 // ============
 //
-// These delegate to usecase.RuleUseCase (internal/usecase/rule.go), which
-// owns the actual pre-check/UUID-generation/validation logic. Kept here
-// with their historical signatures because AppManager must satisfy
-// tui.TUIManager (internal/command/tui/quickstart.go) and is called
-// directly by gui/wails3/services/tingly_service.go — CLI and TUI code
-// that builds its own request now calls usecase.NewRuleUseCase(...)
-// directly instead of going through these.
-
-// AddRule adds a new routing rule. The rule's UUID, if already set, is
-// ignored — Create always mints a fresh one; only Scenario, RequestModel,
-// and Services are used from the input.
-func (am *AppManager) AddRule(rule typ.Rule) error {
-	uc := usecase.NewRuleUseCase(am.appConfig.GetGlobalConfig())
-	_, err := uc.Create(usecase.CreateRuleRequest{
-		Scenario:     rule.Scenario,
-		RequestModel: rule.RequestModel,
-		Services:     rule.Services,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to add rule: %w", err)
-	}
-	return nil
-}
+// Wails still consumes ListRules; command and TUI mutation paths use
+// RuleUseCase directly.
 
 // ListRules returns all configured rules.
 func (am *AppManager) ListRules() []typ.Rule {
@@ -205,30 +146,6 @@ func (am *AppManager) ListRules() []typ.Rule {
 func (am *AppManager) GetRuleByRequestModelAndScenario(requestModel string, scenario typ.RuleScenario) *typ.Rule {
 	globalConfig := am.appConfig.GetGlobalConfig()
 	return globalConfig.GetRuleByRequestModelAndScenario(requestModel, scenario)
-}
-
-// UpdateRule updates an existing rule's Services by UUID (matching
-// usecase.RuleUseCase.UpdateService's scope — request model, scenario,
-// flags, and tactic are left as-is regardless of what's set on rule).
-func (am *AppManager) UpdateRule(uuid string, rule typ.Rule) error {
-	uc := usecase.NewRuleUseCase(am.appConfig.GetGlobalConfig())
-	_, err := uc.UpdateService(usecase.UpdateServiceRequest{
-		UUID:     uuid,
-		Services: rule.Services,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to update rule: %w", err)
-	}
-	return nil
-}
-
-// DeleteRule removes a rule by UUID.
-func (am *AppManager) DeleteRule(uuid string) error {
-	uc := usecase.NewRuleUseCase(am.appConfig.GetGlobalConfig())
-	if err := uc.Delete(usecase.DeleteRuleRequest{UUID: uuid}); err != nil {
-		return fmt.Errorf("failed to delete rule: %w", err)
-	}
-	return nil
 }
 
 // GetRuleByUUID returns the rule for the given UUID, or nil if not found.

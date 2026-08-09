@@ -49,7 +49,7 @@ func RunRuleMode(mgr TUIManager) error {
 }
 
 func ruleList(mgr TUIManager) error {
-	rules := mgr.ListRules()
+	rules := usecase.NewRuleUseCase(mgr.GetGlobalConfig()).List().Rules
 	if len(rules) == 0 {
 		fmt.Println(descStyle.Render("No rules configured."))
 		Pause("")
@@ -78,8 +78,8 @@ func formatRuleService(mgr TUIManager, r *typ.Rule) string {
 	}
 	s := r.Services[0]
 	label := s.Provider
-	if p, err := mgr.GetProvider(s.Provider); err == nil && p != nil {
-		label = p.Name
+	if result, err := usecase.NewProviderUseCase(mgr.GetGlobalConfig()).Get(usecase.GetProviderRequest{UUID: s.Provider}); err == nil {
+		label = result.Provider.Name
 	}
 	extra := ""
 	if len(r.Services) > 1 {
@@ -181,7 +181,8 @@ func ruleDelete(mgr TUIManager) error {
 }
 
 func pickRule(mgr TUIManager, prompt string) (*typ.Rule, error) {
-	rules := mgr.ListRules()
+	ruleUC := usecase.NewRuleUseCase(mgr.GetGlobalConfig())
+	rules := ruleUC.List().Rules
 	if len(rules) == 0 {
 		fmt.Println(descStyle.Render("No rules configured."))
 		Pause("")
@@ -203,7 +204,11 @@ func pickRule(mgr TUIManager, prompt string) (*typ.Rule, error) {
 	if sel.IsCancel() || sel.IsBack() {
 		return nil, nil
 	}
-	return mgr.GetRuleByUUID(sel.Value), nil
+	result, err := ruleUC.Get(usecase.GetRuleRequest{UUID: sel.Value})
+	if err != nil {
+		return nil, err
+	}
+	return &result.Rule, nil
 }
 
 func pickRuleService(mgr TUIManager) (*loadbalance.Service, error) {
@@ -299,8 +304,8 @@ func availableModels(mgr TUIManager, p *typ.Provider) []string {
 }
 
 func providerName(mgr TUIManager, uuid string) string {
-	if p, err := mgr.GetProvider(uuid); err == nil && p != nil {
-		return p.Name
+	if result, err := usecase.NewProviderUseCase(mgr.GetGlobalConfig()).Get(usecase.GetProviderRequest{UUID: uuid}); err == nil {
+		return result.Provider.Name
 	}
 	return uuid
 }

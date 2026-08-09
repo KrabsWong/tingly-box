@@ -95,11 +95,12 @@ func runRuleAddCI(appManager *AppManager, scenario, requestModel, providerRef, m
 // resolveProviderRef accepts a UUID or a name and returns the provider's UUID.
 // Name lookup is case-insensitive; ambiguous names (more than one match) error.
 func resolveProviderRef(appManager *AppManager, ref string) (string, error) {
-	if p, err := appManager.GetProvider(ref); err == nil && p != nil {
-		return p.UUID, nil
+	providerUC := usecase.NewProviderUseCase(appManager.GetGlobalConfig())
+	if result, err := providerUC.Get(usecase.GetProviderRequest{UUID: ref}); err == nil {
+		return result.Provider.UUID, nil
 	}
 	var matches []*typ.Provider
-	for _, p := range appManager.ListProviders() {
+	for _, p := range providerUC.List().Providers {
 		if strings.EqualFold(p.Name, ref) {
 			matches = append(matches, p)
 		}
@@ -191,11 +192,11 @@ func (c *ConfigRuleExportCmdKong) Run(appManager *AppManager) error {
 		}
 		uid = picked
 	}
-	rule := appManager.GetRuleByUUID(uid)
-	if rule == nil {
-		return fmt.Errorf("rule not found: %s", uid)
+	result, err := usecase.NewRuleUseCase(appManager.GetGlobalConfig()).Get(usecase.GetRuleRequest{UUID: uid})
+	if err != nil {
+		return err
 	}
-	return runExport(appManager, rule.RequestModel, string(rule.Scenario), c.Format, c.Output)
+	return runExport(appManager, result.Rule.RequestModel, string(result.Rule.Scenario), c.Format, c.Output)
 }
 
 // ConfigRuleImportCmdKong imports a rule (with its providers) from a bundle.
@@ -217,7 +218,7 @@ func (c *ConfigRuleImportCmdKong) Run(appManager *AppManager) error {
 // runRuleList prints the table of rules in the compact form
 // "index | request-model | scenario | service | uuid[:8]".
 func runRuleList(appManager *AppManager) error {
-	rules := appManager.ListRules()
+	rules := usecase.NewRuleUseCase(appManager.GetGlobalConfig()).List().Rules
 	if len(rules) == 0 {
 		fmt.Println("No rules configured. Use 'config rule add' to create one.")
 		return nil
@@ -245,8 +246,8 @@ func formatPrimaryService(appManager *AppManager, r *typ.Rule) string {
 	}
 	svc := r.Services[0]
 	providerLabel := svc.Provider
-	if p, err := appManager.GetProvider(svc.Provider); err == nil && p != nil {
-		providerLabel = p.Name
+	if result, err := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).Get(usecase.GetProviderRequest{UUID: svc.Provider}); err == nil {
+		providerLabel = result.Provider.Name
 	} else if len(providerLabel) > 8 {
 		providerLabel = providerLabel[:8]
 	}
@@ -261,7 +262,7 @@ func formatPrimaryService(appManager *AppManager, r *typ.Rule) string {
 // index from the user. Returns the chosen rule's UUID (empty string means
 // the user backed out with "0").
 func selectRuleInteractive(appManager *AppManager, reader *bufio.Reader, verb string) (string, error) {
-	rules := appManager.ListRules()
+	rules := usecase.NewRuleUseCase(appManager.GetGlobalConfig()).List().Rules
 	if len(rules) == 0 {
 		fmt.Println("No rules configured.")
 		return "", nil
@@ -311,11 +312,6 @@ func runRuleAddInteractive(appManager *AppManager, reader *bufio.Reader) error {
 	scenario, err := promptForScenario(reader)
 	if err != nil {
 		return err
-	}
-
-	if existing := appManager.GetGlobalConfig().GetRuleByRequestModelAndScenario(requestModel, scenario); existing != nil {
-		return fmt.Errorf("rule for request-model %q + scenario %q already exists (UUID %s); use 'config rule update' instead",
-			requestModel, scenario, existing.UUID)
 	}
 
 	service, err := pickServiceInteractive(appManager, reader)
@@ -368,10 +364,12 @@ func runRuleAddInteractive(appManager *AppManager, reader *bufio.Reader) error {
 // runRuleUpdateService re-picks the service for an existing rule. Everything
 // else on the rule (request-model, scenario, flags, tactic) stays as-is.
 func runRuleUpdateService(appManager *AppManager, reader *bufio.Reader, ruleUUID string) error {
-	rule := appManager.GetRuleByUUID(ruleUUID)
-	if rule == nil {
-		return fmt.Errorf("rule not found: %s", ruleUUID)
+	ruleUC := usecase.NewRuleUseCase(appManager.GetGlobalConfig())
+	result, err := ruleUC.Get(usecase.GetRuleRequest{UUID: ruleUUID})
+	if err != nil {
+		return err
 	}
+	rule := &result.Rule
 
 	fmt.Printf("\nUpdating rule '%s' (scenario: %s)\n", rule.RequestModel, rule.Scenario)
 	fmt.Printf("Current service: %s\n", formatPrimaryService(appManager, rule))
@@ -402,7 +400,6 @@ func runRuleUpdateService(appManager *AppManager, reader *bufio.Reader, ruleUUID
 		return nil
 	}
 
-	ruleUC := usecase.NewRuleUseCase(appManager.GetGlobalConfig())
 	if _, err := ruleUC.UpdateService(usecase.UpdateServiceRequest{
 		UUID:     rule.UUID,
 		Services: []*loadbalance.Service{service},
@@ -415,10 +412,12 @@ func runRuleUpdateService(appManager *AppManager, reader *bufio.Reader, ruleUUID
 
 // runRuleDelete deletes a rule with confirmation.
 func runRuleDelete(appManager *AppManager, reader *bufio.Reader, ruleUUID string) error {
-	rule := appManager.GetRuleByUUID(ruleUUID)
-	if rule == nil {
-		return fmt.Errorf("rule not found: %s", ruleUUID)
+	ruleUC := usecase.NewRuleUseCase(appManager.GetGlobalConfig())
+	result, err := ruleUC.Get(usecase.GetRuleRequest{UUID: ruleUUID})
+	if err != nil {
+		return err
 	}
+	rule := &result.Rule
 
 	fmt.Printf("\nAbout to delete rule:\n  Request model: %s\n  Scenario:      %s\n  UUID:          %s\n",
 		rule.RequestModel, rule.Scenario, rule.UUID)
@@ -433,7 +432,6 @@ func runRuleDelete(appManager *AppManager, reader *bufio.Reader, ruleUUID string
 		return nil
 	}
 
-	ruleUC := usecase.NewRuleUseCase(appManager.GetGlobalConfig())
 	if err := ruleUC.Delete(usecase.DeleteRuleRequest{UUID: rule.UUID}); err != nil {
 		return err
 	}
@@ -445,7 +443,7 @@ func runRuleDelete(appManager *AppManager, reader *bufio.Reader, ruleUUID string
 // model string, building a single weighted Service. Returns (nil, nil) when
 // the operator cancels with "0".
 func pickServiceInteractive(appManager *AppManager, reader *bufio.Reader) (*loadbalance.Service, error) {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 	if len(providers) == 0 {
 		return nil, fmt.Errorf("no providers configured; add a provider first via 'config provider add'")
 	}
@@ -509,5 +507,3 @@ func promptForScenario(reader *bufio.Reader) (typ.RuleScenario, error) {
 	}
 	return typ.RuleScenario(choice), nil
 }
-
-

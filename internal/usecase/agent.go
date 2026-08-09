@@ -82,6 +82,8 @@ type ResolveRoutingResult struct {
 	RequestModel  string           `json:"request_model"`
 	Scenario      typ.RuleScenario `json:"scenario"`
 	RuleFound     bool             `json:"rule_found"`
+	RuleActive    bool             `json:"rule_active"`
+	ResponseModel string           `json:"response_model,omitempty"`
 	ServiceUsable bool             `json:"service_usable"`
 	ProviderUUID  string           `json:"provider_uuid,omitempty"`
 	ProviderName  string           `json:"provider_name,omitempty"`
@@ -101,12 +103,20 @@ func (uc *AgentUseCase) ResolveRouting(req ResolveRoutingRequest) (ResolveRoutin
 	res := ResolveRoutingResult{RequestModel: requestModel, Scenario: scenario}
 
 	rule := uc.cfg.GetRuleByRequestModelAndScenario(requestModel, scenario)
-	if rule == nil || len(rule.Services) == 0 {
+	if rule == nil {
 		return res, nil
 	}
 	res.RuleFound = true
+	res.RuleActive = rule.Active
+	res.ResponseModel = rule.ResponseModel
+	if len(rule.Services) == 0 {
+		return res, nil
+	}
 
 	service := rule.Services[0]
+	res.ProviderUUID = service.Provider
+	res.ProviderName = service.Provider
+	res.Model = service.Model
 	if service.Provider == "" || service.Model == "" {
 		return res, nil
 	}
@@ -117,9 +127,7 @@ func (uc *AgentUseCase) ResolveRouting(req ResolveRoutingRequest) (ResolveRoutin
 	}
 
 	res.ServiceUsable = true
-	res.ProviderUUID = service.Provider
 	res.ProviderName = provider.Name
-	res.Model = service.Model
 	return res, nil
 }
 

@@ -54,7 +54,7 @@ func RunProviderMode(mgr TUIManager) error {
 }
 
 func providerList(mgr TUIManager) error {
-	providers := mgr.ListProviders()
+	providers := configuredProviders(mgr)
 	if len(providers) == 0 {
 		fmt.Println(descStyle.Render("No providers configured."))
 		Pause("")
@@ -126,7 +126,7 @@ func providerAdd(mgr TUIManager) error {
 }
 
 func pickProvider(mgr TUIManager, prompt string) (*typ.Provider, error) {
-	providers := mgr.ListProviders()
+	providers := configuredProviders(mgr)
 	if len(providers) == 0 {
 		fmt.Println(descStyle.Render("No providers configured. Add one from Provider → Add first."))
 		Pause("")

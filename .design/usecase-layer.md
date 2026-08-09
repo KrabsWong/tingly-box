@@ -9,7 +9,7 @@ Introduced 2026-08-09. Spec: `.sdlc/docs/refactor-cli-usecase-20260809.spec.md`.
 
 ## Why
 
-Rule/Provider/Agent operations exist today as three separate implementations:
+Rule/Provider/Agent operations historically existed as three separate implementations:
 CLI (`internal/command/config_rule.go` etc.), TUI (`internal/command/tui/rule_mode.go`
 etc.), and the Web handler (`internal/server/module/rule` etc.). They drift —
 e.g. the agent routing-key table was hand-copied into two files with a "keep in
@@ -47,8 +47,7 @@ server itself), `gui/*`. A use-case must never import a caller.
 ### No interfaces (yet)
 
 Each domain is one concrete struct — `RuleUseCase`, `ProviderUseCase`,
-`AgentUseCase` — holding a `*config.Config` (or `*command.AppManager`-shaped
-dependency passed at construction; see below). An interface gets introduced
+`AgentUseCase`, `ProfileUseCase` — holding a `*config.Config`. An interface gets introduced
 only once a second implementation (e.g. an HTTP-client-backed use-case for a
 remote mode) actually exists. Until then an interface is speculative and adds
 a layer of indirection nothing needs.
@@ -63,6 +62,8 @@ internal/usecase/
   provider_test.go
   agent.go      AgentUseCase + Request/Result/Error types, routing key table
   agent_test.go
+  profile.go    ProfileUseCase + profile resolution/detail DTOs
+  profile_test.go
 ```
 
 One file per domain. No shared base type — each use-case is independent;
@@ -72,7 +73,7 @@ over a premature shared abstraction.
 ## Construction
 
 Use-cases take `*serverconfig.Config` directly (the type callers already have
-via `AppManager.AppConfig().GetGlobalConfig()`), not `*command.AppManager` —
+via `AppManager.GetGlobalConfig()`), not `*command.AppManager` —
 `AppManager` lives in `internal/command`, which is on the forbidden-dependency
 list precisely because it's a caller, not a foundation. `AppManager` and the
 TUI/Web handlers construct a use-case as needed and call into it; the
@@ -80,14 +81,19 @@ use-case never reaches back up.
 
 ## Migration status
 
-As of Stage 2 (2026-08), `internal/usecase` exists standalone with its own
-tests. CLI, TUI, and the Web handler are **not yet migrated** to call it —
-that's Stage 3, deliberately deferred (see spec §2.6). Business logic exists
-in two places simultaneously during this window: the use-case, and each
-caller's original implementation. The one exception is the agent
-routing-key table (spec §2.2d) — CLI and TUI call sites were updated to call
-the single use-case-owned function, because leaving two hand-copied tables in
-place would defeat the point of extracting it.
+As of 2026-08-09, CLI and TUI Rule/Provider/Agent reads and mutations use this
+layer. Agent Show data and the routing-key table have one implementation.
+Claude Code profile list/resolve/detail data is represented by
+`ProfileUseCase`; the top-level `profile` command remains an intentional,
+first-class product surface, while `profile` and `cc --profile` share the same
+resolution contract.
+
+`TUIManager` now exposes only host-owned config/server lifecycle capabilities;
+it no longer mirrors Provider and Rule CRUD. `AppManager` retains only the
+small compatibility surface still consumed by Wails and unrelated commands.
+
+The HTTP handlers and Wails service have **not** been migrated. They remain a
+separate follow-up so API contracts and generated clients can move together.
 
 ## Known behavioral differences not yet resolved
 
@@ -99,7 +105,5 @@ type below) rather than silently picking one CLI/TUI already had:
   concern per rule 1 — display formatting is caller I/O)
 - **Proxy field** (TUI has it, CLI doesn't)
 - **Model list fallback depth**: engine is cache→vmodel→API→template (4
-  levels), TUI's own list-building code only did cache→template (2 levels,
-  missing virtual providers). `ProviderUseCase.AvailableModels` uses the full
-  4-level engine path — this is a deliberate behavior change from the TUI's
-  historical shortcut, not a preserved quirk.
+  levels). TUI now consumes `ProviderUseCase.AvailableModels`, so virtual
+  providers and template fallbacks follow the same path as other callers.

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/tingly-dev/tingly-box/internal/agent"
-	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
@@ -202,30 +201,24 @@ func agentShow(mgr TUIManager, info agent.AgentInfo) error {
 	if cfg == nil {
 		return fmt.Errorf("global config not available")
 	}
-	fmt.Println()
-	fmt.Println(promptStyle.Render(info.Name) + "  " + descStyle.Render("("+string(info.Scenario)+")"))
-
-	requestModel, scenario, err := usecase.NewAgentUseCase(cfg, "localhost").RoutingKey(info.Type)
-	var rule *typ.Rule
-	if err == nil {
-		rule = cfg.GetRuleByRequestModelAndScenario(requestModel, scenario)
+	result, err := usecase.NewAgentUseCase(cfg, "localhost").Show(usecase.ShowRequest{AgentType: info.Type})
+	if err != nil {
+		return err
 	}
-	if rule != nil {
+	fmt.Println()
+	fmt.Println(promptStyle.Render(result.Info.Name) + "  " + descStyle.Render("("+string(result.Info.Scenario)+")"))
+
+	if result.Routing.RuleFound {
 		fmt.Println(descStyle.Render("  routing rule:"))
-		fmt.Println(descStyle.Render(fmt.Sprintf("    request-model: %s  active: %v", rule.RequestModel, rule.Active)))
-		if len(rule.Services) > 0 {
-			svc := rule.Services[0]
-			pname := svc.Provider
-			if p, err := cfg.GetProviderByUUID(svc.Provider); err == nil && p != nil {
-				pname = p.Name
-			}
-			fmt.Println(descStyle.Render(fmt.Sprintf("    service:       %s:%s", pname, svc.Model)))
+		fmt.Println(descStyle.Render(fmt.Sprintf("    request-model: %s  active: %v", result.Routing.RequestModel, result.Routing.RuleActive)))
+		if result.Routing.ProviderName != "" || result.Routing.Model != "" {
+			fmt.Println(descStyle.Render(fmt.Sprintf("    service:       %s:%s", result.Routing.ProviderName, result.Routing.Model)))
 		}
 	} else {
 		fmt.Println(descStyle.Render("  no routing rule configured."))
 	}
 	fmt.Println(descStyle.Render("  config files:"))
-	for _, f := range info.ConfigFiles {
+	for _, f := range result.Info.ConfigFiles {
 		fmt.Println(descStyle.Render("    - " + f))
 	}
 	fmt.Println()

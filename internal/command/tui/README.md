@@ -25,7 +25,10 @@ Everything is in one flat package. The package is a leaf: imported by
 `internal/command/quickstart.go`, `config.go`, `config_rule.go`, and
 `config_provider.go`. To avoid a cycle, the `TUIManager` interface (defined
 in `quickstart.go`, kept as `QuickstartManager` for backward compatibility)
-is defined here; `AppManager` satisfies it implicitly.
+is defined here; `AppManager` satisfies it implicitly. The interface contains
+only host-owned config and server-lifecycle capabilities. Provider, Rule,
+Agent, and Profile work goes through `internal/usecase`, so the TUI does not
+grow a second business API on `AppManager`.
 
 ---
 
