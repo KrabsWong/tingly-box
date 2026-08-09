@@ -10,6 +10,7 @@ import (
 
 	"github.com/tingly-dev/tingly-box/internal/agent"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // ============== Kong Command Structures ==============
@@ -284,7 +285,7 @@ func promptForAgentConfig(reader *bufio.Reader, appManager *AppManager, req *age
 func resolveAgentConfigFromRules(appManager *AppManager, req *agent.ApplyAgentRequest) error {
 	globalConfig := appManager.GetGlobalConfig()
 
-	requestModel, scenario, err := agentRoutingKey(req.AgentType)
+	requestModel, scenario, err := usecase.NewAgentUseCase(globalConfig, "localhost").RoutingKey(req.AgentType)
 	if err != nil {
 		return err
 	}
@@ -557,23 +558,6 @@ func listAgentTypes() error {
 	return nil
 }
 
-// agentRoutingKey returns the canonical request model + scenario pair that
-// identifies the routing rule for an agent type. apply / show / restore must
-// agree on this mapping or they will look at different rules and disagree
-// about whether the agent is configured.
-func agentRoutingKey(agentType agent.AgentType) (string, typ.RuleScenario, error) {
-	switch agentType {
-	case agent.AgentTypeClaudeCode:
-		return "tingly/cc", typ.ScenarioClaudeCode, nil
-	case agent.AgentTypeOpenCode:
-		return "tingly-opencode", typ.ScenarioOpenCode, nil
-	case agent.AgentTypeCodex:
-		return "tingly-codex", typ.ScenarioCodex, nil
-	default:
-		return "", "", fmt.Errorf("unsupported agent type: %s", agentType)
-	}
-}
-
 // showAgentConfig shows current configuration for an agent type
 func showAgentConfig(appManager *AppManager, agentType agent.AgentType) error {
 	globalConfig := appManager.GetGlobalConfig()
@@ -587,7 +571,7 @@ func showAgentConfig(appManager *AppManager, agentType agent.AgentType) error {
 	fmt.Printf("Scenario:  %s\n", info.Scenario)
 	fmt.Println()
 
-	requestModel, _, err := agentRoutingKey(agentType)
+	requestModel, _, err := usecase.NewAgentUseCase(globalConfig, "localhost").RoutingKey(agentType)
 	if err != nil {
 		return err
 	}

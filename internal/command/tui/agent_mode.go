@@ -6,6 +6,7 @@ import (
 
 	"github.com/tingly-dev/tingly-box/internal/agent"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // RunAgentMode is the entry point for the Agent mode loop. Users pick an
@@ -68,7 +69,14 @@ func agentStatusLabel(mgr TUIManager, info agent.AgentInfo) string {
 	if cfg == nil {
 		return info.Description
 	}
-	rule := cfg.GetRuleByRequestModelAndScenario(agentRequestModel(info.Type), typ.RuleScenario(info.Scenario))
+	requestModel, scenario, err := usecase.NewAgentUseCase(cfg, "localhost").RoutingKey(info.Type)
+	if err != nil {
+		if info.Description != "" {
+			return "not configured · " + info.Description
+		}
+		return "not configured"
+	}
+	rule := cfg.GetRuleByRequestModelAndScenario(requestModel, scenario)
 	if rule != nil && len(rule.Services) > 0 && rule.Services[0].Provider != "" {
 		if p, err := cfg.GetProviderByUUID(rule.Services[0].Provider); err == nil && p != nil {
 			return fmt.Sprintf("configured · %s:%s", p.Name, rule.Services[0].Model)
@@ -79,27 +87,6 @@ func agentStatusLabel(mgr TUIManager, info agent.AgentInfo) string {
 		return "not configured · " + info.Description
 	}
 	return "not configured"
-}
-
-// agentRequestModel returns the canonical request model used to look up the
-// routing rule for an agent type. Mirrors agentRoutingKey in
-// internal/command/agent_command.go — keep these in sync.
-//
-// KNOWN DRIFT: agentRoutingKey errors on an unsupported agent type; this
-// function silently falls back to string(t). Not fixed here — Stage 2 of
-// .sdlc/docs/refactor-cli-usecase-20260809.spec.md collapses both into a
-// single source in internal/usecase.
-func agentRequestModel(t agent.AgentType) string {
-	switch t {
-	case agent.AgentTypeClaudeCode:
-		return "tingly/cc"
-	case agent.AgentTypeOpenCode:
-		return "tingly-opencode"
-	case agent.AgentTypeCodex:
-		return "tingly-codex"
-	default:
-		return string(t)
-	}
 }
 
 func runAgentSubmenu(mgr TUIManager, info agent.AgentInfo) error {
@@ -218,7 +205,11 @@ func agentShow(mgr TUIManager, info agent.AgentInfo) error {
 	fmt.Println()
 	fmt.Println(promptStyle.Render(info.Name) + "  " + descStyle.Render("("+string(info.Scenario)+")"))
 
-	rule := cfg.GetRuleByRequestModelAndScenario(agentRequestModel(info.Type), typ.RuleScenario(info.Scenario))
+	requestModel, scenario, err := usecase.NewAgentUseCase(cfg, "localhost").RoutingKey(info.Type)
+	var rule *typ.Rule
+	if err == nil {
+		rule = cfg.GetRuleByRequestModelAndScenario(requestModel, scenario)
+	}
 	if rule != nil {
 		fmt.Println(descStyle.Render("  routing rule:"))
 		fmt.Println(descStyle.Render(fmt.Sprintf("    request-model: %s  active: %v", rule.RequestModel, rule.Active)))

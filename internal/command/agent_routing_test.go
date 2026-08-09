@@ -3,49 +3,16 @@ package command
 import (
 	"testing"
 
-	"github.com/tingly-dev/tingly-box/internal/agent"
 	"github.com/tingly-dev/tingly-box/internal/data/db"
-	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 
-// TestAgentRoutingKey locks down the (agent type → request model, scenario)
-// mapping that apply / show / restore all use to look up routing rules. The
-// strings must match the canonical request models registered by the rule
-// system (internal/agent/rule.go) — drift previously caused `agent show
-// opencode` to always report "No routing rule configured" even after apply.
-func TestAgentRoutingKey(t *testing.T) {
-	cases := []struct {
-		agentType    agent.AgentType
-		wantModel    string
-		wantScenario typ.RuleScenario
-	}{
-		{agent.AgentTypeClaudeCode, "tingly/cc", typ.ScenarioClaudeCode},
-		{agent.AgentTypeOpenCode, "tingly-opencode", typ.ScenarioOpenCode},
-		{agent.AgentTypeCodex, "tingly-codex", typ.ScenarioCodex},
-	}
-
-	for _, tc := range cases {
-		t.Run(string(tc.agentType), func(t *testing.T) {
-			gotModel, gotScenario, err := agentRoutingKey(tc.agentType)
-			if err != nil {
-				t.Fatalf("agentRoutingKey(%q) returned error: %v", tc.agentType, err)
-			}
-			if gotModel != tc.wantModel {
-				t.Errorf("request model: got %q, want %q", gotModel, tc.wantModel)
-			}
-			if gotScenario != tc.wantScenario {
-				t.Errorf("scenario: got %q, want %q", gotScenario, tc.wantScenario)
-			}
-		})
-	}
-}
-
-func TestAgentRoutingKeyUnknown(t *testing.T) {
-	_, _, err := agentRoutingKey(agent.AgentType("not-a-real-agent"))
-	if err == nil {
-		t.Fatal("expected error for unknown agent type, got nil")
-	}
-}
+// The (agent type → request model, scenario) routing-key mapping that
+// apply / show / restore all use to look up routing rules now lives in
+// internal/usecase.AgentUseCase.RoutingKey — see
+// internal/usecase/agent_test.go:TestAgentUseCase_RoutingKey for its
+// coverage. Moved here previously to lock down drift between this
+// package's agentRoutingKey and tui/agent_mode.go's agentRequestModel;
+// both call sites now call the single usecase-owned function instead.
 
 func TestStandaloneBotSettingPreservesClaudeProfileSelection(t *testing.T) {
 	got := standaloneBotSetting(db.Settings{
