@@ -3,9 +3,9 @@ package command
 import (
 	"fmt"
 	"os"
-	"sort"
 
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // ============== Kong Command Structures ==============
@@ -72,8 +72,9 @@ const profileScenario = typ.ScenarioClaudeCode
 
 // profileList prints all profiles for the claude_code scenario.
 func profileList(appManager *AppManager) error {
-	globalConfig := appManager.GetGlobalConfig()
-	profiles := globalConfig.GetProfiles(profileScenario)
+	profiles := usecase.NewProfileUseCase(appManager.GetGlobalConfig()).List(usecase.ListProfilesRequest{
+		Scenario: profileScenario,
+	}).Profiles
 
 	if len(profiles) == 0 {
 		fmt.Println("No profiles configured for Claude Code.")
@@ -94,73 +95,57 @@ func profileList(appManager *AppManager) error {
 
 // profileShow prints detailed information about a specific profile.
 func profileShow(appManager *AppManager, nameOrID string) error {
-	globalConfig := appManager.GetGlobalConfig()
-
-	// First try to resolve as a name or ID
-	resolvedID, err := globalConfig.ResolveProfileNameOrID(profileScenario, nameOrID)
+	profileUC := usecase.NewProfileUseCase(appManager.GetGlobalConfig())
+	result, err := profileUC.Get(usecase.GetProfileRequest{
+		Scenario:   profileScenario,
+		Identifier: nameOrID,
+	})
 	if err != nil {
 		// Try showing all profiles and let user pick
-		profiles := globalConfig.GetProfiles(profileScenario)
+		profiles := profileUC.List(usecase.ListProfilesRequest{Scenario: profileScenario}).Profiles
 		if len(profiles) == 0 {
 			return fmt.Errorf("no profiles configured for Claude Code")
 		}
 		fmt.Fprintf(os.Stderr, "Profile '%s' not found.\n", nameOrID)
 		selected, selErr := selectProfileInteractive(profiles, nameOrID)
 		if selErr != nil {
-			return fmt.Errorf("profile error: %w", err)
+			return fmt.Errorf("profile error: %w", selErr)
 		}
-		resolvedID = selected
-	}
-
-	meta, found := globalConfig.GetProfile(profileScenario, resolvedID)
-	if !found {
-		return fmt.Errorf("profile '%s' not found", resolvedID)
-	}
-
-	scenarioPath := string(typ.ProfiledScenarioName(profileScenario, resolvedID))
-
-	// Filter rules by profiled scenario
-	var rules []typ.Rule
-	for _, r := range globalConfig.Rules {
-		if string(r.Scenario) == scenarioPath {
-			rules = append(rules, r)
+		if selected == "" {
+			return nil
+		}
+		result, err = profileUC.Get(usecase.GetProfileRequest{
+			Scenario:   profileScenario,
+			Identifier: selected,
+		})
+		if err != nil {
+			return err
 		}
 	}
 
 	mode := "separate"
-	if meta.Unified {
+	if result.Profile.Unified {
 		mode = "unified"
 	}
 
-	fmt.Printf("Profile: %s (%s)\n", resolvedID, meta.Name)
-	fmt.Printf("  Scenario: %s\n", scenarioPath)
+	fmt.Printf("Profile: %s (%s)\n", result.Profile.ID, result.Profile.Name)
+	fmt.Printf("  Scenario: %s\n", result.Scenario)
 	fmt.Printf("  Mode:     %s\n", mode)
 	fmt.Println("  Rules:")
 
-	if len(rules) == 0 {
+	if len(result.Rules) == 0 {
 		fmt.Println("    (no routing rules configured)")
 	} else {
-		// Sort rules by name for consistent display
-		sort.Slice(rules, func(i, j int) bool {
-			return rules[i].RequestModel < rules[j].RequestModel
-		})
-
-		for _, r := range rules {
-			svc := ""
-			if len(r.Services) > 0 && r.Services[0].Provider != "" {
-				providerName := r.Services[0].Provider
-				if provider, err := globalConfig.GetProviderByUUID(r.Services[0].Provider); err == nil && provider != nil {
-					providerName = provider.Name
-				}
-				svc = fmt.Sprintf("%s / %s", providerName, r.Services[0].Model)
-			} else {
-				svc = "(not configured)"
+		for _, rule := range result.Rules {
+			svc := "(not configured)"
+			if rule.Configured {
+				svc = fmt.Sprintf("%s / %s", rule.ProviderName, rule.Model)
 			}
 			status := "active"
-			if !r.Active {
+			if !rule.Active {
 				status = "inactive"
 			}
-			fmt.Printf("    %-10s %s [%s]\n", r.RequestModel, svc, status)
+			fmt.Printf("    %-10s %s [%s]\n", rule.RequestModel, svc, status)
 		}
 	}
 
@@ -169,8 +154,9 @@ func profileShow(appManager *AppManager, nameOrID string) error {
 
 // profileShowInteractive lists profiles and prompts the user to pick one to inspect.
 func profileShowInteractive(appManager *AppManager) error {
-	globalConfig := appManager.GetGlobalConfig()
-	profiles := globalConfig.GetProfiles(profileScenario)
+	profiles := usecase.NewProfileUseCase(appManager.GetGlobalConfig()).List(usecase.ListProfilesRequest{
+		Scenario: profileScenario,
+	}).Profiles
 
 	if len(profiles) == 0 {
 		fmt.Println("No profiles configured for Claude Code.")
@@ -193,36 +179,46 @@ func profileShowInteractive(appManager *AppManager) error {
 // If port > 0, it overrides the configured server port.
 // Additional args are passed to Claude Code.
 func profileUse(appManager *AppManager, nameOrID string, port int, extraArgs []string) error {
-	globalConfig := appManager.GetGlobalConfig()
+	profileUC := usecase.NewProfileUseCase(appManager.GetGlobalConfig())
 
 	// Resolve profile name → ID (handles both name and ID lookup).
 	// If not found, show interactive list so the user can pick one.
-	resolvedID, err := globalConfig.ResolveProfileNameOrID(profileScenario, nameOrID)
+	resolved, err := profileUC.Resolve(usecase.GetProfileRequest{
+		Scenario:   profileScenario,
+		Identifier: nameOrID,
+	})
 	if err != nil {
-		profiles := globalConfig.GetProfiles(profileScenario)
+		profiles := profileUC.List(usecase.ListProfilesRequest{Scenario: profileScenario}).Profiles
 		if len(profiles) == 0 {
 			return fmt.Errorf("profile '%s' not found and no profiles are configured", nameOrID)
 		}
 		fmt.Fprintf(os.Stderr, "Profile '%s' not found.\n", nameOrID)
 		selected, selErr := selectProfileInteractive(profiles, nameOrID)
 		if selErr != nil {
-			return fmt.Errorf("profile error: %w", err)
+			return fmt.Errorf("profile error: %w", selErr)
 		}
 		if selected == "" {
 			return fmt.Errorf("no profile selected")
 		}
-		resolvedID = selected
+		resolved, err = profileUC.Resolve(usecase.GetProfileRequest{
+			Scenario:   profileScenario,
+			Identifier: selected,
+		})
+		if err != nil {
+			return err
+		}
 	}
 
 	// Delegate to runCC with the resolved profile ID and additional args.
-	return runCC(appManager, resolvedID, port, extraArgs)
+	return runCC(appManager, resolved.Profile.ID, port, extraArgs)
 }
 
 // profileLaunchInteractive lists profiles and prompts the user to pick one to launch.
 // port > 0 overrides the configured server port.
 func profileLaunchInteractive(appManager *AppManager, port int) error {
-	globalConfig := appManager.GetGlobalConfig()
-	profiles := globalConfig.GetProfiles(profileScenario)
+	profiles := usecase.NewProfileUseCase(appManager.GetGlobalConfig()).List(usecase.ListProfilesRequest{
+		Scenario: profileScenario,
+	}).Profiles
 
 	if len(profiles) == 0 {
 		fmt.Println("No profiles configured for Claude Code.")

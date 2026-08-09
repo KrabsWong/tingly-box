@@ -11,6 +11,7 @@ import (
 	"github.com/tingly-dev/tingly-box/agentboot/claude"
 	"github.com/tingly-dev/tingly-box/internal/agent"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // ============== Kong Command Structures ==============
@@ -44,25 +45,32 @@ func runCC(appManager *AppManager, profile string, portOverride int, claudeArgs 
 	var profileID string
 	var profileMeta *typ.ProfileMeta
 	if profile != "" {
-		resolved, err := globalConfig.ResolveProfileNameOrID(scenario, profile)
+		profileUC := usecase.NewProfileUseCase(globalConfig)
+		resolved, err := profileUC.Resolve(usecase.GetProfileRequest{
+			Scenario:   scenario,
+			Identifier: profile,
+		})
 		if err != nil {
 			// Profile not found — show interactive list so user can pick one
-			profiles := globalConfig.GetProfiles(scenario)
+			profiles := profileUC.List(usecase.ListProfilesRequest{Scenario: scenario}).Profiles
 			selected, selErr := selectProfileInteractive(profiles, profile)
 			if selErr != nil {
-				return fmt.Errorf("profile error: %w", err)
+				return fmt.Errorf("profile error: %w", selErr)
 			}
-			resolved = selected
+			if selected != "" {
+				resolved, err = profileUC.Resolve(usecase.GetProfileRequest{
+					Scenario:   scenario,
+					Identifier: selected,
+				})
+				if err != nil {
+					return err
+				}
+			}
 		}
-		profileID = resolved
-
-		// Get profile metadata
-		profiles := globalConfig.GetProfiles(scenario)
-		for i := range profiles {
-			if profiles[i].ID == profileID {
-				profileMeta = &profiles[i]
-				break
-			}
+		if resolved.Profile.ID != "" {
+			profileID = resolved.Profile.ID
+			meta := resolved.Profile
+			profileMeta = &meta
 		}
 	}
 
