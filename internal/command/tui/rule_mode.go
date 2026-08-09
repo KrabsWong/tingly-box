@@ -1,12 +1,12 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
-
-	"github.com/google/uuid"
 
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // RunRuleMode is the entry point for the Rule mode loop.
@@ -99,26 +99,9 @@ func ruleAdd(mgr TUIManager) error {
 		return nil
 	}
 
-	if existing := mgr.GetGlobalConfig().GetRuleByRequestModelAndScenario(rmR.Value, scn); existing != nil {
-		return fmt.Errorf("a rule for %q + %q already exists (uuid %s); use Edit instead",
-			rmR.Value, scn, existing.UUID)
-	}
-
 	svc, err := pickRuleService(mgr)
 	if err != nil || svc == nil {
 		return err
-	}
-
-	rule := typ.Rule{
-		UUID:         uuid.New().String(),
-		Scenario:     scn,
-		RequestModel: rmR.Value,
-		Services:     []*loadbalance.Service{svc},
-		LBTactic: typ.Tactic{
-			Type:   loadbalance.TacticRandom,
-			Params: typ.DefaultRandomParams(),
-		},
-		Active: true,
 	}
 
 	cfm, err := Confirm("Save this rule?", ConfirmOptions{DefaultYes: true, CanGoBack: true,
@@ -126,10 +109,22 @@ func ruleAdd(mgr TUIManager) error {
 	if err != nil || !cfm.IsConfirm() || !cfm.Value {
 		return nil
 	}
-	if err := mgr.AddRule(rule); err != nil {
+
+	ruleUC := usecase.NewRuleUseCase(mgr.GetGlobalConfig())
+	res, err := ruleUC.Create(usecase.CreateRuleRequest{
+		Scenario:     scn,
+		RequestModel: rmR.Value,
+		Services:     []*loadbalance.Service{svc},
+	})
+	if err != nil {
+		var exists usecase.ErrRuleExists
+		if errors.As(err, &exists) {
+			return fmt.Errorf("a rule for %q + %q already exists (uuid %s); use Edit instead",
+				exists.RequestModel, exists.Scenario, exists.UUID)
+		}
 		return err
 	}
-	fmt.Println(successStyle.Render(fmt.Sprintf("✓ Rule added (uuid: %s).", rule.UUID)))
+	fmt.Println(successStyle.Render(fmt.Sprintf("✓ Rule added (uuid: %s).", res.Rule.UUID)))
 	Pause("")
 	return nil
 }
@@ -145,15 +140,18 @@ func ruleEdit(mgr TUIManager) error {
 	if err != nil || svc == nil {
 		return err
 	}
-	updated := *rule
-	updated.Services = []*loadbalance.Service{svc}
 
 	cfm, err := Confirm("Apply update?", ConfirmOptions{DefaultYes: true, CanGoBack: true,
 		Description: fmt.Sprintf("new service: %s:%s", providerName(mgr, svc.Provider), svc.Model)})
 	if err != nil || !cfm.IsConfirm() || !cfm.Value {
 		return nil
 	}
-	if err := mgr.UpdateRule(rule.UUID, updated); err != nil {
+
+	ruleUC := usecase.NewRuleUseCase(mgr.GetGlobalConfig())
+	if _, err := ruleUC.UpdateService(usecase.UpdateServiceRequest{
+		UUID:     rule.UUID,
+		Services: []*loadbalance.Service{svc},
+	}); err != nil {
 		return err
 	}
 	fmt.Println(successStyle.Render("✓ Rule updated."))
@@ -172,7 +170,9 @@ func ruleDelete(mgr TUIManager) error {
 	if err != nil || !cfm.IsConfirm() || !cfm.Value {
 		return nil
 	}
-	if err := mgr.DeleteRule(rule.UUID); err != nil {
+
+	ruleUC := usecase.NewRuleUseCase(mgr.GetGlobalConfig())
+	if err := ruleUC.Delete(usecase.DeleteRuleRequest{UUID: rule.UUID}); err != nil {
 		return err
 	}
 	fmt.Println(successStyle.Render("✓ Rule deleted."))

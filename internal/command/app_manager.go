@@ -9,6 +9,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/server"
 	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 	"github.com/tingly-dev/tingly-box/pkg/lock"
 )
 
@@ -169,11 +170,26 @@ func (am *AppManager) GetProviderByName(name string) (*typ.Provider, error) {
 // ============
 // Rule Management
 // ============
+//
+// These delegate to usecase.RuleUseCase (internal/usecase/rule.go), which
+// owns the actual pre-check/UUID-generation/validation logic. Kept here
+// with their historical signatures because AppManager must satisfy
+// tui.TUIManager (internal/command/tui/quickstart.go) and is called
+// directly by gui/wails3/services/tingly_service.go — CLI and TUI code
+// that builds its own request now calls usecase.NewRuleUseCase(...)
+// directly instead of going through these.
 
-// AddRule adds a new routing rule.
+// AddRule adds a new routing rule. The rule's UUID, if already set, is
+// ignored — Create always mints a fresh one; only Scenario, RequestModel,
+// and Services are used from the input.
 func (am *AppManager) AddRule(rule typ.Rule) error {
-	globalConfig := am.appConfig.GetGlobalConfig()
-	if err := globalConfig.AddRule(rule); err != nil {
+	uc := usecase.NewRuleUseCase(am.appConfig.GetGlobalConfig())
+	_, err := uc.Create(usecase.CreateRuleRequest{
+		Scenario:     rule.Scenario,
+		RequestModel: rule.RequestModel,
+		Services:     rule.Services,
+	})
+	if err != nil {
 		return fmt.Errorf("failed to add rule: %w", err)
 	}
 	return nil
@@ -181,8 +197,8 @@ func (am *AppManager) AddRule(rule typ.Rule) error {
 
 // ListRules returns all configured rules.
 func (am *AppManager) ListRules() []typ.Rule {
-	globalConfig := am.appConfig.GetGlobalConfig()
-	return globalConfig.Rules
+	uc := usecase.NewRuleUseCase(am.appConfig.GetGlobalConfig())
+	return uc.List().Rules
 }
 
 // GetRuleByRequestModelAndScenario returns a rule by request model and scenario.
@@ -191,10 +207,16 @@ func (am *AppManager) GetRuleByRequestModelAndScenario(requestModel string, scen
 	return globalConfig.GetRuleByRequestModelAndScenario(requestModel, scenario)
 }
 
-// UpdateRule updates an existing rule by UUID.
+// UpdateRule updates an existing rule's Services by UUID (matching
+// usecase.RuleUseCase.UpdateService's scope — request model, scenario,
+// flags, and tactic are left as-is regardless of what's set on rule).
 func (am *AppManager) UpdateRule(uuid string, rule typ.Rule) error {
-	globalConfig := am.appConfig.GetGlobalConfig()
-	if err := globalConfig.UpdateRule(uuid, rule); err != nil {
+	uc := usecase.NewRuleUseCase(am.appConfig.GetGlobalConfig())
+	_, err := uc.UpdateService(usecase.UpdateServiceRequest{
+		UUID:     uuid,
+		Services: rule.Services,
+	})
+	if err != nil {
 		return fmt.Errorf("failed to update rule: %w", err)
 	}
 	return nil
@@ -202,8 +224,8 @@ func (am *AppManager) UpdateRule(uuid string, rule typ.Rule) error {
 
 // DeleteRule removes a rule by UUID.
 func (am *AppManager) DeleteRule(uuid string) error {
-	globalConfig := am.appConfig.GetGlobalConfig()
-	if err := globalConfig.DeleteRule(uuid); err != nil {
+	uc := usecase.NewRuleUseCase(am.appConfig.GetGlobalConfig())
+	if err := uc.Delete(usecase.DeleteRuleRequest{UUID: uuid}); err != nil {
 		return fmt.Errorf("failed to delete rule: %w", err)
 	}
 	return nil
