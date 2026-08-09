@@ -276,31 +276,26 @@ func pickProviderModel(cfg *serverconfig.Config, p *typ.Provider, prompt string)
 	return r.Value, nil
 }
 
-// availableModels returns the model list for a provider with the same
-// fallback order FetchAndSaveProviderModels uses internally:
-//
-//  1. DB-cached models (populated by a successful provider /v1/models call)
-//  2. compile-time embedded template (GetEmbeddedModelsForProvider) — used
-//     when the upstream API has no models endpoint (Anthropic, OAuth-only
-//     providers, etc.) or the call failed.
-//
-// Without the second step the UI shows an empty list for providers whose
-// catalogs only exist as build-time data — exactly the case the user hit.
+// availableModels resolves a provider's model list through the full
+// cache→vmodel→API→template chain by delegating to
+// ProviderUseCase.AvailableModels. This replaces an earlier hand-rolled
+// cache→template two-level shortcut that missed the vmodel and API tiers —
+// see .design/usecase-layer.md, "Known behavioral differences not yet
+// resolved". For the interactive provider picked here (always a real,
+// user-configured provider, never a build-time virtual one) the vmodel tier
+// is naturally skipped, so the practical effect is that a DB miss now falls
+// through to a real /v1/models fetch (covered by the RefreshModels spinner in
+// pickProviderModel) before the embedded template, instead of jumping
+// straight to the template.
 func availableModels(cfg *serverconfig.Config, p *typ.Provider) []string {
 	if cfg == nil {
 		return nil
 	}
-	if mm := cfg.GetModelManager(); mm != nil {
-		if models := mm.GetModels(p.UUID); len(models) > 0 {
-			return models
-		}
+	res, err := usecase.NewProviderUseCase(cfg).AvailableModels(usecase.AvailableModelsRequest{UUID: p.UUID})
+	if err != nil {
+		return nil
 	}
-	if tm := cfg.GetTemplateManager(); tm != nil {
-		if models, err := tm.GetEmbeddedModelsForProvider(p); err == nil {
-			return models
-		}
-	}
-	return nil
+	return res.Models
 }
 
 func providerName(cfg *serverconfig.Config, uuid string) string {

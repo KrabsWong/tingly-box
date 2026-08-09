@@ -93,9 +93,13 @@ func TestAvailableModels_FallsBackToTemplate(t *testing.T) {
 	}
 }
 
-// TestAvailableModels_EmptyWhenNoSource: an unknown provider with no DB
-// cache and no template match returns nil. pickProviderModel uses this to
-// decide between a Select and a free-form Input.
+// TestAvailableModels_EmptyWhenNoSource: an unknown provider — no DB cache,
+// no embedded template match, and an unreachable /v1/models endpoint —
+// resolves to an empty list. pickProviderModel uses this to decide between a
+// Select and a free-form Input. Note AvailableModels walks the full chain, so
+// this case now exercises a real (failing) /v1/models fetch against the
+// bogus host before falling through to empty; the assertion still holds
+// because every tier comes up empty.
 func TestAvailableModels_EmptyWhenNoSource(t *testing.T) {
 	mgr := newTUIHarness(t)
 	p := addTestProvider(t, mgr, "custom", "https://api.totally-made-up-vendor.example/v1", protocol.APIStyleOpenAI)
