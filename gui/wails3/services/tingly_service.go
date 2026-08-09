@@ -164,7 +164,7 @@ func (s *TinglyService) ListRules() []typ.Rule {
 // name (kept for call-site compatibility), only providers are imported —
 // dataio export/import no longer carries rule data.
 func (s *TinglyService) ImportRule(data string) (*command.ImportResult, error) {
-	return s.appManager.ImportRule(data, exportpkg.FormatAuto, command.ImportOptions{
+	return command.ImportProviders(s.appManager.GetGlobalConfig(), data, exportpkg.FormatAuto, command.ImportOptions{
 		OnProviderConflict: "use",
 		Quiet:              true,
 	})
