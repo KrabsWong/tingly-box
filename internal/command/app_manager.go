@@ -57,7 +57,9 @@ func (am *AppManager) GetGlobalConfig() *serverconfig.Config {
 
 // FetchAndSaveProviderModels fetches models from a provider and saves them.
 func (am *AppManager) FetchAndSaveProviderModels(providerUUID string) error {
-	return am.appConfig.FetchAndSaveProviderModels(providerUUID)
+	uc := usecase.NewProviderUseCase(am.appConfig.GetGlobalConfig())
+	_, err := uc.RefreshModels(usecase.RefreshModelsRequest{UUID: providerUUID})
+	return err
 }
 
 // ============
@@ -92,33 +94,26 @@ func (am *AppManager) StartServer() error {
 // ============
 // Provider Management
 // ============
+//
+// AddProvider/DeleteProviderByUUID/UpdateProviderByUUID delegate to
+// usecase.ProviderUseCase (internal/usecase/provider.go) for the same
+// reason as the Rule methods above: kept for tui.TUIManager and
+// gui/wails3/services/tingly_service.go compatibility, logic lives in the
+// use-case now.
 
 // AddProvider adds a new AI provider with the given configuration.
 // Note: Provider name is not used as a unique identifier - multiple providers
 // can have the same name. The system automatically generates a unique UUID for each.
 // Returns the UUID of the newly created provider.
 func (am *AppManager) AddProvider(name, apiBase, token string, apiStyle protocol.APIStyle) (string, error) {
-	// Create provider with API style set from the start
-	provider := &typ.Provider{
-		Name:     name,
-		APIBase:  apiBase,
-		APIStyle: apiStyle,
-		AuthType: typ.AuthTypeAPIKey,
-		Token:    token,
-		Enabled:  true,
-	}
-
-	// Add the provider (UUID will be generated automatically)
-	if err := am.appConfig.AddProvider(provider); err != nil {
+	uc := usecase.NewProviderUseCase(am.appConfig.GetGlobalConfig())
+	res, err := uc.Add(usecase.CreateProviderRequest{
+		Name: name, APIBase: apiBase, Token: token, APIStyle: apiStyle,
+	})
+	if err != nil {
 		return "", fmt.Errorf("failed to add provider: %w", err)
 	}
-
-	// Save the configuration
-	if err := am.appConfig.Save(); err != nil {
-		return "", fmt.Errorf("failed to save configuration: %w", err)
-	}
-
-	return provider.UUID, nil
+	return res.Provider.UUID, nil
 }
 
 // DeleteProvider removes an AI provider by name.
@@ -131,17 +126,22 @@ func (am *AppManager) DeleteProvider(name string) error {
 
 // DeleteProviderByUUID removes an AI provider by UUID.
 func (am *AppManager) DeleteProviderByUUID(uuid string) error {
-	globalConfig := am.appConfig.GetGlobalConfig()
-	if err := globalConfig.DeleteProvider(uuid); err != nil {
+	uc := usecase.NewProviderUseCase(am.appConfig.GetGlobalConfig())
+	if err := uc.Delete(usecase.DeleteProviderRequest{UUID: uuid}); err != nil {
 		return fmt.Errorf("failed to delete provider: %w", err)
 	}
 	return nil
 }
 
-// UpdateProviderByUUID updates an existing provider by UUID.
+// UpdateProviderByUUID updates an existing provider by UUID (full replace —
+// matches usecase.ProviderUseCase.Update's semantics).
 func (am *AppManager) UpdateProviderByUUID(uuid string, provider *typ.Provider) error {
-	globalConfig := am.appConfig.GetGlobalConfig()
-	if err := globalConfig.UpdateProvider(uuid, provider); err != nil {
+	uc := usecase.NewProviderUseCase(am.appConfig.GetGlobalConfig())
+	_, err := uc.Update(usecase.UpdateProviderRequest{
+		UUID: uuid, Name: provider.Name, APIBase: provider.APIBase,
+		Token: provider.Token, APIStyle: provider.APIStyle, ProxyURL: provider.ProxyURL,
+	})
+	if err != nil {
 		return fmt.Errorf("failed to update provider: %w", err)
 	}
 	return nil

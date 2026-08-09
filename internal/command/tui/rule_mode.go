@@ -232,7 +232,8 @@ func pickProviderModel(mgr TUIManager, p *typ.Provider, prompt string) (string, 
 	models := availableModels(mgr, p)
 	if len(models) == 0 {
 		_, _ = WithSpinner("Fetching models from "+p.Name, func() (struct{}, error) {
-			return struct{}{}, mgr.FetchAndSaveProviderModels(p.UUID)
+			_, err := usecase.NewProviderUseCase(mgr.GetGlobalConfig()).RefreshModels(usecase.RefreshModelsRequest{UUID: p.UUID})
+			return struct{}{}, err
 		})
 		models = availableModels(mgr, p)
 	}

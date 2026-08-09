@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tingly-dev/tingly-box/internal/protocol"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // runAdd handles the provider addition process with both positional arguments and interactive mode
@@ -108,11 +109,13 @@ func runAdd(appManager *AppManager, args []string) error {
 // addProviderCI adds a provider without prompting. Used when every required
 // field is provided on the command line — typical for scripts and CI.
 func addProviderCI(appManager *AppManager, name, apiBase, token string, apiStyle APIStyle) error {
-	uuid, err := appManager.AddProvider(name, apiBase, token, apiStyle)
+	res, err := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).Add(usecase.CreateProviderRequest{
+		Name: name, APIBase: apiBase, Token: token, APIStyle: apiStyle,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to add provider: %w", err)
 	}
-	fmt.Printf("✓ Provider '%s' added (uuid: %s, style: %s)\n", name, uuid, apiStyle)
+	fmt.Printf("✓ Provider '%s' added (uuid: %s, style: %s)\n", name, res.Provider.UUID, apiStyle)
 	return nil
 }
 
@@ -139,13 +142,15 @@ func addProviderWithConfirmation(appManager *AppManager, reader *bufio.Reader, n
 		return nil
 	}
 
-	// Add the provider using AppManager
-	uuid, err := appManager.AddProvider(name, apiBase, token, apiStyle)
+	// Add the provider
+	res, err := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).Add(usecase.CreateProviderRequest{
+		Name: name, APIBase: apiBase, Token: token, APIStyle: apiStyle,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to add provider: %w", err)
 	}
 
-	fmt.Printf("Successfully added provider '%s' (UUID: %s) with API style '%s'\n", name, uuid, apiStyle)
+	fmt.Printf("Successfully added provider '%s' (UUID: %s) with API style '%s'\n", name, res.Provider.UUID, apiStyle)
 	return nil
 }
 

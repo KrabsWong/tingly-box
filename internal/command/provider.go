@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tingly-dev/tingly-box/internal/protocol"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // APIStyle is re-exported from internal/protocol for the CLI prompts.
@@ -138,7 +139,15 @@ func runProviderUpdateInteractive(appManager *AppManager, reader *bufio.Reader) 
 	provider.APIStyle = apiStyle
 
 	// Save to database using UUID
-	if err := appManager.UpdateProviderByUUID(providerUUID, provider); err != nil {
+	providerUC := usecase.NewProviderUseCase(appManager.GetGlobalConfig())
+	if _, err := providerUC.Update(usecase.UpdateProviderRequest{
+		UUID:     providerUUID,
+		Name:     provider.Name,
+		APIBase:  apiBase,
+		Token:    token,
+		APIStyle: apiStyle,
+		ProxyURL: provider.ProxyURL,
+	}); err != nil {
 		return fmt.Errorf("failed to save updated provider: %w", err)
 	}
 
@@ -195,7 +204,7 @@ func runProviderDeleteByUUID(appManager *AppManager, uuid, name string) error {
 		return nil
 	}
 
-	if err := appManager.DeleteProviderByUUID(uuid); err != nil {
+	if err := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).Delete(usecase.DeleteProviderRequest{UUID: uuid}); err != nil {
 		return fmt.Errorf("failed to delete provider: %w", err)
 	}
 

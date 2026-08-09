@@ -12,6 +12,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // TUIManager is the surface the TUI needs from the host (the CLI's
@@ -410,33 +411,27 @@ func qsDetails(ctx StepContext, s quickstartState) (quickstartState, StepResult,
 	}
 	s.proxyURL = proxyR.Value
 
-	uuid, err := s.mgr.AddProvider(s.providerName, s.apiBase, s.apiToken, s.apiStyle)
+	res, err := usecase.NewProviderUseCase(s.mgr.GetGlobalConfig()).Add(usecase.CreateProviderRequest{
+		Name: s.providerName, APIBase: s.apiBase, Token: s.apiToken,
+		APIStyle: s.apiStyle, ProxyURL: s.proxyURL,
+	})
 	if err != nil {
 		return s, StepCancel, fmt.Errorf("failed to add provider: %w", err)
 	}
-	provider, err := s.mgr.GetProvider(uuid)
-	if err != nil {
-		return s, StepCancel, err
-	}
-	if s.proxyURL != "" {
-		provider.ProxyURL = s.proxyURL
-		if err := s.mgr.SaveConfig(); err != nil {
-			return s, StepCancel, fmt.Errorf("failed to save proxy: %w", err)
-		}
-	}
-	s.provider = provider
+	s.provider = res.Provider
 	return s, StepContinue, nil
 }
 
 func qsModel(ctx StepContext, s quickstartState) (quickstartState, StepResult, error) {
 	models, _ := WithSpinner("Fetching models from provider", func() ([]string, error) {
-		if err := s.mgr.FetchAndSaveProviderModels(s.provider.UUID); err != nil {
+		// RefreshModels walks the full cache→vmodel→API→template fallback
+		// chain, so providers whose catalogs only exist as build-time data
+		// (Anthropic, OAuth-only) still produce a non-empty list.
+		res, err := usecase.NewProviderUseCase(s.mgr.GetGlobalConfig()).RefreshModels(usecase.RefreshModelsRequest{UUID: s.provider.UUID})
+		if err != nil {
 			return nil, err
 		}
-		// availableModels does the DB-cached → embedded-template cascade so
-		// providers whose catalogs only exist as build-time data (Anthropic,
-		// OAuth-only) still produce a non-empty list.
-		return availableModels(s.mgr, s.provider), nil
+		return res.Models, nil
 	})
 
 	if len(models) == 0 {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // RunProviderMode is the entry point for the Provider mode loop. It returns
@@ -112,19 +113,14 @@ func providerAdd(mgr TUIManager) error {
 		return nil
 	}
 
-	uuid, err := mgr.AddProvider(nameR.Value, apiBase, tokenR.Value, styleR.Value)
+	res, err := usecase.NewProviderUseCase(mgr.GetGlobalConfig()).Add(usecase.CreateProviderRequest{
+		Name: nameR.Value, APIBase: apiBase, Token: tokenR.Value,
+		APIStyle: styleR.Value, ProxyURL: proxyR.Value,
+	})
 	if err != nil {
 		return err
 	}
-	if proxyR.Value != "" {
-		if p, gerr := mgr.GetProvider(uuid); gerr == nil && p != nil {
-			p.ProxyURL = proxyR.Value
-			if uerr := mgr.UpdateProviderByUUID(uuid, p); uerr != nil {
-				return fmt.Errorf("save proxy: %w", uerr)
-			}
-		}
-	}
-	fmt.Println(successStyle.Render(fmt.Sprintf("✓ Provider '%s' added (uuid: %s).", nameR.Value, uuid)))
+	fmt.Println(successStyle.Render(fmt.Sprintf("✓ Provider '%s' added (uuid: %s).", nameR.Value, res.Provider.UUID)))
 	Pause("")
 	return nil
 }
@@ -199,7 +195,10 @@ func providerEdit(mgr TUIManager) error {
 	if tokenR.Value != "" {
 		p.Token = tokenR.Value
 	}
-	if err := mgr.UpdateProviderByUUID(p.UUID, p); err != nil {
+	if _, err := usecase.NewProviderUseCase(mgr.GetGlobalConfig()).Update(usecase.UpdateProviderRequest{
+		UUID: p.UUID, Name: p.Name, APIBase: p.APIBase, Token: p.Token,
+		APIStyle: p.APIStyle, ProxyURL: p.ProxyURL,
+	}); err != nil {
 		return err
 	}
 	fmt.Println(successStyle.Render(fmt.Sprintf("✓ Provider '%s' updated.", p.Name)))
@@ -219,7 +218,7 @@ func providerDelete(mgr TUIManager) error {
 	if err != nil || !confirm.IsConfirm() || !confirm.Value {
 		return nil
 	}
-	if err := mgr.DeleteProviderByUUID(p.UUID); err != nil {
+	if err := usecase.NewProviderUseCase(mgr.GetGlobalConfig()).Delete(usecase.DeleteProviderRequest{UUID: p.UUID}); err != nil {
 		return err
 	}
 	fmt.Println(successStyle.Render(fmt.Sprintf("✓ Provider '%s' deleted.", p.Name)))
@@ -232,15 +231,14 @@ func providerRefreshModels(mgr TUIManager) error {
 	if err != nil || p == nil {
 		return err
 	}
-	_, err = WithSpinner(fmt.Sprintf("Fetching models from %s", p.Name), func() (struct{}, error) {
-		return struct{}{}, mgr.FetchAndSaveProviderModels(p.UUID)
+	res, err := WithSpinner(fmt.Sprintf("Fetching models from %s", p.Name), func() (usecase.RefreshModelsResult, error) {
+		return usecase.NewProviderUseCase(mgr.GetGlobalConfig()).RefreshModels(usecase.RefreshModelsRequest{UUID: p.UUID})
 	})
 	if err != nil {
 		return err
 	}
-	models := availableModels(mgr, p)
-	fmt.Println(successStyle.Render(fmt.Sprintf("✓ %d model(s) available for %s.", len(models), p.Name)))
-	for _, m := range models {
+	fmt.Println(successStyle.Render(fmt.Sprintf("✓ %d model(s) available for %s.", len(res.Models), p.Name)))
+	for _, m := range res.Models {
 		fmt.Println(descStyle.Render("  - " + m))
 	}
 	fmt.Println()
