@@ -102,9 +102,14 @@ func (uc *ProviderUseCase) Add(req CreateProviderRequest) (CreateProviderResult,
 	return CreateProviderResult{Provider: provider}, nil
 }
 
-// UpdateProviderRequest replaces a provider's fields wholesale (matching
-// UpdateProviderByUUID's existing full-replace semantics — there is no
-// partial-update path today in either CLI or TUI).
+// UpdateProviderRequest replaces a provider's fields by UUID. There is no
+// partial-update path today in either CLI or TUI.
+//
+// Token is the one exception to wholesale replace: an empty Token is ignored
+// and the existing token is preserved. This matches the CLI's interactive
+// "press Enter to keep current" behavior (the CLI reloads the stored token
+// before calling Update when the user leaves the field blank). Clearing a
+// token is intentionally unsupported.
 type UpdateProviderRequest struct {
 	UUID     string            `json:"uuid"`
 	Name     string            `json:"name"`
