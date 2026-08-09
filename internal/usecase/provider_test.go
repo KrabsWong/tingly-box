@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/tingly-dev/tingly-box/ai"
@@ -49,13 +50,21 @@ func codexTestProvider() *typ.Provider {
 	}
 }
 
+func TestErrProviderNotFound_Error(t *testing.T) {
+	err := ErrProviderNotFound{UUID: "provider-1"}
+	if got := err.Error(); !strings.Contains(got, "provider-1") {
+		t.Errorf("Error() = %q, expected it to contain %q", got, "provider-1")
+	}
+}
+
 func TestProviderUseCase_Add(t *testing.T) {
 	cfg := newTestProviderConfig(t)
 	uc := NewProviderUseCase(cfg)
 
 	tests := []struct {
-		name string
-		req  CreateProviderRequest
+		name    string
+		req     CreateProviderRequest
+		wantErr bool
 	}{
 		{
 			name: "openai style, no proxy",
@@ -85,11 +94,37 @@ func TestProviderUseCase_Add(t *testing.T) {
 				APIStyle: protocol.APIStyleOpenAI,
 			},
 		},
+		{
+			name: "empty name is rejected by the underlying config",
+			req: CreateProviderRequest{
+				Name:     "",
+				APIBase:  "https://api.openai.com/v1",
+				Token:    "sk-test",
+				APIStyle: protocol.APIStyleOpenAI,
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty API base is rejected by the underlying config",
+			req: CreateProviderRequest{
+				Name:     "no-api-base",
+				APIBase:  "",
+				Token:    "sk-test",
+				APIStyle: protocol.APIStyleOpenAI,
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			res, err := uc.Add(tt.req)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error, got nil")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Add: %v", err)
 			}
@@ -264,11 +299,38 @@ func TestProviderUseCase_AvailableModels_FallsThroughToTemplate(t *testing.T) {
 	}
 }
 
+func TestProviderUseCase_AvailableModels_UnknownProvider(t *testing.T) {
+	cfg := newTestProviderConfig(t)
+	uc := NewProviderUseCase(cfg)
+
+	if _, err := uc.AvailableModels(AvailableModelsRequest{UUID: "does-not-exist"}); err == nil {
+		t.Fatal("expected an error for an unknown provider UUID")
+	}
+}
+
 func TestProviderUseCase_RefreshModels_UnknownProvider(t *testing.T) {
 	cfg := newTestProviderConfig(t)
 	uc := NewProviderUseCase(cfg)
 
 	if _, err := uc.RefreshModels(RefreshModelsRequest{UUID: "does-not-exist"}); err == nil {
 		t.Fatal("expected an error for an unknown provider UUID")
+	}
+}
+
+func TestProviderUseCase_RefreshModels_BypassesCache(t *testing.T) {
+	cfg := newTestProviderConfig(t)
+	uc := NewProviderUseCase(cfg)
+
+	p := codexTestProvider()
+	if err := cfg.AddProvider(p); err != nil {
+		t.Fatalf("AddProvider: %v", err)
+	}
+
+	res, err := uc.RefreshModels(RefreshModelsRequest{UUID: p.UUID})
+	if err != nil {
+		t.Fatalf("RefreshModels: %v", err)
+	}
+	if len(res.Models) == 0 {
+		t.Error("expected a non-empty model list from the embedded template")
 	}
 }
