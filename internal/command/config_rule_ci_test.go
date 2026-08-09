@@ -15,15 +15,15 @@ import (
 func TestResolveProviderRef(t *testing.T) {
 	am := newTestAppManager(t)
 
-	uniqUUID, err := am.AddProvider("only-mine", "https://a.example", "tok", protocol.APIStyleOpenAI)
+	uniqUUID, err := addProviderForTest(am, "only-mine", "https://a.example", "tok", protocol.APIStyleOpenAI)
 	if err != nil {
 		t.Fatalf("AddProvider unique: %v", err)
 	}
-	dupAUUID, err := am.AddProvider("dup", "https://b.example", "tok", protocol.APIStyleOpenAI)
+	dupAUUID, err := addProviderForTest(am, "dup", "https://b.example", "tok", protocol.APIStyleOpenAI)
 	if err != nil {
 		t.Fatalf("AddProvider dup-a: %v", err)
 	}
-	dupBUUID, err := am.AddProvider("dup", "https://c.example", "tok", protocol.APIStyleOpenAI)
+	dupBUUID, err := addProviderForTest(am, "dup", "https://c.example", "tok", protocol.APIStyleOpenAI)
 	if err != nil {
 		t.Fatalf("AddProvider dup-b: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestResolveProviderRef(t *testing.T) {
 func TestRunRuleAddCI(t *testing.T) {
 	am := newTestAppManager(t)
 
-	providerUUID, err := am.AddProvider("openai", "https://api.openai.com", "tok", protocol.APIStyleOpenAI)
+	providerUUID, err := addProviderForTest(am, "openai", "https://api.openai.com", "tok", protocol.APIStyleOpenAI)
 	if err != nil {
 		t.Fatalf("AddProvider: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestRunRuleAddCI(t *testing.T) {
 // would hang a CI job on a TTY read.
 func TestConfigRuleAddCmdPartialFlagsErrors(t *testing.T) {
 	am := newTestAppManager(t)
-	if _, err := am.AddProvider("openai", "https://api.openai.com", "tok", protocol.APIStyleOpenAI); err != nil {
+	if _, err := addProviderForTest(am, "openai", "https://api.openai.com", "tok", protocol.APIStyleOpenAI); err != nil {
 		t.Fatalf("AddProvider: %v", err)
 	}
 

@@ -15,6 +15,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/command"
 	exportpkg "github.com/tingly-dev/tingly-box/internal/dataio"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // TinglyService manages the web UI and HTTP server functionality
@@ -92,13 +93,15 @@ func (s *TinglyService) ServiceShutdown(ctx context.Context) error {
 // ============
 
 func (s *TinglyService) GetUserAuthToken() string {
-	logrus.Debugf("Getting auth token %s\n", s.appManager.GetUserToken())
-	return s.appManager.GetUserToken()
+	token := s.appManager.GetGlobalConfig().GetUserToken()
+	logrus.Debugf("Getting auth token %s\n", token)
+	return token
 }
 
 func (s *TinglyService) GetPort() int {
-	logrus.Debugf("Getting port %d\n", s.appManager.GetServerPort())
-	return s.appManager.GetServerPort()
+	port := s.appManager.GetGlobalConfig().GetServerPort()
+	logrus.Debugf("Getting port %d\n", port)
+	return port
 }
 
 // ChoosePath opens a native file dialog and returns a selected file or directory path.
@@ -121,22 +124,31 @@ func (s *TinglyService) ChoosePath() (string, error) {
 
 // ListProviders returns all configured providers
 func (s *TinglyService) ListProviders() []*typ.Provider {
-	return s.appManager.ListProviders()
+	return usecase.NewProviderUseCase(s.appManager.GetGlobalConfig()).List().Providers
 }
 
 // AddProvider adds a new AI provider
 func (s *TinglyService) AddProvider(name, apiBase, token, apiStyle string) (string, error) {
-	return s.appManager.AddProvider(name, apiBase, token, protocol.APIStyle(apiStyle))
+	result, err := usecase.NewProviderUseCase(s.appManager.GetGlobalConfig()).Add(usecase.CreateProviderRequest{
+		Name: name, APIBase: apiBase, Token: token, APIStyle: protocol.APIStyle(apiStyle),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to add provider: %w", err)
+	}
+	return result.Provider.UUID, nil
 }
 
-// DeleteProvider removes an AI provider by name
-func (s *TinglyService) DeleteProvider(name string) error {
-	return s.appManager.DeleteProvider(name)
+// DeleteProvider removes an AI provider by UUID.
+func (s *TinglyService) DeleteProvider(uuid string) error {
+	if err := usecase.NewProviderUseCase(s.appManager.GetGlobalConfig()).Delete(usecase.DeleteProviderRequest{UUID: uuid}); err != nil {
+		return fmt.Errorf("failed to delete provider: %w", err)
+	}
+	return nil
 }
 
-// GetProvider returns a provider by name
-func (s *TinglyService) GetProvider(name string) (*typ.Provider, error) {
-	return s.appManager.GetProvider(name)
+// GetProvider returns a provider by UUID.
+func (s *TinglyService) GetProvider(uuid string) (*typ.Provider, error) {
+	return s.appManager.GetGlobalConfig().GetProviderByUUID(uuid)
 }
 
 // ============
@@ -145,7 +157,7 @@ func (s *TinglyService) GetProvider(name string) (*typ.Provider, error) {
 
 // ListRules returns all configured rules
 func (s *TinglyService) ListRules() []typ.Rule {
-	return s.appManager.ListRules()
+	return usecase.NewRuleUseCase(s.appManager.GetGlobalConfig()).List().Rules
 }
 
 // ImportRule imports providers from JSONL/base64 export data. Despite the

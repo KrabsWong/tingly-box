@@ -57,7 +57,7 @@ func (l *LogCmdKong) Run(appManager *AppManager) error {
 	}
 	baseURL := fmt.Sprintf("http://%s:%d/api/v1/system/logs", host, port)
 
-	token := appManager.GetUserToken()
+	token := appManager.GetGlobalConfig().GetUserToken()
 
 	limit := l.Limit
 	if limit <= 0 {

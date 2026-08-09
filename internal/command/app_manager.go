@@ -5,16 +5,13 @@ import (
 
 	"github.com/tingly-dev/tingly-box/internal/config"
 	exportpkg "github.com/tingly-dev/tingly-box/internal/dataio"
-	"github.com/tingly-dev/tingly-box/internal/protocol"
 	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
-	"github.com/tingly-dev/tingly-box/internal/usecase"
 	"github.com/tingly-dev/tingly-box/pkg/lock"
 )
 
 // AppManager is the command process host: it owns AppConfig and server
-// lifecycle, plus a small compatibility surface still consumed by Wails.
-// Domain behavior belongs in internal/usecase rather than growing here.
+// lifecycle. Domain behavior belongs in internal/usecase rather than here.
 type AppManager struct {
 	appConfig *config.AppConfig
 }
@@ -62,71 +59,8 @@ func (am *AppManager) StartServerAt(port int) error {
 }
 
 // ============
-// Provider Management
-// ============
-//
-// The Wails compatibility service still consumes this small read/add surface.
-// CLI and TUI workflows construct ProviderUseCase directly.
-
-// AddProvider adds a new AI provider with the given configuration.
-// Note: Provider name is not used as a unique identifier - multiple providers
-// can have the same name. The system automatically generates a unique UUID for each.
-// Returns the UUID of the newly created provider.
-func (am *AppManager) AddProvider(name, apiBase, token string, apiStyle protocol.APIStyle) (string, error) {
-	uc := usecase.NewProviderUseCase(am.appConfig.GetGlobalConfig())
-	res, err := uc.Add(usecase.CreateProviderRequest{
-		Name: name, APIBase: apiBase, Token: token, APIStyle: apiStyle,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to add provider: %w", err)
-	}
-	return res.Provider.UUID, nil
-}
-
-// DeleteProvider removes an AI provider by name.
-func (am *AppManager) DeleteProvider(name string) error {
-	if err := am.appConfig.DeleteProvider(name); err != nil {
-		return fmt.Errorf("failed to delete provider: %w", err)
-	}
-	return nil
-}
-
-// ListProviders returns all configured providers.
-func (am *AppManager) ListProviders() []*typ.Provider {
-	return am.appConfig.ListProviders()
-}
-
-// GetProviderByUUID returns a provider by UUID (implements quota.ProviderManager interface)
-func (am *AppManager) GetProviderByUUID(uuid string) (*typ.Provider, error) {
-	return am.GetProvider(uuid)
-}
-
-// GetProvider returns a provider by UUID, or nil if not found.
-func (am *AppManager) GetProvider(uuid string) (*typ.Provider, error) {
-	return am.appConfig.GetProviderByUUID(uuid)
-}
-
-// ============
-// Rule Management
-// ============
-//
-// Wails still consumes ListRules; command and TUI mutation paths use
-// RuleUseCase directly.
-
-// ListRules returns all configured rules.
-func (am *AppManager) ListRules() []typ.Rule {
-	uc := usecase.NewRuleUseCase(am.appConfig.GetGlobalConfig())
-	return uc.List().Rules
-}
-
-// ============
 // Configuration Accessors
 // ============
-
-// GetServerPort returns the configured server port.
-func (am *AppManager) GetServerPort() int {
-	return am.appConfig.GetServerPort()
-}
 
 // GetRuntimeServerPort returns the port the running server is actually
 // listening on. The server port is intentionally not persisted in the config
@@ -143,11 +77,6 @@ func (am *AppManager) GetRuntimeServerPort() int {
 		}
 	}
 	return am.appConfig.GetServerPort()
-}
-
-// GetUserToken returns the user authentication token.
-func (am *AppManager) GetUserToken() string {
-	return am.appConfig.GetGlobalConfig().GetUserToken()
 }
 
 // ============

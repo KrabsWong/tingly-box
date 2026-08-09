@@ -82,18 +82,21 @@ use-case never reaches back up.
 ## Migration status
 
 As of 2026-08-09, CLI and TUI Rule/Provider/Agent reads and mutations use this
-layer. Agent Show data and the routing-key table have one implementation.
+layer. The Wails service also constructs Provider and Rule use-cases directly
+while preserving its existing binding methods. Agent Show data and the routing-key
+table have one implementation.
 Claude Code profile list/resolve/detail data is represented by
 `ProfileUseCase`; the top-level `profile` command remains an intentional,
 first-class product surface, while `profile` and `cc --profile` share the same
 resolution contract.
 
 `TUIManager` now exposes only host-owned config/server lifecycle capabilities;
-it no longer mirrors Provider and Rule CRUD. `AppManager` retains only the
-small compatibility surface still consumed by Wails and unrelated commands.
+it no longer mirrors Provider and Rule CRUD. `AppManager` is the command-process
+host for AppConfig, runtime-port lookup, and TUI server startup; it does not
+mirror domain CRUD for CLI, TUI, or Wails callers.
 
-The HTTP handlers and Wails service have **not** been migrated. They remain a
-separate follow-up so API contracts and generated clients can move together.
+The HTTP handlers have **not** been migrated. They remain a separate follow-up
+so API contracts and generated clients can move together.
 
 ## Known behavioral differences not yet resolved
 

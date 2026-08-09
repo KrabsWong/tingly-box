@@ -43,7 +43,7 @@ func notifyServerBotReload(appManager *AppManager) ([]reloadedBot, bool) {
 	if err != nil {
 		return nil, false
 	}
-	if token := appManager.GetUserToken(); token != "" {
+	if token := appManager.GetGlobalConfig().GetUserToken(); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 

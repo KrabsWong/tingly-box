@@ -10,7 +10,18 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
+
+func addProviderForTest(appManager *AppManager, name, apiBase, token string, apiStyle protocol.APIStyle) (string, error) {
+	result, err := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).Add(usecase.CreateProviderRequest{
+		Name: name, APIBase: apiBase, Token: token, APIStyle: apiStyle,
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.Provider.UUID, nil
+}
 
 // TestQuickstartProviderLookup tests the fix for the provider lookup bug
 // where GetProvider was being used with a name instead of UUID.
@@ -45,7 +56,7 @@ func TestQuickstartProviderLookup(t *testing.T) {
 		apiBase := "https://api.deepseek.com"
 		token := "test-token-123"
 
-		uuid, err := appManager.AddProvider(providerName, apiBase, token, protocol.APIStyleOpenAI)
+		uuid, err := addProviderForTest(appManager, providerName, apiBase, token, protocol.APIStyleOpenAI)
 		if err != nil {
 			t.Fatalf("Failed to add provider: %v", err)
 		}
@@ -54,7 +65,7 @@ func TestQuickstartProviderLookup(t *testing.T) {
 		}
 
 		// Verify we can retrieve by UUID
-		provider, err := appManager.GetProvider(uuid)
+		provider, err := appManager.GetGlobalConfig().GetProviderByUUID(uuid)
 		if err != nil {
 			t.Errorf("Failed to get provider by UUID: %v", err)
 		}
@@ -86,19 +97,19 @@ func TestQuickstartProviderLookup(t *testing.T) {
 		token := "test-token"
 
 		// First add should succeed
-		_, err := appManager.AddProvider(providerName, apiBase1, token, protocol.APIStyleOpenAI)
+		_, err := addProviderForTest(appManager, providerName, apiBase1, token, protocol.APIStyleOpenAI)
 		if err != nil {
 			t.Fatalf("First add failed: %v", err)
 		}
 
 		// Second add with same name but different API base should also succeed
-		_, err = appManager.AddProvider(providerName, apiBase2, token, protocol.APIStyleOpenAI)
+		_, err = addProviderForTest(appManager, providerName, apiBase2, token, protocol.APIStyleOpenAI)
 		if err != nil {
 			t.Errorf("Second add should succeed (providers are distinguished by UUID), got: %v", err)
 		}
 
 		// Verify we have two providers with the same name
-		providers := appManager.ListProviders()
+		providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 		sameNameCount := 0
 		for _, p := range providers {
 			if p.Name == providerName {
@@ -116,7 +127,7 @@ func TestQuickstartProviderLookup(t *testing.T) {
 		apiBase := "https://api.test.com"
 		token := "test-token-uuid"
 
-		uuid, err := appManager.AddProvider(providerName, apiBase, token, protocol.APIStyleAnthropic)
+		uuid, err := addProviderForTest(appManager, providerName, apiBase, token, protocol.APIStyleAnthropic)
 		if err != nil {
 			t.Fatalf("Failed to add provider: %v", err)
 		}
@@ -125,7 +136,7 @@ func TestQuickstartProviderLookup(t *testing.T) {
 		}
 
 		// Get by UUID directly
-		providerByUUID, err := appManager.GetProvider(uuid)
+		providerByUUID, err := appManager.GetGlobalConfig().GetProviderByUUID(uuid)
 		if err != nil {
 			t.Errorf("Failed to get provider by UUID: %v", err)
 		}
@@ -162,12 +173,12 @@ func TestQuickstartConfigureRules(t *testing.T) {
 	apiBase := "https://api.test.com"
 	token := "test-token"
 
-	uuid, err := appManager.AddProvider(providerName, apiBase, token, protocol.APIStyleOpenAI)
+	uuid, err := addProviderForTest(appManager, providerName, apiBase, token, protocol.APIStyleOpenAI)
 	if err != nil {
 		t.Fatalf("Failed to add provider: %v", err)
 	}
 
-	provider, err := appManager.GetProvider(uuid)
+	provider, err := appManager.GetGlobalConfig().GetProviderByUUID(uuid)
 	if err != nil {
 		t.Fatalf("Failed to get provider: %v", err)
 	}
@@ -240,7 +251,7 @@ func TestQuickstartProviderTemplate(t *testing.T) {
 	apiBase := "https://api.deepseek.com"
 	token := "test-token"
 
-	uuid, err := appManager.AddProvider(templateID, apiBase, token, protocol.APIStyleOpenAI)
+	uuid, err := addProviderForTest(appManager, templateID, apiBase, token, protocol.APIStyleOpenAI)
 	if err != nil {
 		t.Fatalf("Failed to add provider with template ID as name: %v", err)
 	}
@@ -249,7 +260,7 @@ func TestQuickstartProviderTemplate(t *testing.T) {
 	}
 
 	// The fix: AddProvider now returns the UUID, use GetProvider to retrieve
-	provider, err := appManager.GetProvider(uuid)
+	provider, err := appManager.GetGlobalConfig().GetProviderByUUID(uuid)
 	if err != nil {
 		t.Errorf("Failed to get provider by UUID: %v", err)
 	}
@@ -315,7 +326,7 @@ func TestQuickstartConfigPersistence(t *testing.T) {
 			t.Fatalf("Failed to create app manager: %v", err)
 		}
 
-		_, err = appManager1.AddProvider("persist-test", "https://api.test.com", "token", protocol.APIStyleOpenAI)
+		_, err = addProviderForTest(appManager1, "persist-test", "https://api.test.com", "token", protocol.APIStyleOpenAI)
 		if err != nil {
 			t.Fatalf("Failed to add provider: %v", err)
 		}
