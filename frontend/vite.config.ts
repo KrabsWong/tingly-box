@@ -1,4 +1,4 @@
-import react from '@vitejs/plugin-react-swc';
+import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv } from 'vite';
 import { visualizer } from 'rollup-plugin-visualizer';
 import path from 'path';
@@ -54,12 +54,14 @@ export default defineConfig(({ mode }) => {
         },
         // Memory optimization for build process
         optimizeDeps: {
-            // Pre-bundle large dependencies to reduce build memory
+            // Pre-bundle large dependencies to reduce build memory.
+            // @mui/icons-material is NOT listed: the app only ever imports it as
+            // a type (see components/icons/tablerMui.tsx), so it's a devDependency
+            // with no runtime module to pre-bundle.
             include: [
                 'react',
                 'react-dom',
                 '@mui/material',
-                '@mui/icons-material',
             ],
         },
         build: {
@@ -72,6 +74,9 @@ export default defineConfig(({ mode }) => {
                     // Only MUI is forced into its own vendor chunk here: it's imported
                     // eagerly by Layout/App (not just lazy pages), so it belongs in the
                     // always-loaded set and benefits from a stable, cacheable chunk name.
+                    // (@mui/icons-material is deliberately NOT grouped here — it's only
+                    // ever imported as a type, so no runtime module from it ever reaches
+                    // the bundle; see the optimizeDeps comment above.)
                     //
                     // recharts/d3 deliberately have NO manual rule. They're only used by
                     // two lazy pages (Dashboard, UserUsage) and are never imported eagerly
@@ -89,9 +94,6 @@ export default defineConfig(({ mode }) => {
                             if (id.includes('@mui/material') || id.includes('@mui/system') || id.includes('@mui/utils')) {
                                 return 'mui-vendor';
                             }
-                            if (id.includes('@mui/icons-material')) {
-                                return 'mui-icons-vendor';
-                            }
                         }
                         return undefined;
                     },
@@ -101,8 +103,11 @@ export default defineConfig(({ mode }) => {
             chunkSizeWarningLimit: 500,
             // Disable sourcemap in production to reduce memory and output size
             sourcemap: mode !== 'production',
-            // Use SWC for minification (via @vitejs/plugin-react-swc)
-            minify: 'swc',
+            // 'swc' is not a value Vite/Rolldown recognizes for build.minify
+            // (valid: true | false | 'oxc' | 'terser' | 'esbuild') — it was
+            // silently falling through to unminified output. 'oxc' is
+            // Rolldown-Vite's native minifier (same as the `true` default).
+            minify: 'oxc',
         },
     }
 })
