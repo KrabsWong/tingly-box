@@ -180,11 +180,7 @@ func (a *AgentRestoreFlagCmdKong) Run(appManager *AppManager) error {
 
 // executeAgentRestore performs the agent restore and prints the result.
 func executeAgentRestore(appManager *AppManager, req *agent.RestoreAgentRequest) error {
-	globalConfig := appManager.GetGlobalConfig()
-	host := "localhost"
-
-	agentApply := agent.NewAgentApply(globalConfig, host)
-	result, err := agentApply.RestoreAgent(req)
+	result, err := usecase.NewAgentUseCase(appManager.GetGlobalConfig(), "localhost").Restore(req)
 	if err != nil {
 		return fmt.Errorf("failed to restore configuration: %w", err)
 	}
@@ -284,34 +280,24 @@ func promptForAgentConfig(reader *bufio.Reader, appManager *AppManager, req *age
 // Falls back to prompting if no rules are configured.
 func resolveAgentConfigFromRules(appManager *AppManager, req *agent.ApplyAgentRequest) error {
 	globalConfig := appManager.GetGlobalConfig()
+	agentUC := usecase.NewAgentUseCase(globalConfig, "localhost")
 
-	requestModel, scenario, err := usecase.NewAgentUseCase(globalConfig, "localhost").RoutingKey(req.AgentType)
+	routing, err := agentUC.ResolveRouting(usecase.ResolveRoutingRequest{AgentType: req.AgentType})
 	if err != nil {
 		return err
 	}
 
-	// Look for existing routing rule
-	rule := globalConfig.GetRuleByRequestModelAndScenario(requestModel, scenario)
-
-	// If rule exists and has services, use provider/model from it
-	if rule != nil && len(rule.Services) > 0 {
-		service := rule.Services[0]
-		if service.Provider != "" && service.Model != "" {
-			// Verify the provider still exists
-			provider, err := globalConfig.GetProviderByUUID(service.Provider)
-			if err == nil && provider != nil {
-				// Use the provider and model from the routing rule
-				if req.Provider == "" {
-					req.Provider = service.Provider
-				}
-				if req.Model == "" {
-					req.Model = service.Model
-				}
-				fmt.Printf("Using existing routing rule '%s' with provider '%s' and model '%s'\n",
-					requestModel, provider.Name, service.Model)
-				return nil
-			}
+	// If the rule exists with a usable provider, use it.
+	if routing.ServiceUsable {
+		if req.Provider == "" {
+			req.Provider = routing.ProviderUUID
 		}
+		if req.Model == "" {
+			req.Model = routing.Model
+		}
+		fmt.Printf("Using existing routing rule '%s' with provider '%s' and model '%s'\n",
+			routing.RequestModel, routing.ProviderName, routing.Model)
+		return nil
 	}
 
 	// No rule or no usable service is configured yet. This is not fatal:
@@ -321,7 +307,7 @@ func resolveAgentConfigFromRules(appManager *AppManager, req *agent.ApplyAgentRe
 	// are providers available AND we're on a TTY; otherwise just warn.
 	fmt.Fprintf(os.Stderr,
 		"Warning: no routing service configured for '%s' (scenario '%s').\n",
-		requestModel, scenario)
+		routing.RequestModel, routing.Scenario)
 	fmt.Fprintln(os.Stderr,
 		"Config files will still be applied. Run 'tingly-box tui' to set up routing rules later.")
 
@@ -520,16 +506,7 @@ func showPreview(appManager *AppManager, req *agent.ApplyAgentRequest) error {
 
 // executeAgentApply executes the agent configuration apply
 func executeAgentApply(appManager *AppManager, req *agent.ApplyAgentRequest) error {
-	globalConfig := appManager.GetGlobalConfig()
-
-	// Get host for configuration (pure hostname, port is handled by AgentApply)
-	host := "localhost"
-
-	// Create agent apply instance
-	agentApply := agent.NewAgentApply(globalConfig, host)
-
-	// Apply configuration
-	result, err := agentApply.ApplyAgent(req)
+	result, err := usecase.NewAgentUseCase(appManager.GetGlobalConfig(), "localhost").Apply(req)
 	if err != nil {
 		return fmt.Errorf("failed to apply configuration: %w", err)
 	}

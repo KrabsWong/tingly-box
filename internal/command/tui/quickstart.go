@@ -701,7 +701,7 @@ func qsAgent(ctx StepContext, s quickstartState) (quickstartState, StepResult, e
 		s.ccInstallStatusLine = sl.Value
 	}
 
-	apply := agent.NewAgentApply(s.mgr.GetGlobalConfig(), "localhost")
+	agentUC := usecase.NewAgentUseCase(s.mgr.GetGlobalConfig(), "localhost")
 	for _, t := range s.selectedAgents {
 		t := t
 		req := &agent.ApplyAgentRequest{
@@ -717,7 +717,7 @@ func qsAgent(ctx StepContext, s quickstartState) (quickstartState, StepResult, e
 			label = info.Name
 		}
 		res, err := WithSpinner(fmt.Sprintf("Applying %s configuration", label), func() (*agent.ApplyAgentResult, error) {
-			return apply.ApplyAgent(req)
+			return agentUC.Apply(req)
 		})
 		if err != nil {
 			fmt.Println(errorStyle.Render(fmt.Sprintf("  ✗ %s: %v", label, err)))

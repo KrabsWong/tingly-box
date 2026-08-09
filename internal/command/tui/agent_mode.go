@@ -181,7 +181,7 @@ func agentApply(mgr TUIManager, info agent.AgentInfo) error {
 	}
 
 	res, err := WithSpinner(fmt.Sprintf("Applying %s configuration", info.Name), func() (*agent.ApplyAgentResult, error) {
-		return agent.NewAgentApply(mgr.GetGlobalConfig(), "localhost").ApplyAgent(req)
+		return usecase.NewAgentUseCase(mgr.GetGlobalConfig(), "localhost").Apply(req)
 	})
 	if err != nil {
 		return err
@@ -242,7 +242,7 @@ func agentRestore(mgr TUIManager, info agent.AgentInfo) error {
 	if err != nil || !cfm.IsConfirm() || !cfm.Value {
 		return nil
 	}
-	res, err := agent.NewAgentApply(mgr.GetGlobalConfig(), "localhost").RestoreAgent(&agent.RestoreAgentRequest{
+	res, err := usecase.NewAgentUseCase(mgr.GetGlobalConfig(), "localhost").Restore(&agent.RestoreAgentRequest{
 		AgentType: info.Type,
 		Force:     true,
 	})
