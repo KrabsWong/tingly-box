@@ -84,8 +84,14 @@ func TestProfileUseCase_GetByIDOrName(t *testing.T) {
 			if len(result.Rules) != 5 {
 				t.Fatalf("rules = %d, want 5", len(result.Rules))
 			}
-			if result.Rules[0].RequestModel != "default" {
-				t.Errorf("rules are not sorted: first = %q", result.Rules[0].RequestModel)
+			// Assert the full ordering is non-decreasing by RequestModel, not
+			// just Rules[0]. "default" sorts first lexicographically anyway, so
+			// checking only the first element cannot catch a sort regression.
+			for i := 1; i < len(result.Rules); i++ {
+				if result.Rules[i-1].RequestModel > result.Rules[i].RequestModel {
+					t.Errorf("rules not sorted by RequestModel: %q > %q at index %d",
+						result.Rules[i-1].RequestModel, result.Rules[i].RequestModel, i)
+				}
 			}
 			if !result.Rules[0].Configured || result.Rules[0].ProviderUUID != providerUUID || result.Rules[0].ProviderName != "profile-provider" {
 				t.Errorf("configured rule = %#v", result.Rules[0])

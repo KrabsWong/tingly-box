@@ -274,8 +274,13 @@ func TestRuleUseCase_Delete(t *testing.T) {
 		if err := uc.Delete(DeleteRuleRequest{UUID: created.Rule.UUID}); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
-		if _, err := uc.Get(GetRuleRequest{UUID: created.Rule.UUID}); err == nil {
+		_, err := uc.Get(GetRuleRequest{UUID: created.Rule.UUID})
+		if err == nil {
 			t.Fatal("expected rule to be gone after Delete")
+		}
+		var nf ErrRuleNotFound
+		if !errors.As(err, &nf) {
+			t.Fatalf("expected ErrRuleNotFound after Delete, got %T: %v", err, err)
 		}
 	})
 

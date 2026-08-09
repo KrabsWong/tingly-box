@@ -8,6 +8,7 @@ import (
 
 	"github.com/tingly-dev/tingly-box/ai"
 	"github.com/tingly-dev/tingly-box/internal/data"
+	"github.com/tingly-dev/tingly-box/internal/data/db"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
@@ -272,6 +273,11 @@ func TestProviderUseCase_Delete(t *testing.T) {
 	}
 	if _, err := uc.Get(GetProviderRequest{UUID: created.Provider.UUID}); err == nil {
 		t.Fatal("expected provider to be gone after Delete")
+	} else {
+		var nf ErrProviderNotFound
+		if !errors.As(err, &nf) {
+			t.Fatalf("expected ErrProviderNotFound after Delete, got %T: %v", err, err)
+		}
 	}
 }
 
@@ -326,11 +332,33 @@ func TestProviderUseCase_RefreshModels_BypassesCache(t *testing.T) {
 		t.Fatalf("AddProvider: %v", err)
 	}
 
+	// Poison the DB cache with a sentinel. AvailableModels (forceRefresh=false)
+	// must serve this cached value; RefreshModels (forceRefresh=true) must NOT —
+	// only the latter proves the force-refresh path actually bypasses cache and
+	// re-resolves through the template fallback.
+	const poison = "POISONED-CACHE-ONLY"
+	if err := cfg.GetModelManager().SaveModels(p, []string{poison}, db.ModelSourceAPI); err != nil {
+		t.Fatalf("SaveModels: %v", err)
+	}
+
+	avail, err := uc.AvailableModels(AvailableModelsRequest{UUID: p.UUID})
+	if err != nil {
+		t.Fatalf("AvailableModels: %v", err)
+	}
+	if len(avail.Models) != 1 || avail.Models[0] != poison {
+		t.Fatalf("AvailableModels (no force) = %v, want [%q] from cache", avail.Models, poison)
+	}
+
 	res, err := uc.RefreshModels(RefreshModelsRequest{UUID: p.UUID})
 	if err != nil {
 		t.Fatalf("RefreshModels: %v", err)
 	}
 	if len(res.Models) == 0 {
-		t.Error("expected a non-empty model list from the embedded template")
+		t.Fatal("expected a non-empty model list after forcing a refresh")
+	}
+	for _, m := range res.Models {
+		if m == poison {
+			t.Fatalf("RefreshModels returned the stale cache entry %q; force-refresh did not bypass cache", poison)
+		}
 	}
 }
