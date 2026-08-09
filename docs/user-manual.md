@@ -58,10 +58,10 @@ Tingly Box supports two types of provider authentication:
 
 ```bash
 # OpenAI example
-tingly-box add openai https://api.openai.com/v1 sk-your-key
+tingly-box config provider add my-openai https://api.openai.com/v1 sk-your-key openai
 
 # Anthropic example
-tingly-box add anthropic https://api.anthropic.com sk-your-key
+tingly-box config provider add my-anthropic https://api.anthropic.com sk-your-key anthropic
 ```
 
 #### Using Web UI

@@ -243,7 +243,7 @@ func promptForAgentTypeChoice(reader *bufio.Reader) (agent.AgentType, error) {
 func promptForAgentConfig(reader *bufio.Reader, appManager *AppManager, req *agent.ApplyAgentRequest) error {
 	providers := appManager.ListProviders()
 	if len(providers) == 0 {
-		return fmt.Errorf("no providers configured. Please add a provider first using 'tingly-box provider add'")
+		return fmt.Errorf("no providers configured. Please add a provider first using 'tingly-box config provider add'")
 	}
 
 	// Prompt for provider if not specified

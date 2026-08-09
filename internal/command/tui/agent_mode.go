@@ -84,6 +84,11 @@ func agentStatusLabel(mgr TUIManager, info agent.AgentInfo) string {
 // agentRequestModel returns the canonical request model used to look up the
 // routing rule for an agent type. Mirrors agentRoutingKey in
 // internal/command/agent_command.go — keep these in sync.
+//
+// KNOWN DRIFT: agentRoutingKey errors on an unsupported agent type; this
+// function silently falls back to string(t). Not fixed here — Stage 2 of
+// .sdlc/docs/refactor-cli-usecase-20260809.spec.md collapses both into a
+// single source in internal/usecase.
 func agentRequestModel(t agent.AgentType) string {
 	switch t {
 	case agent.AgentTypeClaudeCode:
