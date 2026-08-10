@@ -1,5 +1,6 @@
-import { ContentCopy, GitHub, AppRegistration as NPM, Refresh } from '@/components/icons';
+import { ContentCopy, Check, GitHub, AppRegistration as NPM, Refresh } from '@/components/icons';
 import { Box, Button, Collapse, Dialog, DialogActions, DialogContent, Divider, IconButton, Stack, Typography, useTheme } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import { fontMono } from '@/theme/fonts';
 import React, { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -25,6 +26,7 @@ export const UpdatePanelDialog: React.FC<UpdatePanelDialogProps> = ({ open, onCl
     const { currentVersion, latestVersion, checking, releaseURL, checkForUpdates, hasUpdate } = useVersion();
 
     const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+    const [copiedVersion, setCopiedVersion] = useState(false);
 
     const displayCurrentVersion = (currentVersion || 'Unknown').split('+')[0];
     const displayLatestVersion = (latestVersion || currentVersion || 'Unknown').split('+')[0];
@@ -70,28 +72,34 @@ export const UpdatePanelDialog: React.FC<UpdatePanelDialogProps> = ({ open, onCl
         });
     }, []);
 
+    const handleCopyVersion = useCallback(() => {
+        navigator.clipboard.writeText(displayCurrentVersion).then(() => {
+            setCopiedVersion(true);
+            setTimeout(() => setCopiedVersion(false), 2000);
+        });
+    }, [displayCurrentVersion]);
+
     const handleCheckForUpdates = useCallback(() => {
         checkForUpdates(true);
     }, [checkForUpdates]);
 
-    const getHeaderGradient = () => {
-        if (checking) {
-            return 'linear-gradient(135deg, #2196f3 0%, #1976d2 100%)'; // Blue
-        }
-        if (hasVersionUpdate) {
-            return 'linear-gradient(135deg, #ff9800 0%, #f57c00 100%)'; // Orange
-        }
-        return 'linear-gradient(135deg, #4caf50 0%, #388e3c 100%)'; // Green
+    const getStatusColor = () => {
+        if (checking) return 'info';
+        if (hasVersionUpdate) return 'warning';
+        return 'success';
     };
+
+    const statusColor = getStatusColor();
+    const statusPalette = theme.palette[statusColor];
 
     const getStatusIcon = () => {
         if (checking) {
-            return <Refresh sx={{ fontSize: 32, color: 'white', animation: 'spin 1s linear infinite' }} />;
+            return <Refresh sx={{ fontSize: 32, color: statusPalette.main, animation: 'spin 1s linear infinite' }} />;
         }
         if (hasVersionUpdate) {
-            return <GitHub sx={{ fontSize: 32, color: 'white' }} />;
+            return <GitHub sx={{ fontSize: 32, color: statusPalette.main }} />;
         }
-        return <Refresh sx={{ fontSize: 32, color: 'white' }} />;
+        return <Refresh sx={{ fontSize: 32, color: statusPalette.main }} />;
     };
 
     const getStatusTitle = () => {
@@ -121,10 +129,12 @@ export const UpdatePanelDialog: React.FC<UpdatePanelDialogProps> = ({ open, onCl
                 }
             }}
         >
-            {/* Header with gradient background */}
+            {/* Header — soft tinted surface derived from the status palette color */}
             <Box
                 sx={{
-                    background: getHeaderGradient(),
+                    bgcolor: alpha(statusPalette.main, theme.palette.mode === 'dark' ? 0.16 : 0.10),
+                    borderBottom: '1px solid',
+                    borderColor: alpha(statusPalette.main, 0.24),
                     px: 3,
                     py: 2.5,
                     textAlign: 'center',
@@ -135,7 +145,7 @@ export const UpdatePanelDialog: React.FC<UpdatePanelDialogProps> = ({ open, onCl
                         width: 56,
                         height: 56,
                         borderRadius: '50%',
-                        bgcolor: 'rgba(255, 255, 255, 0.2)',
+                        bgcolor: alpha(statusPalette.main, theme.palette.mode === 'dark' ? 0.24 : 0.16),
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -145,19 +155,31 @@ export const UpdatePanelDialog: React.FC<UpdatePanelDialogProps> = ({ open, onCl
                 >
                     {getStatusIcon()}
                 </Box>
-                <Typography variant="h5" sx={{ color: 'white', fontWeight: 600, mb: 0.5 }}>
+                <Typography variant="h6" sx={{ color: 'text.primary', fontWeight: 600, mb: 0.5 }}>
                     {getStatusTitle()}
                 </Typography>
-                <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-                    {hasVersionUpdate ? (
-                        t('update.versionComparison', {
-                            latest: displayLatestVersion,
-                            current: displayCurrentVersion,
-                        })
-                    ) : (
-                        t('update.currentVersion', { version: displayCurrentVersion })
-                    )}
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                        {hasVersionUpdate ? (
+                            t('update.versionComparison', {
+                                latest: displayLatestVersion,
+                                current: displayCurrentVersion,
+                            })
+                        ) : (
+                            t('update.currentVersion', { version: displayCurrentVersion })
+                        )}
+                    </Typography>
+                    <Tooltip title={copiedVersion ? t('update.copied') : t('update.copy')} placement="top" arrow>
+                        <IconButton
+                            size="small"
+                            onClick={handleCopyVersion}
+                            aria-label={t('update.copy')}
+                            sx={{ color: copiedVersion ? 'success.main' : 'text.secondary' }}
+                        >
+                            {copiedVersion ? <Check sx={{ fontSize: 16 }} /> : <ContentCopy sx={{ fontSize: 16 }} />}
+                        </IconButton>
+                    </Tooltip>
+                </Box>
             </Box>
             <DialogContent sx={{ p: 0 }}>
                 <Stack spacing={0} divider={<Divider />}>
@@ -168,19 +190,12 @@ export const UpdatePanelDialog: React.FC<UpdatePanelDialogProps> = ({ open, onCl
                         </Typography>
                         <Button
                             variant={hasVersionUpdate ? 'contained' : 'outlined'}
+                            color={hasVersionUpdate ? 'warning' : 'primary'}
                             onClick={handleCheckForUpdates}
                             disabled={checking}
                             startIcon={checking ? <Refresh sx={{ fontSize: 18, animation: 'spin 1s linear infinite' }} /> : <Refresh />}
                             fullWidth
-                            sx={{
-                                height: 48,
-                                ...(hasVersionUpdate && {
-                                    background: 'linear-gradient(135deg, #ff9800 0%, #f57c00 100%)',
-                                    '&:hover': {
-                                        background: 'linear-gradient(135deg, #f57c00 0%, #ef6c00 100%)',
-                                    },
-                                }),
-                            }}
+                            sx={{ height: 48 }}
                         >
                             {checking ? t('update.checking') : t('update.check')}
                         </Button>
