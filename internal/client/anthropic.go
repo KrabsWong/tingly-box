@@ -34,7 +34,7 @@ type AnthropicClientInterface interface {
 	BetaMessagesCountTokens(ctx context.Context, req *anthropic.BetaMessageCountTokensParams) (*anthropic.BetaMessageTokensCount, error)
 
 	// Utility methods
-	ListModels(ctx context.Context) ([]string, error)
+	ListModels(ctx context.Context) (*ModelListResult, error)
 	Close() error
 	GetProvider() *typ.Provider
 	APIStyle() protocol.APIStyle
@@ -243,7 +243,7 @@ func (c *AnthropicClient) GetProvider() *typ.Provider {
 }
 
 // ListModels returns the list of available models from the Anthropic API
-func (c *AnthropicClient) ListModels(ctx context.Context) ([]string, error) {
+func (c *AnthropicClient) ListModels(ctx context.Context) (*ModelListResult, error) {
 	// Bedrock / Vertex expose only the messages endpoint, not the Anthropic
 	// /v1/models list; use the template model list instead.
 	if c.provider.IsMultiFieldCredential() {
@@ -252,19 +252,19 @@ func (c *AnthropicClient) ListModels(ctx context.Context) ([]string, error) {
 			Reason:   "cloud-credential providers use template model lists",
 		}
 	}
-	models, err := c.client.Models.List(ctx, anthropic.ModelListParams{})
+	res, err := c.client.Models.List(ctx, anthropic.ModelListParams{})
 	if err != nil {
 		return nil, err
 	}
 
-	var result []string
-	for _, model := range models.Data {
-		result = append(result, model.ID)
+	var models []string
+	for _, model := range res.Data {
+		models = append(models, model.ID)
 	}
 
-	if len(result) == 0 {
-		return nil, fmt.Errorf("no models found in provider response")
+	if len(models) == 0 {
+		return &ModelListResult{Raw: res}, fmt.Errorf("no models found in provider response")
 	}
 
-	return result, nil
+	return &ModelListResult{Models: models, Raw: res}, nil
 }

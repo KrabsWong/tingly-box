@@ -204,7 +204,7 @@ func promptForSmartGuideModel(reader *bufio.Reader, appManager *AppManager) (str
 
 	// ResolveProviderModels walks the full fallback chain, so providers whose
 	// /models endpoint is unsupported (e.g. Codex) still return their catalog.
-	resolved, err := globalCfg.ResolveProviderModels(true, provider.UUID)
+	resolved, err := globalCfg.ResolveProviderModels(true, false, provider.UUID)
 	if err != nil {
 		logrus.WithError(err).Warn("Failed to fetch models from provider, using cached list")
 	}

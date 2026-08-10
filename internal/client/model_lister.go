@@ -1,8 +1,6 @@
 package client
 
-import (
-	"context"
-)
+import "context"
 
 // IsModelsEndpointNotSupported checks if an error is ErrModelsEndpointNotSupported
 func IsModelsEndpointNotSupported(err error) bool {
@@ -10,9 +8,16 @@ func IsModelsEndpointNotSupported(err error) bool {
 	return ok
 }
 
-// ModelLister defines the interface for fetching model lists from provider APIs
+// ModelLister fetches model lists from provider APIs.
 type ModelLister interface {
-	// ListModels returns the list of available models from the provider API
-	// Returns ErrModelsEndpointNotSupported if the provider does not support the models endpoint
-	ListModels(ctx context.Context) ([]string, error)
+	// ListModels returns parsed model IDs and, when available, the raw upstream
+	// payload. Unsupported providers return ErrModelsEndpointNotSupported.
+	ListModels(ctx context.Context) (*ModelListResult, error)
+	Close() error
+}
+
+// ModelListResult carries parsed model IDs and the raw upstream payload.
+type ModelListResult struct {
+	Models []string
+	Raw    any
 }

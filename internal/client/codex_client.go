@@ -371,7 +371,7 @@ func isAlnumunderscoreHyphen(c rune) bool {
 
 // ListModels returns the list of available models.
 // For Codex, this returns an error as ChatGPT OAuth tokens cannot access /models endpoint.
-func (c *CodexClient) ListModels(ctx context.Context) ([]string, error) {
+func (c *CodexClient) ListModels(ctx context.Context) (*ModelListResult, error) {
 	return nil, &ErrModelsEndpointNotSupported{
 		Provider: c.provider.Name,
 		Reason:   "ChatGPT OAuth token cannot access /models endpoint",

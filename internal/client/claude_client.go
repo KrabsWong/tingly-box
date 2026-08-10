@@ -150,12 +150,8 @@ func applyClaudeCodeHeaders(options []anthropicOption.RequestOption, provider *t
 // ===================================================================
 
 // ListModels returns the list of available models.
-// For Claude Code OAuth, this returns an error as the token cannot access /models endpoint.
-func (c *ClaudeClient) ListModels(ctx context.Context) ([]string, error) {
-	return nil, &ErrModelsEndpointNotSupported{
-		Provider: c.provider.Name,
-		Reason:   "Claude Code OAuth token cannot access /models endpoint",
-	}
+func (c *ClaudeClient) ListModels(ctx context.Context) (*ModelListResult, error) {
+	return c.AnthropicClient.ListModels(ctx)
 }
 
 func (c *ClaudeClient) Guard(ctx context.Context, req *anthropic.MessageNewParams) (*AnthropicClient, map[string]string) {

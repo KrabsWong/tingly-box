@@ -73,18 +73,19 @@ func TestE2E_ClaudeRoundTripper(t *testing.T) {
 		defer cancel()
 
 		// List models
-		models, err := client.ListModels(ctx)
+		res, err := client.ListModels(ctx)
 		require.NoError(t, err)
-		require.NotEmpty(t, models, "expected at least one model")
+		require.NotNil(t, res)
+		require.NotEmpty(t, res.Models, "expected at least one model")
 
-		t.Logf("Found %d models:", len(models))
-		for _, m := range models {
+		t.Logf("Found %d models:", len(res.Models))
+		for _, m := range res.Models {
 			t.Logf("  - %s", m)
 		}
 
 		// Verify the requested model is in the list
 		found := false
-		for _, m := range models {
+		for _, m := range res.Models {
 			if strings.Contains(m, model) || m == model {
 				found = true
 				break

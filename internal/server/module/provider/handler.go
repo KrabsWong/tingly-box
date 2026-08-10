@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -483,7 +484,11 @@ func (h *Handler) UpdateProviderModelsByUUID(c *gin.Context) {
 		return
 	}
 
-	resolved, err := h.config.ResolveProviderModels(true, uid)
+	// force_upstream allows an upstream attempt for providers normally skipped,
+	// such as Claude Code OAuth. The regular template fallback still applies.
+	forceUpstream, _ := strconv.ParseBool(c.Query("force_upstream"))
+
+	resolved, err := h.config.ResolveProviderModels(true, forceUpstream, uid)
 	if err == nil && len(resolved.Models) == 0 {
 		// A manual refresh that surfaces nothing is a failure worth reporting,
 		// unlike the display path which tolerates an empty list.
@@ -544,7 +549,7 @@ func (h *Handler) GetProviderModelsByUUID(c *gin.Context) {
 	// Resolve through the shared fallback chain (cache → vmodel → api →
 	// template). A resolve error (e.g. provider not found) is non-fatal for the
 	// display path: serve an empty list rather than an error.
-	resolved, _ := h.config.ResolveProviderModels(false, uid)
+	resolved, _ := h.config.ResolveProviderModels(false, false, uid)
 
 	providerModels := ProviderModelInfo{
 		Models:      resolved.Models,

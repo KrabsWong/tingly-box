@@ -1150,7 +1150,7 @@ func (h *Handler) createProviderFromToken(token *oauth.Token, issuer ai.Issuer, 
 	// falls back to the embedded template for issuers whose /models endpoint is
 	// unsupported (e.g. Codex), so the log reflects the real catalog size.
 	log.Printf("[OAuth] Fetching models for OAuth provider %s (%s)", providerName, providerUUID.String())
-	if resolved, err := h.config.ResolveProviderModels(true, providerUUID.String()); err != nil {
+	if resolved, err := h.config.ResolveProviderModels(true, false, providerUUID.String()); err != nil {
 		log.Printf("[OAuth] Warning: Failed to fetch models for OAuth provider %s: %v", providerName, err)
 	} else {
 		log.Printf("[OAuth] Successfully fetched %d models for OAuth provider %s", len(resolved.Models), providerName)

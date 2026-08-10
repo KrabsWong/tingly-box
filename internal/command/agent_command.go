@@ -259,7 +259,7 @@ func promptForAgentConfig(reader *bufio.Reader, appManager *AppManager, req *age
 	// fallback chain, so providers whose /models endpoint is unsupported
 	// (e.g. Codex) still yield their embedded template catalog.
 	globalConfig := appManager.GetGlobalConfig()
-	resolved, err := globalConfig.ResolveProviderModels(true, req.Provider)
+	resolved, err := globalConfig.ResolveProviderModels(true, false, req.Provider)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to fetch models from provider: %v\n", err)
 		fmt.Fprintln(os.Stderr, "Using cached model list...")

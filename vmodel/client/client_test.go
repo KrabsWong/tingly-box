@@ -133,8 +133,10 @@ func TestOpenAIClient_ListModels(t *testing.T) {
 	svc := virtualserver.NewService()
 	c := vmodelclient.NewOpenAIClient(svc.GetOpenAIRegistry(), newVirtualProvider())
 
-	ids, err := c.ListModels(context.Background())
+	res, err := c.ListModels(context.Background())
 	require.NoError(t, err)
+	require.NotNil(t, res)
+	ids := res.Models
 	assert.NotEmpty(t, ids)
 	assert.Contains(t, ids, "virtual-gpt-4")
 }
@@ -238,8 +240,10 @@ func TestAnthropicClient_ListModels(t *testing.T) {
 	svc := virtualserver.NewService()
 	c := vmodelclient.NewAnthropicClient(svc.GetAnthropicRegistry(), newVirtualProvider())
 
-	ids, err := c.ListModels(context.Background())
+	res, err := c.ListModels(context.Background())
 	require.NoError(t, err)
+	require.NotNil(t, res)
+	ids := res.Models
 	assert.NotEmpty(t, ids)
 	assert.Contains(t, ids, "virtual-claude-3")
 }

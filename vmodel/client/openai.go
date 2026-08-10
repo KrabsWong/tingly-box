@@ -14,6 +14,7 @@ import (
 	openaistream "github.com/openai/openai-go/v3/packages/ssestream"
 	"github.com/openai/openai-go/v3/responses"
 
+	"github.com/tingly-dev/tingly-box/internal/client"
 	"github.com/tingly-dev/tingly-box/internal/obs"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/protocol/token"
@@ -39,13 +40,13 @@ func (c *OpenAIClient) SetRecordSink(_ *obs.Sink)   {}
 func (c *OpenAIClient) Client() *openai.Client      { return nil }
 func (c *OpenAIClient) Close() error                { return nil }
 
-func (c *OpenAIClient) ListModels(_ context.Context) ([]string, error) {
+func (c *OpenAIClient) ListModels(_ context.Context) (*client.ModelListResult, error) {
 	models := c.reg.ListModels()
 	ids := make([]string, len(models))
 	for i, m := range models {
 		ids[i] = m.ID
 	}
-	return ids, nil
+	return &client.ModelListResult{Models: ids, Raw: models}, nil
 }
 
 // ChatCompletionsNew calls the vmodel synchronously and returns an

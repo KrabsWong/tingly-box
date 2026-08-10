@@ -33,7 +33,7 @@ type OpenAIClientInterface interface {
 	EmbeddingsNew(ctx context.Context, req openai.EmbeddingNewParams) (*openai.CreateEmbeddingResponse, error)
 
 	// Utility methods
-	ListModels(ctx context.Context) ([]string, error)
+	ListModels(ctx context.Context) (*ModelListResult, error)
 	Close() error
 	GetProvider() *typ.Provider
 	APIStyle() protocol.APIStyle
@@ -194,7 +194,7 @@ func (c *OpenAIClient) GetProvider() *typ.Provider {
 }
 
 // ListModels returns the list of available models from the OpenAI-compatible API
-func (c *OpenAIClient) ListModels(ctx context.Context) ([]string, error) {
+func (c *OpenAIClient) ListModels(ctx context.Context) (*ModelListResult, error) {
 	// Special handling for Codex (ChatGPT OAuth) providers
 	// The ChatGPT OAuth token cannot access OpenAI's /models endpoint
 	// because it's a ChatGPT web interface token, not an OpenAI API token.
@@ -285,7 +285,7 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]string, error) {
 	// Check response status
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("provider returned status %d (len=%d)", resp.StatusCode, len(bodyBytes))
+		return &ModelListResult{Raw: json.RawMessage(bodyBytes)}, fmt.Errorf("provider returned status %d (len=%d)", resp.StatusCode, len(bodyBytes))
 	}
 
 	// Parse response body
@@ -306,12 +306,12 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]string, error) {
 	}
 
 	if err := json.Unmarshal(body, &modelsResponse); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
+		return &ModelListResult{Raw: json.RawMessage(body)}, fmt.Errorf("failed to parse JSON response: %w", err)
 	}
 
 	// Check for API error
 	if modelsResponse.Error != nil {
-		return nil, fmt.Errorf("API error: %s (type: %s)", modelsResponse.Error.Message, modelsResponse.Error.Type)
+		return &ModelListResult{Raw: json.RawMessage(body)}, fmt.Errorf("API error: %s (type: %s)", modelsResponse.Error.Message, modelsResponse.Error.Type)
 	}
 
 	// Extract model IDs
@@ -331,10 +331,11 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]string, error) {
 	}
 
 	if len(models) == 0 {
-		return nil, fmt.Errorf("no models found in provider response")
+		return &ModelListResult{Raw: json.RawMessage(body)}, fmt.Errorf("no models found in provider response")
 	}
 
-	return models, nil
+	// Raw carries the response body (already JSON) for persistence/triage.
+	return &ModelListResult{Models: models, Raw: json.RawMessage(body)}, nil
 }
 
 // isCodexProvider checks if the current provider is a Codex OAuth provider

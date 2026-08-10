@@ -120,19 +120,19 @@ func (l *LightweightService) probeModelsEndpoint(ctx context.Context, provider *
 
 	switch provider.APIStyle {
 	case protocol.APIStyleOpenAI:
-		c := l.pool.GetOpenAIClient(context.Background(), provider, "")
+		c := l.pool.GetOpenAIClient(ctx, provider, "")
 		if c == nil {
 			return modelsReport{false, "Failed to create OpenAI client", 0, 0, ""}
 		}
 		lister = c
 	case protocol.APIStyleAnthropic:
-		c := l.pool.GetAnthropicClient(context.Background(), provider, "")
+		c := l.pool.GetAnthropicClient(ctx, provider, "")
 		if c == nil {
 			return modelsReport{false, "Failed to create Anthropic client", 0, 0, ""}
 		}
 		lister = c
 	case protocol.APIStyleGoogle:
-		c := l.pool.GetGoogleClient(context.Background(), provider, "")
+		c := l.pool.GetGoogleClient(ctx, provider, "")
 		if c == nil {
 			return modelsReport{false, "Failed to create Google client", 0, 0, ""}
 		}
@@ -144,7 +144,7 @@ func (l *LightweightService) probeModelsEndpoint(ctx context.Context, provider *
 	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	models, err := lister.ListModels(probeCtx)
+	result, err := lister.ListModels(probeCtx)
 	responseTime := time.Since(startTime).Milliseconds()
 
 	if client.IsModelsEndpointNotSupported(err) {
@@ -161,15 +161,19 @@ func (l *LightweightService) probeModelsEndpoint(ctx context.Context, provider *
 		return modelsReport{false, fmt.Sprintf("Models endpoint failed: %v", err), responseTime, 0, ""}
 	}
 
-	if len(models) == 0 {
+	modelCount := 0
+	if result != nil {
+		modelCount = len(result.Models)
+	}
+	if modelCount == 0 {
 		return modelsReport{false, "Models endpoint returned no models", responseTime, 0, ""}
 	}
 
 	return modelsReport{
 		true,
-		fmt.Sprintf("Models endpoint accessible - %d models found", len(models)),
+		fmt.Sprintf("Models endpoint accessible - %d models found", modelCount),
 		responseTime,
-		len(models),
+		modelCount,
 		"",
 	}
 }
@@ -177,7 +181,7 @@ func (l *LightweightService) probeModelsEndpoint(ctx context.Context, provider *
 func (l *LightweightService) probeChatEndpoint(ctx context.Context, provider *typ.Provider) endpointReport {
 	startTime := time.Now()
 
-	c := l.pool.GetOpenAIClient(context.Background(), provider, "")
+	c := l.pool.GetOpenAIClient(ctx, provider, "")
 	if c == nil {
 		return endpointReport{false, "Failed to create OpenAI client", 0}
 	}
@@ -200,7 +204,7 @@ func (l *LightweightService) probeChatEndpoint(ctx context.Context, provider *ty
 func (l *LightweightService) probeResponsesEndpoint(ctx context.Context, provider *typ.Provider) endpointReport {
 	startTime := time.Now()
 
-	c := l.pool.GetOpenAIClient(context.Background(), provider, "")
+	c := l.pool.GetOpenAIClient(ctx, provider, "")
 	if c == nil {
 		return endpointReport{false, "Failed to create OpenAI client", 0}
 	}
