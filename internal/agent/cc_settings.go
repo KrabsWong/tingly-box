@@ -198,8 +198,44 @@ type CCProfileSettingsResolution struct {
 	HasOverrides         bool
 }
 
+// Profile model slots are derived from the profile's Model Rules. Treating
+// them as ordinary env overrides would create a second source of truth and
+// could make a rule edit appear to have no effect.
+var ccProfileRuleOwnedEnvKeys = []string{
+	"ANTHROPIC_MODEL",
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL",
+	"ANTHROPIC_DEFAULT_SONNET_MODEL",
+	"ANTHROPIC_DEFAULT_OPUS_MODEL",
+	"CLAUDE_CODE_SUBAGENT_MODEL",
+}
+
+func isCCProfileRuleOwnedEnvKey(key string) bool {
+	return slices.Contains(ccProfileRuleOwnedEnvKeys, key)
+}
+
+func hasCCProfileRuntimeOverrides(profileConfig *typ.ClaudeCodeProfileConfig) bool {
+	if profileConfig == nil {
+		return false
+	}
+	if profileConfig.DefaultMode != "" {
+		return true
+	}
+	for key := range profileConfig.Env {
+		if !isCCProfileRuleOwnedEnvKey(key) {
+			return true
+		}
+	}
+	for _, key := range profileConfig.UnsetEnv {
+		if !isCCProfileRuleOwnedEnvKey(key) {
+			return true
+		}
+	}
+	return false
+}
+
 // ResolveCCProfileSettings composes main settings, rule-derived profile model
-// slots, stored overrides, and protected connection values in that order.
+// slots, stored runtime overrides, and protected connection values in that
+// order. Legacy stored model-slot overrides are ignored.
 func ResolveCCProfileSettings(cfg *serverconfig.Config, baseURL, apiKey, scenarioPath string, profile typ.ProfileMeta) (CCProfileSettingsResolution, error) {
 	snapshot, err := ReadMainClaudeCodeSettings()
 	if err != nil {
@@ -232,9 +268,15 @@ func ResolveCCProfileSettings(cfg *serverconfig.Config, baseURL, apiKey, scenari
 	effectiveEnv := maps.Clone(baseEnv)
 	if profile.ClaudeCode != nil {
 		for key, value := range profile.ClaudeCode.Env {
+			if isCCProfileRuleOwnedEnvKey(key) {
+				continue
+			}
 			effectiveEnv[key] = value
 		}
 		for _, key := range profile.ClaudeCode.UnsetEnv {
+			if isCCProfileRuleOwnedEnvKey(key) {
+				continue
+			}
 			delete(effectiveEnv, key)
 		}
 	}
@@ -266,8 +308,7 @@ func ResolveCCProfileSettings(cfg *serverconfig.Config, baseURL, apiKey, scenari
 		InheritedDefaultMode: inheritedDefaultMode,
 		EffectiveDefaultMode: effectiveDefaultMode,
 		Env:                  effectiveEnv,
-		HasOverrides: profile.ClaudeCode != nil && (len(profile.ClaudeCode.Env) > 0 ||
-			len(profile.ClaudeCode.UnsetEnv) > 0 || profile.ClaudeCode.DefaultMode != ""),
+		HasOverrides:         hasCCProfileRuntimeOverrides(profile.ClaudeCode),
 	}, nil
 }
 
@@ -282,13 +323,24 @@ func DiffCCProfileConfig(base ClaudeCodePrefs, inheritedDefaultMode string, desi
 	if err != nil {
 		return nil, err
 	}
+	for _, key := range ccProfileRuleOwnedEnvKeys {
+		if desiredValue, present := desiredValues[key]; present && desiredValue != baseValues[key] {
+			return nil, fmt.Errorf("%s is derived from Model Rules and cannot be overridden by a profile", key)
+		}
+	}
 	overrides := &typ.ClaudeCodeProfileConfig{Env: map[string]string{}}
 	for key, value := range desiredValues {
+		if isCCProfileRuleOwnedEnvKey(key) {
+			continue
+		}
 		if baseValues[key] != value {
 			overrides.Env[key] = value
 		}
 	}
 	for key := range baseValues {
+		if isCCProfileRuleOwnedEnvKey(key) {
+			continue
+		}
 		if _, present := desiredValues[key]; !present {
 			overrides.UnsetEnv = append(overrides.UnsetEnv, key)
 		}

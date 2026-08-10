@@ -305,10 +305,20 @@ and materialized by `BuildCCProfileSettings`.
 
 This placement makes the page answer three questions in order: which profile
 and how to launch it; what runtime values this profile changes; how its models
-are routed. `Add override` promotes max output tokens and permission mode, and
-all other supported typed fields remain available without showing inherited
-values as editable noise. Saving is labeled **Save Profile**, while generated
-files remain a rebuildable runtime artifact.
+are routed. `Add` promotes max output tokens and permission mode, and a
+compact grouped search exposes the remaining overridable runtime fields without
+showing inherited values as editable noise. The card-scoped save action is
+labeled **Save**, while generated files remain a rebuildable runtime artifact.
+
+The five model env keys (`ANTHROPIC_MODEL`, the Haiku/Sonnet/Opus slots, and
+`CLAUDE_CODE_SUBAGENT_MODEL`) are deliberately excluded from Profile Overrides.
+They are derived artifacts owned by the profile's **Model Rules** below the
+card. Allowing both surfaces to write them creates two sources of truth and can
+make a rule edit appear ineffective. The backend therefore ignores legacy
+stored model-slot overrides and rejects new desired values that conflict with
+the rule-derived base. Runtime preferences such as token limits, timeouts,
+auto-compaction, behavior switches, proxy settings, and `defaultMode` remain
+valid per-profile overrides.
 
 The profile identity card shows a **Settings File** row immediately below Quick
 Start. Its path is derived on every profile-config response by the same backend
@@ -355,7 +365,7 @@ On every materialization, `settings.json` is rebuilt in this order:
 1. inherit the current local settings (or canonical defaults if the file does
    not exist);
 2. apply rule-derived profile model slots and 1M behavior;
-3. apply the profile's persisted value/removal delta;
+3. apply the profile's persisted runtime value/removal delta (never model slots);
 4. inject the current server-owned URL/token and safe loopback `NO_PROXY`;
 5. install the profile-local `statusline.sh` command.
 

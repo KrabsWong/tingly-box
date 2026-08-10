@@ -223,6 +223,7 @@ func TestResolveCCProfileSettings_InheritsThenAppliesOverrides(t *testing.T) {
 		ClaudeCode: &typ.ClaudeCodeProfileConfig{
 			Env: map[string]string{
 				"CLAUDE_CODE_MAX_OUTPUT_TOKENS": "64000",
+				"ANTHROPIC_DEFAULT_HAIKU_MODEL": "legacy-model-override-must-not-win",
 				"ANTHROPIC_AUTH_TOKEN":          "profile-token-must-not-win",
 			},
 			UnsetEnv:    []string{"DISABLE_TELEMETRY"},
@@ -238,7 +239,7 @@ func TestResolveCCProfileSettings_InheritsThenAppliesOverrides(t *testing.T) {
 		t.Fatalf("main env was not inherited: %#v", resolved.Env)
 	}
 	if resolved.Env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] != "profile-fast" {
-		t.Fatalf("profile routing model was not applied: %#v", resolved.Env)
+		t.Fatalf("profile routing model did not win over the legacy override: %#v", resolved.Env)
 	}
 	if resolved.Env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] != "64000" {
 		t.Fatalf("profile override was not applied: %#v", resolved.Env)
@@ -292,6 +293,15 @@ func TestDiffCCProfileConfig_StoresOnlyDeltaAndExplicitRemovals(t *testing.T) {
 	noDelta, err := DiffCCProfileConfig(base, "plan", base, "plan")
 	if err != nil || noDelta != nil {
 		t.Fatalf("identical config should produce no delta, got %#v, %v", noDelta, err)
+	}
+}
+
+func TestDiffCCProfileConfig_RejectsModelSlotOverride(t *testing.T) {
+	base := ClaudeCodePrefs{AnthropicDefaultHaikuModel: "haiku"}
+	desired := ClaudeCodePrefs{AnthropicDefaultHaikuModel: "custom-haiku"}
+
+	if _, err := DiffCCProfileConfig(base, "plan", desired, "plan"); err == nil {
+		t.Fatal("expected profile model slot override to be rejected")
 	}
 }
 
