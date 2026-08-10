@@ -33,7 +33,7 @@ type OpenAIClientInterface interface {
 	EmbeddingsNew(ctx context.Context, req openai.EmbeddingNewParams) (*openai.CreateEmbeddingResponse, error)
 
 	// Utility methods
-	ListModels(ctx context.Context) ([]string, error)
+	ListModels(ctx context.Context) (*ModelListResult, error)
 	Close() error
 	GetProvider() *typ.Provider
 	APIStyle() protocol.APIStyle
@@ -194,7 +194,7 @@ func (c *OpenAIClient) GetProvider() *typ.Provider {
 }
 
 // ListModels returns the list of available models from the OpenAI-compatible API
-func (c *OpenAIClient) ListModels(ctx context.Context) ([]string, error) {
+func (c *OpenAIClient) ListModels(ctx context.Context) (*ModelListResult, error) {
 	// Special handling for Codex (ChatGPT OAuth) providers
 	// The ChatGPT OAuth token cannot access OpenAI's /models endpoint
 	// because it's a ChatGPT web interface token, not an OpenAI API token.
@@ -334,7 +334,8 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("no models found in provider response")
 	}
 
-	return models, nil
+	// Raw carries the response body (already JSON) for persistence/triage.
+	return &ModelListResult{Models: models, Raw: json.RawMessage(body)}, nil
 }
 
 // isCodexProvider checks if the current provider is a Codex OAuth provider

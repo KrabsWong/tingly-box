@@ -34,7 +34,7 @@ type AnthropicClientInterface interface {
 	BetaMessagesCountTokens(ctx context.Context, req *anthropic.BetaMessageCountTokensParams) (*anthropic.BetaMessageTokensCount, error)
 
 	// Utility methods
-	ListModels(ctx context.Context) ([]string, error)
+	ListModels(ctx context.Context) (*ModelListResult, error)
 	Close() error
 	GetProvider() *typ.Provider
 	APIStyle() protocol.APIStyle
@@ -243,7 +243,7 @@ func (c *AnthropicClient) GetProvider() *typ.Provider {
 }
 
 // ListModels returns the list of available models from the Anthropic API
-func (c *AnthropicClient) ListModels(ctx context.Context) ([]string, error) {
+func (c *AnthropicClient) ListModels(ctx context.Context) (*ModelListResult, error) {
 	// Bedrock / Vertex expose only the messages endpoint, not the Anthropic
 	// /v1/models list; use the template model list instead.
 	if c.provider.IsMultiFieldCredential() {
@@ -266,5 +266,7 @@ func (c *AnthropicClient) ListModels(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("no models found in provider response")
 	}
 
-	return result, nil
+	// Raw carries the SDK response slice for persistence/triage (mirrors
+	// provider_usage.raw_response). The caller marshals it.
+	return &ModelListResult{Models: result, Raw: models.Data}, nil
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	anthropicstream "github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 
+	"github.com/tingly-dev/tingly-box/internal/client"
 	"github.com/tingly-dev/tingly-box/internal/obs"
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/protocol/token"
@@ -34,13 +35,13 @@ func (c *AnthropicClient) SetRecordSink(_ *obs.Sink)   {}
 func (c *AnthropicClient) Client() *anthropic.Client   { return nil }
 func (c *AnthropicClient) Close() error                { return nil }
 
-func (c *AnthropicClient) ListModels(_ context.Context) ([]string, error) {
+func (c *AnthropicClient) ListModels(_ context.Context) (*client.ModelListResult, error) {
 	models := c.reg.ListModels()
 	ids := make([]string, len(models))
 	for i, m := range models {
 		ids[i] = m.ID
 	}
-	return ids, nil
+	return &client.ModelListResult{Models: ids, Raw: models}, nil
 }
 
 // BetaMessagesNew calls the vmodel synchronously and returns an

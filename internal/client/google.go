@@ -153,7 +153,7 @@ func (c *GoogleClient) GetProvider() *typ.Provider {
 // ListModels returns the list of available models from the Google Gemini API
 // Note: Google genai SDK doesn't have a direct ListModels method, so we return
 // ErrModelsEndpointNotSupported to signal the caller to use template fallback.
-func (c *GoogleClient) ListModels(ctx context.Context) ([]string, error) {
+func (c *GoogleClient) ListModels(ctx context.Context) (*ModelListResult, error) {
 	// Google genai SDK doesn't provide a models list endpoint
 	// The caller should use template fallback instead
 	return nil, &ErrModelsEndpointNotSupported{

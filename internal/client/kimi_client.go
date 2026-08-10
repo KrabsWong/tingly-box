@@ -278,6 +278,6 @@ func (c *KimiClient) ResponsesNewStreaming(ctx context.Context, req responses.Re
 }
 
 // ListModels returns the list of available models.
-func (c *KimiClient) ListModels(ctx context.Context) ([]string, error) {
+func (c *KimiClient) ListModels(ctx context.Context) (*ModelListResult, error) {
 	return c.OpenAIClient.ListModels(ctx)
 }

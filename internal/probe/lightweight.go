@@ -144,7 +144,7 @@ func (l *LightweightService) probeModelsEndpoint(ctx context.Context, provider *
 	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	models, err := lister.ListModels(probeCtx)
+	result, err := lister.ListModels(probeCtx)
 	responseTime := time.Since(startTime).Milliseconds()
 
 	if client.IsModelsEndpointNotSupported(err) {
@@ -161,15 +161,19 @@ func (l *LightweightService) probeModelsEndpoint(ctx context.Context, provider *
 		return modelsReport{false, fmt.Sprintf("Models endpoint failed: %v", err), responseTime, 0, ""}
 	}
 
-	if len(models) == 0 {
+	modelCount := 0
+	if result != nil {
+		modelCount = len(result.Models)
+	}
+	if modelCount == 0 {
 		return modelsReport{false, "Models endpoint returned no models", responseTime, 0, ""}
 	}
 
 	return modelsReport{
 		true,
-		fmt.Sprintf("Models endpoint accessible - %d models found", len(models)),
+		fmt.Sprintf("Models endpoint accessible - %d models found", modelCount),
 		responseTime,
-		len(models),
+		modelCount,
 		"",
 	}
 }
