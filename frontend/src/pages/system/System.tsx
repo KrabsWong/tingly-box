@@ -21,7 +21,7 @@ const LABEL_WIDTH = 140;
 
 // Cap each card's width on wide viewports (via UnifiedCard.maxWidth) so the
 // settings cards don't stretch edge-to-edge. Cards still shrink responsively.
-const CARD_MAX_WIDTH = 560;
+const CARD_MAX_WIDTH = 720;
 
 /**
  * SettingsRow — the shared label-column rhythm for this page.
@@ -188,6 +188,7 @@ const System = () => {
                     the Server row itself (trailing icons), matching how the
                     About card keeps its copy button on the Version row. */}
                 <UnifiedCard
+                    grid={{ xs: 12, md: 12 }}
                     title={t('system.serverStatus.title')}
                     titleHeadingLevel={1}
                     size="full"
@@ -297,9 +298,35 @@ const System = () => {
                     </Stack>
                 </UnifiedCard>
 
+
+                {/* Preferences — "How do I want the UI to behave?" */}
+                <UnifiedCard grid={{ xs: 12, md: 12 }} title={t('system.preferences.title')} size="full" maxWidth={CARD_MAX_WIDTH}>
+                    <Stack spacing={1.5}>
+                        <SettingsRow icon={<IconLanguage sx={{ fontSize: 16 }} />} label={t('system.language.title')}>
+                            <Chip label={t('system.language.en')} onClick={() => changeLanguage('en')} size="small" sx={chipSx(i18n.language === 'en')} />
+                            <Chip label={t('system.language.zh')} onClick={() => changeLanguage('zh')} size="small" sx={chipSx(i18n.language === 'zh')} />
+                        </SettingsRow>
+
+                        <SettingsRow icon={<IconBrush sx={{ fontSize: 16 }} />} label={t('common.theme')}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                {themeOptions.map(({ value, label, renderIcon }) => (
+                                    <Chip
+                                        key={value}
+                                        icon={renderIcon({ size: 14 })}
+                                        label={label}
+                                        onClick={() => setTheme(value)}
+                                        size="small"
+                                        sx={chipSx(themeMode === value)}
+                                    />
+                                ))}
+                            </Box>
+                        </SettingsRow>
+                    </Stack>
+                </UnifiedCard>
+
                 {/* Proxy — "How does TB reach upstream?" Env-proxy policy +
                     reusable URL preset, kept on their own card. */}
-                <UnifiedCard title={t('system.proxy.title')} size="full" maxWidth={CARD_MAX_WIDTH}>
+                <UnifiedCard grid={{ xs: 12, md: 12 }} title={t('system.proxy.title')} size="full" maxWidth={CARD_MAX_WIDTH}>
                     <Stack spacing={2}>
                         {/* Env-proxy policy — an honest switch, not a flip-chip.
                             The off-state is just "off" (no `common.direct`
@@ -362,31 +389,6 @@ const System = () => {
                                 </Button>
                             </Stack>
                         </Box>
-                    </Stack>
-                </UnifiedCard>
-
-                {/* Preferences — "How do I want the UI to behave?" */}
-                <UnifiedCard title={t('system.preferences.title')} size="full" maxWidth={CARD_MAX_WIDTH}>
-                    <Stack spacing={1.5}>
-                        <SettingsRow icon={<IconLanguage sx={{ fontSize: 16 }} />} label={t('system.language.title')}>
-                            <Chip label={t('system.language.en')} onClick={() => changeLanguage('en')} size="small" sx={chipSx(i18n.language === 'en')} />
-                            <Chip label={t('system.language.zh')} onClick={() => changeLanguage('zh')} size="small" sx={chipSx(i18n.language === 'zh')} />
-                        </SettingsRow>
-
-                        <SettingsRow icon={<IconBrush sx={{ fontSize: 16 }} />} label={t('common.theme')}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                                {themeOptions.map(({ value, label, renderIcon }) => (
-                                    <Chip
-                                        key={value}
-                                        icon={renderIcon({ size: 14 })}
-                                        label={label}
-                                        onClick={() => setTheme(value)}
-                                        size="small"
-                                        sx={chipSx(themeMode === value)}
-                                    />
-                                ))}
-                            </Box>
-                        </SettingsRow>
                     </Stack>
                 </UnifiedCard>
 
