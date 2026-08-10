@@ -1,6 +1,7 @@
 package data
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -41,6 +42,18 @@ func (mm *ModelListManager) Close() error {
 // source should be db.ModelSourceAPI or db.ModelSourceTemplate.
 func (mm *ModelListManager) SaveModels(provider *typ.Provider, models []string, source db.ModelSource) error {
 	return mm.modelStore.SaveModels(provider, models, source)
+}
+
+// SaveModelsWithRaw saves a successful real upstream fetch (model list + raw
+// payload) and clears any prior error fields.
+func (mm *ModelListManager) SaveModelsWithRaw(provider *typ.Provider, models []string, source db.ModelSource, raw json.RawMessage) error {
+	return mm.modelStore.SaveModelsWithRaw(provider, models, source, raw)
+}
+
+// SaveFetchFailure records a fetch error without clobbering an existing model
+// list. raw is optional (the upstream body, when available).
+func (mm *ModelListManager) SaveFetchFailure(provider *typ.Provider, lastErr string, raw json.RawMessage) error {
+	return mm.modelStore.SaveFetchFailure(provider, lastErr, raw, time.Time{})
 }
 
 // GetModels returns models for a provider by reading from database.
