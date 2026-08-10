@@ -1,10 +1,11 @@
-// Package guardrailspath holds filesystem-layout helpers for the guardrails
-// config/storage directory. It is a dedicated leaf package (rather than
-// living in root server or webui) because both the WebUI Management API's
-// admin handlers (internal/server) and the AI Model API's runtime
-// evaluation (internal/server/aimodel, root server today) need it, and those
-// two cannot import each other.
 package config
+
+// This file holds filesystem-layout helpers for the guardrails
+// config/storage directory. They live here (rather than in root server or
+// webui) because both the WebUI Management API's admin handlers
+// (internal/server) and the AI Model API's runtime evaluation
+// (internal/server/aimodel, root server today) need them, and those
+// two cannot import each other.
 
 import (
 	"errors"
@@ -16,6 +17,7 @@ import (
 	guardrailscore "github.com/tingly-dev/tingly-box/internal/guardrails/core"
 	guardrailsevaluate "github.com/tingly-dev/tingly-box/internal/guardrails/evaluate"
 	guardrailsutils "github.com/tingly-dev/tingly-box/internal/guardrails/utils"
+	"github.com/tingly-dev/tingly-box/internal/typ"
 	"gopkg.in/yaml.v3"
 )
 
@@ -143,4 +145,28 @@ func CredentialStore(configDir string) (*guardrailsutils.ProtectedCredentialStor
 		return nil, errors.New("config directory not set")
 	}
 	return guardrailsutils.NewProtectedCredentialStore(DBPath(configDir)), nil
+}
+
+// applyGuardrailsDefaults ensures the global scenario has an extensions map so
+// guardrails can be toggled explicitly later. Guardrails themselves stay opt-in:
+// a missing flag should behave as disabled rather than forcing runtime startup
+// before a guardrails config exists.
+func (c *Config) applyGuardrailsDefaults() bool {
+	updated := false
+	cfg := c.GetScenarioConfig(typ.ScenarioGlobal)
+	if cfg == nil {
+		c.Scenarios = append(c.Scenarios, typ.ScenarioConfig{
+			Scenario:   typ.ScenarioGlobal,
+			Extensions: map[string]interface{}{},
+		})
+		cfg = &c.Scenarios[len(c.Scenarios)-1]
+		updated = true
+	}
+
+	if cfg.Extensions == nil {
+		cfg.Extensions = make(map[string]interface{})
+		updated = true
+	}
+
+	return updated
 }
