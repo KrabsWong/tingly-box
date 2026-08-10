@@ -1,8 +1,7 @@
 import CardGrid from '@/components/CardGrid.tsx';
 import { PageLayout } from '@/components/PageLayout.tsx';
 import UnifiedCard from '@/components/UnifiedCard.tsx';
-import { Logout, Refresh as RefreshIcon, CheckCircle as IconCircleCheck, Cancel as IconCircleX, Info as IconInfoCircle, Lock as IconLock, Star as IconStar, License as IconLicense, GitHub as IconBrandGithub, Translate as IconLanguage, Brush as IconBrush, Check as IconCheck, AccessTime as IconClock } from '@/components/icons';
-import { VersionDisplay } from '@/components/VersionDisplay';
+import { Logout, Refresh as RefreshIcon, CheckCircle as IconCircleCheck, Cancel as IconCircleX, Info as IconInfoCircle, Lock as IconLock, Star as IconStar, License as IconLicense, GitHub as IconBrandGithub, Translate as IconLanguage, Brush as IconBrush, Check as IconCheck, AccessTime as IconClock, ContentCopy as IconContentCopy } from '@/components/icons';
 import { UpdatePanelDialog } from '@/components/UpdatePanelDialog';
 import { Box, Button, CircularProgress, IconButton, InputAdornment, Link, Stack, TextField, Tooltip, Typography, Chip } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
@@ -17,7 +16,7 @@ import { getThemeOptions } from '@/theme/options.ts';
 
 const System = () => {
     const { t, i18n } = useTranslation();
-    const { currentVersion, showUpdateDialog, openUpdateDialog, closeUpdateDialog } = useVersion();
+    const { currentVersion, latestVersion, hasUpdate, showUpdateDialog, openUpdateDialog, closeUpdateDialog } = useVersion();
     const { isHealthy, checking, checkHealth } = useHealth();
     const { logout: authLogout } = useAuth();
     const { mode: themeMode, setTheme } = useThemeMode();
@@ -29,6 +28,7 @@ const System = () => {
     const [globalProxyUrl, setGlobalProxyUrl] = useState('');
     const [globalProxyInput, setGlobalProxyInput] = useState('');
     const [proxyUrlSaving, setProxyUrlSaving] = useState(false);
+    const [copiedVersion, setCopiedVersion] = useState(false);
     const isServerStatusAvailable = Boolean(serverStatus);
     const serverStatusLabel = !isServerStatusAvailable
         ? t('system.status.unavailable')
@@ -47,6 +47,15 @@ const System = () => {
         // Save language preference to localStorage
         localStorage.setItem('i18nextLng', lng);
         notify.success(t('system.language.saveSuccess'));
+    };
+
+    const handleCopyVersion = () => {
+        const value = (currentVersion || 'Unknown').split('+')[0];
+        navigator.clipboard.writeText(value).then(() => {
+            setCopiedVersion(true);
+            notify.success(t('system.about.versionCopied'));
+            setTimeout(() => setCopiedVersion(false), 2000);
+        });
     };
 
     useEffect(() => {
@@ -385,23 +394,51 @@ const System = () => {
                                     {t('system.about.version')}
                                 </Typography>
                             </Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1 }}>
-                                <VersionDisplay onClick={showUpdateDialog}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flex: 1 }}>
+                                <Tooltip
+                                    title={hasUpdate && latestVersion ? t('system.about.updateAvailable', { version: latestVersion.split('+')[0] }) : t('system.about.checkUpdate')}
+                                    placement="top"
+                                    arrow
+                                >
                                     <Typography
+                                        component="span"
                                         variant="body2"
+                                        onClick={showUpdateDialog}
                                         sx={{
                                             color: 'text.primary',
-                                            fontStyle: 'normal',
                                             cursor: 'pointer',
-                                            '&:hover': {
-                                                color: 'primary.main',
-                                            },
+                                            transition: 'color 0.2s ease',
+                                            '&:hover': { color: 'primary.main' },
                                         }}
                                     >
                                         version {(currentVersion || 'Unknown').split('+')[0]}
                                     </Typography>
-                                </VersionDisplay>
+                                </Tooltip>
+                                {hasUpdate && latestVersion && (
+                                    <Typography
+                                        component="span"
+                                        variant="caption"
+                                        onClick={showUpdateDialog}
+                                        sx={{
+                                            color: 'warning.main',
+                                            cursor: 'pointer',
+                                            '&:hover': { textDecoration: 'underline' },
+                                        }}
+                                    >
+                                        {t('system.about.available')} → {latestVersion.split('+')[0]}
+                                    </Typography>
+                                )}
                             </Box>
+                            <Tooltip title={copiedVersion ? t('common.copied') : t('system.about.copyVersion')} placement="top" arrow>
+                                <IconButton
+                                    size="small"
+                                    onClick={handleCopyVersion}
+                                    aria-label={t('system.about.copyVersion')}
+                                    sx={{ color: 'text.secondary' }}
+                                >
+                                    {copiedVersion ? <IconCheck sx={{ fontSize: 16, color: 'success.main' }} /> : <IconContentCopy sx={{ fontSize: 16 }} />}
+                                </IconButton>
+                            </Tooltip>
                         </Box>
 
                         {/* License */}

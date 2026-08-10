@@ -16,6 +16,7 @@ export default {
     "done": "完成",
     "applying": "应用中...",
     "copy": "复制",
+    "copied": "已复制",
     "refresh": "刷新",
     "verify": "验证",
     "saveChanges": "保存更改",
@@ -821,7 +822,11 @@ export default {
       "license": "许可证",
       "github": "GitHub",
       "devMode": "开发模式",
-      "available": "可用"
+      "available": "可用",
+      "copyVersion": "复制版本号",
+      "versionCopied": "版本号已复制到剪贴板",
+      "checkUpdate": "点击检查更新",
+      "updateAvailable": "新版本 {{version}} 可用，点击查看"
     },
     "serverStatus": {
       "title": "服务器状态",
