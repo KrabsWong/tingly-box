@@ -167,15 +167,13 @@ export const RuleCard: React.FC<RuleCardProps> = ({
         await updateField(configRecord, setConfigRecord, 'smartEnabled', !configRecord.smartEnabled);
     }, [configRecord, updateField]);
 
-    // Handler: Delete provider
+    // Handler: Delete provider. updateField re-compacts tiers on commit, so
+    // removing a tier's last service closes the gap (T1 promotes to T0).
     const handleDeleteProvider = useCallback(
         async (_recordId: string, providerId: string) => {
             if (configRecord) {
-                const updated = {
-                    ...configRecord,
-                    providers: configRecord.providers.filter((p) => p.uuid !== providerId),
-                };
-                await updateField(configRecord, setConfigRecord, 'providers', updated.providers);
+                const remaining = configRecord.providers.filter((p) => p.uuid !== providerId);
+                await updateField(configRecord, setConfigRecord, 'providers', remaining);
             }
         },
         [configRecord, updateField]
@@ -200,6 +198,8 @@ export const RuleCard: React.FC<RuleCardProps> = ({
 
     // Handler: Update a service's tier. Setting any service's tier to > 0
     // flips the rule into "tier" tactic on save (handled in pickLbTactic).
+    // updateField re-compacts tiers on commit, so moving the last T0 service
+    // down promotes the tiers below and moving past the bottom is a no-op.
     const handleProviderTierChange = useCallback(
         async (providerUuid: string, tier: number) => {
             if (!configRecord) return;

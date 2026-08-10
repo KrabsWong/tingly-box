@@ -604,13 +604,15 @@ func (c *Config) AddRule(rule typ.Rule) error {
 
 	applyScenarioCreateDefaults(&rule)
 
-	// Validate that all service provider UUIDs exist
-	if err := c.validateRuleServices(rule); err != nil {
+	// A brand-new rule has no grandfathered references — validate everything.
+	if err := c.validateRuleServices(rule, nil); err != nil {
 		return err
 	}
 	if err := validateSmartRoutingRules(rule); err != nil {
 		return err
 	}
+
+	normalizeRuleServiceTiers(&rule)
 
 	// Guard name unique within same scenario
 	for _, rc := range c.Rules {
@@ -637,13 +639,16 @@ func (c *Config) UpdateRule(uid string, rule typ.Rule) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Validate that all service provider UUIDs exist
-	if err := c.validateRuleServices(rule); err != nil {
+	// Incremental validation: references the persisted rule already carries
+	// stay editable even if their provider was disabled/deleted since.
+	if err := c.validateRuleServices(rule, c.findRuleByUUID(uid)); err != nil {
 		return err
 	}
 	if err := validateSmartRoutingRules(rule); err != nil {
 		return err
 	}
+
+	normalizeRuleServiceTiers(&rule)
 
 	// Claude Desktop pulls its model picker from /v1/models, which lists rule
 	// request models verbatim — the [1m] context-window advertisement must
@@ -2553,48 +2558,92 @@ func validateSmartRoutingRules(rule typ.Rule) error {
 	return nil
 }
 
-// validateRuleServices checks that all provider UUIDs referenced by services exist
-// and are enabled. This includes both regular services and smart routing services.
-// Returns an error if any service references a non-existent or disabled provider.
-func (c *Config) validateRuleServices(rule typ.Rule) error {
+// normalizeRuleServiceTiers keeps every service pool's tier numbering
+// contiguous from 0 (T0 always exists, no gaps): deleting or moving the last
+// T0 service automatically promotes the tiers below. The rule's default pool
+// and each smart-routing partition are independent pools, normalized
+// separately. Returns true when any tier was rewritten.
+func normalizeRuleServiceTiers(rule *typ.Rule) bool {
+	changed := loadbalance.NormalizeServiceTiers(rule.Services)
+	for i := range rule.SmartRouting {
+		if loadbalance.NormalizeServiceTiers(rule.SmartRouting[i].Services) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+// validateRuleServices checks provider references incrementally: only
+// references *newly introduced* by this save (absent from the persisted rule,
+// when one exists) must point at an existing, enabled provider — those are
+// genuine input errors (typo, stale UUID, picking a disabled provider outside
+// the normal UI flow). References the rule already carried are always allowed
+// through, even when their provider has since been disabled or deleted:
+// disabling a provider is a temporary, reversible state the runtime already
+// tolerates (the selector skips such services at dispatch time), and blocking
+// every edit of the rule — tier moves, renames, even removing the dead
+// reference itself — would make the rule read-only from an unrelated surface.
+func (c *Config) validateRuleServices(rule typ.Rule, existing *typ.Rule) error {
 	if c.providerStore == nil {
 		return nil // Skip validation if provider store is not initialized
 	}
 
-	// Validate regular services
+	// Grandfathering is per exact (provider, model) reference, not per
+	// provider UUID: a provider-level pass would also waive validation for
+	// brand-new services that happen to reuse an already-referenced (but
+	// disabled/deleted) provider, letting a rule accumulate fresh dangling
+	// references. Pair granularity keeps the promised edits working — tier
+	// moves, renames, removing the dead reference — while any new reference
+	// still has to point at an existing, enabled provider.
+	var grandfathered map[string]struct{}
+	if existing != nil {
+		grandfathered = make(map[string]struct{})
+		addRefs := func(services []*loadbalance.Service) {
+			for _, svc := range services {
+				if svc != nil {
+					grandfathered[svc.ServiceID()] = struct{}{}
+				}
+			}
+		}
+		addRefs(existing.Services)
+		for _, sr := range existing.SmartRouting {
+			addRefs(sr.Services)
+		}
+	}
+
+	check := func(svc *loadbalance.Service, context string) error {
+		if _, ok := grandfathered[svc.ServiceID()]; ok {
+			return nil
+		}
+		provider, err := c.providerStore.GetByUUID(svc.Provider)
+		if err != nil {
+			return fmt.Errorf("%s references non-existent provider '%s': %w", context, svc.Provider, err)
+		}
+		if provider == nil {
+			return fmt.Errorf("%s references non-existent provider '%s'", context, svc.Provider)
+		}
+		if !provider.Enabled {
+			return fmt.Errorf("%s references disabled provider '%s'", context, svc.Provider)
+		}
+		return nil
+	}
+
 	for _, svc := range rule.Services {
 		if svc == nil {
 			continue
 		}
-
-		provider, err := c.providerStore.GetByUUID(svc.Provider)
-		if err != nil {
-			return fmt.Errorf("service references non-existent provider '%s': %w", svc.Provider, err)
-		}
-		if provider == nil {
-			return fmt.Errorf("service references non-existent provider '%s'", svc.Provider)
-		}
-		if !provider.Enabled {
-			return fmt.Errorf("service references disabled provider '%s'", svc.Provider)
+		if err := check(svc, "service"); err != nil {
+			return err
 		}
 	}
 
-	// Validate smart routing services
 	for _, sr := range rule.SmartRouting {
 		for _, svc := range sr.Services {
 			if svc == nil {
 				continue
 			}
-
-			provider, err := c.providerStore.GetByUUID(svc.Provider)
-			if err != nil {
-				return fmt.Errorf("smart routing service references non-existent provider '%s': %w", svc.Provider, err)
-			}
-			if provider == nil {
-				return fmt.Errorf("smart routing service references non-existent provider '%s'", svc.Provider)
-			}
-			if !provider.Enabled {
-				return fmt.Errorf("smart routing service references disabled provider '%s'", svc.Provider)
+			if err := check(svc, "smart routing service"); err != nil {
+				return err
 			}
 		}
 	}

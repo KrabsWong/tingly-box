@@ -304,6 +304,9 @@ export const UnifiedRoutingGraph: React.FC<UnifiedRoutingGraphProps> = ({
     // Tier layout: all tier groups rendered with TierNode label, always shown.
     // T0 row is always present (even with no providers) to guide users.
     // Each service has up/down arrows; up from T0 is hidden (already highest).
+    // Tiers are kept contiguous from 0 (normalizeProviderTiers on every
+    // mutation + backend save), so down is also hidden for the sole service
+    // of the bottom tier — moving it further would just be renumbered back.
     const renderTierLayout = React.useCallback(() => {
         // Always show at least T0, even when no providers exist
         const groups = tierGroups.length > 0 ? tierGroups : [{tier: 0, providers: [] as typeof sortedDefaultProviders}];
@@ -313,7 +316,13 @@ export const UnifiedRoutingGraph: React.FC<UnifiedRoutingGraphProps> = ({
 
         return (
             <Box sx={{display: 'flex', flexDirection: 'column', gap: 1.5}}>
-                {groups.map((group, idx) => (
+                {groups.map((group, idx) => {
+                    // Under contiguous-tier normalization, moving the sole
+                    // service of the bottom tier further down is a no-op
+                    // (it would just be renumbered back) — hide its ↓ arrow,
+                    // symmetric with ↑ being hidden on T0.
+                    const isLoneBottomTier = idx === groups.length - 1 && group.providers.length === 1;
+                    return (
                     <Box
                         key={group.tier}
                         sx={{display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'nowrap'}}
@@ -338,7 +347,7 @@ export const UnifiedRoutingGraph: React.FC<UnifiedRoutingGraphProps> = ({
                                 showTier={false}
                                 forceShowActions={shouldShowActions ?? (hoveredTier === group.tier)}
                                 onMoveTierUp={group.tier > 0 && onTierChange ? () => onTierChange(p.uuid, group.tier - 1) : undefined}
-                                onMoveTierDown={onTierChange ? () => onTierChange(p.uuid, group.tier + 1) : undefined}
+                                onMoveTierDown={onTierChange && !isLoneBottomTier ? () => onTierChange(p.uuid, group.tier + 1) : undefined}
                             />
                         ))}
                         <ActionAddNode
@@ -352,7 +361,8 @@ export const UnifiedRoutingGraph: React.FC<UnifiedRoutingGraphProps> = ({
                             }
                         />
                     </Box>
-                ))}
+                    );
+                })}
             </Box>
         );
     }, [t, tierGroups, active, saving, record.providers.length, getApiStyle, providers, onDeleteProvider, onProviderNodeClick, onEditProvider, onTierChange, onAddService, hoveredTier, guideMode, handleShowGuide]);

@@ -1,5 +1,6 @@
 import type { ConfigRecord, Rule, RuleFlagsApi, SmartRouting } from '@/components/RoutingGraphTypes';
 import { flagsToApi } from './flagHelpers';
+import { normalizeConfigRecordTiers, normalizeProviderTiers } from './utils';
 
 export interface RuleUpdateService {
     provider: string;
@@ -37,6 +38,11 @@ export function buildRuleUpdatePayload(
     rule: Pick<Rule, 'uuid' | 'scenario'>,
     config: ConfigRecord,
 ): RuleUpdatePayload {
+    // The commit paths already normalize tiers; normalizing again here (after
+    // the incomplete-row filter, which can itself vacate a tier) guarantees
+    // the wire payload is canonical on every save path, matching the
+    // backend's own save-time normalization.
+    const normalized = normalizeConfigRecordTiers(config);
     return {
         uuid: rule.uuid,
         scenario: rule.scenario,
@@ -45,8 +51,7 @@ export function buildRuleUpdatePayload(
         active: config.active,
         description: config.description,
         flags: flagsToApi(config.flags),
-        services: config.providers
-            .filter((p) => p.provider && p.model)
+        services: normalizeProviderTiers(normalized.providers.filter((p) => p.provider && p.model))
             .map((provider) => ({
                 provider: provider.provider,
                 model: provider.model,
@@ -56,6 +61,6 @@ export function buildRuleUpdatePayload(
                 tier: provider.tier ?? 0,
             })),
         smart_enabled: config.smartEnabled || false,
-        smart_routing: config.smartRouting || [],
+        smart_routing: normalized.smartRouting || [],
     };
 }

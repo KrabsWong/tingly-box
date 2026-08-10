@@ -486,3 +486,204 @@ func TestDefaultBuiltinRuleFlagsOnce_PreservesUserOff(t *testing.T) {
 		t.Error("migration re-enabled user-disabled flags; one-time gate is broken")
 	}
 }
+
+func TestNormalizeLegacyConfigBaseline_CompactsTierGaps(t *testing.T) {
+	c := &Config{
+		Rules: []typ.Rule{
+			{
+				UUID:     "gappy",
+				Scenario: typ.ScenarioOpenAI,
+				Services: []*loadbalance.Service{
+					{Provider: "p0", Model: "a", Active: true, Tier: 1},
+					{Provider: "p1", Model: "b", Active: true, Tier: 3},
+				},
+			},
+		},
+	}
+
+	normalizeLegacyConfigBaseline(c)
+
+	got := c.Rules[0].Services
+	if got[0].Tier != 0 || got[1].Tier != 1 {
+		t.Fatalf("tiers = [%d, %d], want [0, 1]", got[0].Tier, got[1].Tier)
+	}
+}
+
+func TestUpdateRule_NormalizesTiers(t *testing.T) {
+	cfg, err := NewConfig(WithConfigDir(t.TempDir()))
+	if err != nil {
+		t.Fatalf("NewConfig error: %v", err)
+	}
+
+	prov := &typ.Provider{
+		UUID:     "tier-norm-prov",
+		Name:     "tier-norm-prov",
+		APIBase:  "https://example.com/v1",
+		APIStyle: "openai",
+		Enabled:  true,
+	}
+	if err := cfg.AddProvider(prov); err != nil {
+		t.Fatalf("AddProvider error: %v", err)
+	}
+
+	rule := typ.Rule{
+		UUID:         "tier-norm",
+		Scenario:     typ.ScenarioOpenAI,
+		RequestModel: "tier-norm-model",
+		Active:       true,
+		Services: []*loadbalance.Service{
+			// The T0 service was "deleted": remaining tiers must promote.
+			{Provider: prov.UUID, Model: "a", Active: true, Tier: 1},
+			{Provider: prov.UUID, Model: "b", Active: true, Tier: 2},
+		},
+	}
+	if err := cfg.AddRule(rule); err != nil {
+		t.Fatalf("AddRule error: %v", err)
+	}
+	saved := cfg.GetRuleByUUID("tier-norm")
+	if saved == nil {
+		t.Fatal("rule not found after AddRule")
+	}
+	if saved.Services[0].Tier != 0 || saved.Services[1].Tier != 1 {
+		t.Fatalf("AddRule tiers = [%d, %d], want [0, 1]", saved.Services[0].Tier, saved.Services[1].Tier)
+	}
+
+	rule.Services = []*loadbalance.Service{
+		{Provider: prov.UUID, Model: "a", Active: true, Tier: 2},
+		{Provider: prov.UUID, Model: "b", Active: true, Tier: 5},
+	}
+	if err := cfg.UpdateRule("tier-norm", rule); err != nil {
+		t.Fatalf("UpdateRule error: %v", err)
+	}
+	saved = cfg.GetRuleByUUID("tier-norm")
+	if saved.Services[0].Tier != 0 || saved.Services[1].Tier != 1 {
+		t.Fatalf("UpdateRule tiers = [%d, %d], want [0, 1]", saved.Services[0].Tier, saved.Services[1].Tier)
+	}
+}
+
+// Grandfathered provider references: a rule that already references a
+// provider stays fully editable after that provider is disabled or deleted —
+// only *newly introduced* references are validated strictly.
+func TestUpdateRule_GrandfathersExistingProviderRefs(t *testing.T) {
+	cfg, err := NewConfig(WithConfigDir(t.TempDir()))
+	if err != nil {
+		t.Fatalf("NewConfig error: %v", err)
+	}
+
+	prov := &typ.Provider{
+		UUID:     "gf-prov",
+		Name:     "gf-prov",
+		APIBase:  "https://example.com/v1",
+		APIStyle: "openai",
+		Enabled:  true,
+	}
+	if err := cfg.AddProvider(prov); err != nil {
+		t.Fatalf("AddProvider error: %v", err)
+	}
+
+	rule := typ.Rule{
+		UUID:         "gf-rule",
+		Scenario:     typ.ScenarioOpenAI,
+		RequestModel: "gf-model",
+		Active:       true,
+		Services: []*loadbalance.Service{
+			{Provider: prov.UUID, Model: "a", Active: true, Tier: 0},
+			{Provider: prov.UUID, Model: "b", Active: true, Tier: 1},
+		},
+	}
+	if err := cfg.AddRule(rule); err != nil {
+		t.Fatalf("AddRule error: %v", err)
+	}
+
+	// Disable the provider the rule references.
+	prov.Enabled = false
+	if err := cfg.UpdateProvider(prov.UUID, prov); err != nil {
+		t.Fatalf("disable provider: %v", err)
+	}
+
+	// Editing the rule (e.g. a tier move) must still succeed.
+	rule.Services[0].Tier = 1
+	rule.Services[1].Tier = 0
+	if err := cfg.UpdateRule("gf-rule", rule); err != nil {
+		t.Fatalf("UpdateRule with grandfathered disabled provider: %v", err)
+	}
+
+	// A NEW reference to a non-existent provider is still rejected.
+	withNew := rule
+	withNew.Services = append([]*loadbalance.Service{}, rule.Services...)
+	withNew.Services = append(withNew.Services, &loadbalance.Service{Provider: "does-not-exist", Model: "c", Active: true})
+	if err := cfg.UpdateRule("gf-rule", withNew); err == nil {
+		t.Fatal("expected new non-existent provider reference to be rejected")
+	}
+
+	// Grandfathering is per (provider, model) pair: a NEW model on the
+	// already-referenced disabled provider is a new reference — rejected.
+	withNewModel := rule
+	withNewModel.Services = append([]*loadbalance.Service{}, rule.Services...)
+	withNewModel.Services = append(withNewModel.Services, &loadbalance.Service{Provider: prov.UUID, Model: "c", Active: true})
+	if err := cfg.UpdateRule("gf-rule", withNewModel); err == nil {
+		t.Fatal("expected new model on disabled provider to be rejected")
+	}
+
+	// A brand-new rule referencing the disabled provider is also rejected.
+	fresh := typ.Rule{
+		UUID:         "gf-rule-2",
+		Scenario:     typ.ScenarioOpenAI,
+		RequestModel: "gf-model-2",
+		Active:       true,
+		Services: []*loadbalance.Service{
+			{Provider: prov.UUID, Model: "a", Active: true},
+		},
+	}
+	if err := cfg.AddRule(fresh); err == nil {
+		t.Fatal("expected new rule referencing disabled provider to be rejected")
+	}
+}
+
+// Deleting a provider cascades service removal without going through
+// UpdateRule; the cascade must re-compact tiers so it can't persist a gap.
+func TestDeleteProviderCascade_CompactsTiers(t *testing.T) {
+	cfg, err := NewConfig(WithConfigDir(t.TempDir()))
+	if err != nil {
+		t.Fatalf("NewConfig error: %v", err)
+	}
+
+	keep := &typ.Provider{UUID: "cascade-keep", Name: "cascade-keep", APIBase: "https://example.com/v1", APIStyle: "openai", Enabled: true}
+	gone := &typ.Provider{UUID: "cascade-gone", Name: "cascade-gone", APIBase: "https://example.com/v1", APIStyle: "openai", Enabled: true}
+	for _, p := range []*typ.Provider{keep, gone} {
+		if err := cfg.AddProvider(p); err != nil {
+			t.Fatalf("AddProvider error: %v", err)
+		}
+	}
+
+	rule := typ.Rule{
+		UUID:         "cascade-rule",
+		Scenario:     typ.ScenarioOpenAI,
+		RequestModel: "cascade-model",
+		Active:       true,
+		Services: []*loadbalance.Service{
+			{Provider: gone.UUID, Model: "a", Active: true, Tier: 0}, // sole T0
+			{Provider: keep.UUID, Model: "b", Active: true, Tier: 1},
+			{Provider: keep.UUID, Model: "c", Active: true, Tier: 2},
+		},
+	}
+	if err := cfg.AddRule(rule); err != nil {
+		t.Fatalf("AddRule error: %v", err)
+	}
+
+	if err := cfg.DeleteProvider(gone.UUID); err != nil {
+		t.Fatalf("DeleteProvider error: %v", err)
+	}
+
+	saved := cfg.GetRuleByUUID("cascade-rule")
+	if saved == nil {
+		t.Fatal("rule not found after cascade")
+	}
+	if len(saved.Services) != 2 || saved.Services[0].Tier != 0 || saved.Services[1].Tier != 1 {
+		tiers := make([]int, 0, len(saved.Services))
+		for _, s := range saved.Services {
+			tiers = append(tiers, s.Tier)
+		}
+		t.Fatalf("post-cascade tiers = %v, want [0, 1]", tiers)
+	}
+}
