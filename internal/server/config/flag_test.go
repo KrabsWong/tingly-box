@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tingly-dev/tingly-box/internal/constant"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 
@@ -97,56 +98,56 @@ func TestProfileScenarioFlagWriteInheritsBaseConfig(t *testing.T) {
 	profile := typ.RuleScenario("claude_code:p1")
 
 	// Base scenario is switched to separate mode.
-	if err := cfg.SetScenarioFlag(base, FlagSeparate, true); err != nil {
+	if err := cfg.SetScenarioFlag(base, constant.FlagSeparate, true); err != nil {
 		t.Fatalf("SetScenarioFlag(base, separate) error: %v", err)
 	}
 
 	// Sanity: before any profile-local write, the profile reads through to
 	// base via scenarioConfigLocked's fallback.
-	if v := cfg.GetScenarioFlag(profile, FlagSeparate); !v {
+	if v := cfg.GetScenarioFlag(profile, constant.FlagSeparate); !v {
 		t.Fatalf("expected profile to inherit base separate=true via fallback before any profile write, got false")
 	}
 
 	// Writing an unrelated flag on the profile (e.g. toggling Smart Compact
 	// from the profile page's plugin panel) must not orphan the profile from
 	// the base scenario's already-set flags.
-	if err := cfg.SetScenarioFlag(profile, FlagSmartCompact, true); err != nil {
+	if err := cfg.SetScenarioFlag(profile, constant.FlagSmartCompact, true); err != nil {
 		t.Fatalf("SetScenarioFlag(profile, smart_compact) error: %v", err)
 	}
 
-	if v := cfg.GetScenarioFlag(profile, FlagSeparate); !v {
+	if v := cfg.GetScenarioFlag(profile, constant.FlagSeparate); !v {
 		t.Errorf("profile lost inherited separate=true after an unrelated profile-local flag write")
 	}
-	if v := cfg.GetScenarioFlag(profile, FlagSmartCompact); !v {
+	if v := cfg.GetScenarioFlag(profile, constant.FlagSmartCompact); !v {
 		t.Errorf("profile-local smart_compact write did not persist")
 	}
 	// Base scenario itself must be unaffected by the profile write.
-	if v := cfg.GetScenarioFlag(base, FlagSmartCompact); v {
+	if v := cfg.GetScenarioFlag(base, constant.FlagSmartCompact); v {
 		t.Errorf("smart_compact leaked into the base scenario config")
 	}
 
 	// Same guarantee for the string-flag setter (e.g. thinking_effort set on
 	// base, then a different flag toggled on the profile).
 	profile2 := typ.RuleScenario("claude_code:p2")
-	if err := cfg.SetScenarioStringFlag(base, FlagThinkingEffort, "high"); err != nil {
+	if err := cfg.SetScenarioStringFlag(base, constant.FlagThinkingEffort, "high"); err != nil {
 		t.Fatalf("SetScenarioStringFlag(base, thinking_effort) error: %v", err)
 	}
-	if err := cfg.SetScenarioStringFlag(profile2, FlagRecordingV2, string(typ.RecordingModeRequestOnly)); err != nil {
+	if err := cfg.SetScenarioStringFlag(profile2, constant.FlagRecordingV2, string(typ.RecordingModeRequestOnly)); err != nil {
 		t.Fatalf("SetScenarioStringFlag(profile2, recording_v2) error: %v", err)
 	}
-	if got := cfg.GetScenarioStringFlag(profile2, FlagThinkingEffort); got != "high" {
+	if got := cfg.GetScenarioStringFlag(profile2, constant.FlagThinkingEffort); got != "high" {
 		t.Errorf("profile2 lost inherited thinking_effort=high after an unrelated profile-local string flag write, got %q", got)
 	}
 
 	// Same guarantee for SetScenarioExtensions.
 	profile3 := typ.RuleScenario("claude_code:p3")
-	if err := cfg.SetScenarioFlag(base, FlagSkipUsage, true); err != nil {
+	if err := cfg.SetScenarioFlag(base, constant.FlagSkipUsage, true); err != nil {
 		t.Fatalf("SetScenarioFlag(base, skip_usage) error: %v", err)
 	}
 	if err := cfg.SetScenarioExtensions(profile3, map[string]interface{}{"some_extension": "x"}); err != nil {
 		t.Fatalf("SetScenarioExtensions(profile3) error: %v", err)
 	}
-	if v := cfg.GetScenarioFlag(profile3, FlagSkipUsage); !v {
+	if v := cfg.GetScenarioFlag(profile3, constant.FlagSkipUsage); !v {
 		t.Errorf("profile3 lost inherited skip_usage=true after an unrelated SetScenarioExtensions write")
 	}
 }

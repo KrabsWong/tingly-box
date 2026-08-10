@@ -54,8 +54,8 @@ func GuardrailsEnabledForScenario(cfg *config.Config, runtime *guardrails.Guardr
 	if !GuardrailsSupportsScenario(scenario) {
 		return false
 	}
-	return cfg.GetScenarioFlag(typ.RuleScenario(scenario), config.ExtensionGuardrails) ||
-		cfg.GetScenarioFlag(typ.ScenarioGlobal, config.ExtensionGuardrails)
+	return cfg.GetScenarioFlag(typ.RuleScenario(scenario), constant.ExtensionGuardrails) ||
+		cfg.GetScenarioFlag(typ.ScenarioGlobal, constant.ExtensionGuardrails)
 }
 
 func EnsureGuardrailsCredentialMaskState(c *gin.Context) *guardrailscore.CredentialMaskState {

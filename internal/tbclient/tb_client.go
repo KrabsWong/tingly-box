@@ -59,10 +59,6 @@ type TBClient interface {
 	// GetHTTPEndpointForScenario returns HTTP endpoint configuration for a scenario
 	GetHTTPEndpointForScenario(ctx context.Context, scenario typ.RuleScenario) (*HTTPEndpointConfig, error)
 
-	// EnsureSmartGuideRule ensures the _smart_guide rule exists and is configured correctly
-	// Deprecated: Use EnsureSmartGuideRuleForBot for bot-specific rules
-	EnsureSmartGuideRule(ctx context.Context, providerUUID, modelID string) error
-
 	// EnsureSmartGuideRuleForBot ensures the _smart_guide rule exists for a specific bot
 	// Each bot gets its own rule with UUID equal to botUUID
 	EnsureSmartGuideRuleForBot(ctx context.Context, botUUID, botName, providerUUID, modelID string) error
@@ -415,12 +411,6 @@ func (c *TBClientImpl) GetScenarioEndpointPath(scenario typ.RuleScenario) string
 		// Default to OpenAI scenario path
 		return "/tingly/openai"
 	}
-}
-
-// EnsureSmartGuideRule ensures the _smart_guide rule exists and is configured correctly
-// Deprecated: Use EnsureSmartGuideRuleForBot for bot-specific rules
-func (c *TBClientImpl) EnsureSmartGuideRule(ctx context.Context, providerUUID, modelID string) error {
-	return c.config.EnsureSmartGuideRule(providerUUID, modelID)
 }
 
 // EnsureSmartGuideRuleForBot ensures the _smart_guide rule exists for a specific bot

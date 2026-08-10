@@ -1,4 +1,4 @@
-package config
+package constant
 
 // ScenarioFlags bool field keys. These are the canonical string keys used
 // when reading or writing typed ScenarioFlags fields through the
@@ -26,3 +26,14 @@ const (
 // migrate20260610). The generic int-flag get/set infra (and its HTTP endpoint)
 // is retained for future scenario int flags — add the key const here plus a
 // switch case in config.go's Get/SetScenarioIntFlag.
+
+// ScenarioConfig.Extensions keys. These are the canonical string keys used
+// when reading or writing feature toggles stored in the Extensions map
+// (as opposed to typed ScenarioFlags fields).
+const (
+	ExtensionVisionProxyService = "vision_proxy_service"
+	ExtensionGuardrails         = "guardrails"
+	ExtensionMCP                = "mcp"
+	ExtensionSkillUser          = "skill_user"
+	ExtensionSkillIDE           = "skill_ide"
+)
