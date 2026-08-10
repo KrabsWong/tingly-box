@@ -160,13 +160,6 @@ func (c *Config) EnsureSmartGuideRuleForBot(botUUID, botName, providerUUID, mode
 	return nil
 }
 
-// EnsureSmartGuideRule ensures the _smart_guide rule exists (backward compatible)
-// This method creates a rule without bot-specific identification
-// Deprecated: Use EnsureSmartGuideRuleForBot for bot-specific rules
-func (c *Config) EnsureSmartGuideRule(providerUUID, modelID string) error {
-	return c.EnsureSmartGuideRuleForBot("", "", providerUUID, modelID)
-}
-
 // GetSmartGuideRuleForBot returns the _smart_guide rule for a specific bot
 func (c *Config) GetSmartGuideRuleForBot(botUUID string) *typ.Rule {
 	c.mu.RLock()
@@ -175,21 +168,6 @@ func (c *Config) GetSmartGuideRuleForBot(botUUID string) *typ.Rule {
 	ruleUUID := SmartGuideRuleUUID(botUUID)
 	for i, rule := range c.Rules {
 		if rule.UUID == ruleUUID {
-			return &c.Rules[i]
-		}
-	}
-	return nil
-}
-
-// GetSmartGuideRule returns the _smart_guide rule (backward compatible, non-bot-specific)
-// Deprecated: Use GetSmartGuideRuleForBot for bot-specific rules
-func (c *Config) GetSmartGuideRule() *typ.Rule {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	// Return first matching smart guide rule
-	for i, rule := range c.Rules {
-		if rule.Scenario == typ.ScenarioSmartGuide {
 			return &c.Rules[i]
 		}
 	}

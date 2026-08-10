@@ -47,7 +47,6 @@ type Config struct {
 	EncryptProviders   bool                 `yaml:"encrypt_providers" json:"encrypt_providers"`   // Whether to encrypt provider info (default false)
 	Scenarios          []typ.ScenarioConfig `yaml:"scenarios" json:"scenarios"`                   // Scenario-specific configurations
 	GUI                GUIConfig            `json:"gui"`                                          // GUI-specific settings
-	RemoteCoder        RemoteCoderConfig    `json:"remote_coder"`                                 // Remote-coder service settings
 	RandomUUID         string               `json:"random_uuid"`                                  // A random uuid to help protocol transform for some special provider
 	ClaudeCodeDeviceID string               `json:"claude_code_device_id"`                        // Calc from random claude code device id with sha256
 
@@ -448,9 +447,6 @@ func NewConfig(opts ...ConfigOption) (*Config, error) {
 	}
 	if !cfg.EnterpriseContextJWT.RequireJTI {
 		cfg.EnterpriseContextJWT.RequireJTI = true
-		updated = true
-	}
-	if cfg.applyRemoteCoderDefaults() {
 		updated = true
 	}
 	if cfg.applyGuardrailsDefaults() {
@@ -2469,7 +2465,6 @@ func (c *Config) CreateDefaultConfig() error {
 		APITokenIssuer:     "tingly-box",
 	}
 
-	c.applyRemoteCoderDefaults()
 	c.applyGuardrailsDefaults()
 	if err := c.Save(); err != nil {
 		return fmt.Errorf("failed to create default global cfg: %w", err)
