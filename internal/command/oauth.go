@@ -45,39 +45,6 @@ func (o *OAuthCmdKong) Run(appManager *AppManager) error {
 
 // ============== Business Logic Functions ==============
 
-// buildOAuthHelp generates the help text with provider list
-func buildOAuthHelp() string {
-	providers := supportedProviders()
-
-	var help strings.Builder
-	help.WriteString("OAuth authentication for AI providers.\n\n")
-	help.WriteString("Supported providers:\n")
-
-	for _, p := range providers {
-		help.WriteString(fmt.Sprintf("  %-12s - %s\n", p.Type, p.DisplayName))
-		if p.Description != "" {
-			help.WriteString(fmt.Sprintf("                %s\n", p.Description))
-		}
-		help.WriteString("\n")
-	}
-
-	help.WriteString("Usage:\n")
-	help.WriteString("  tingly oauth              # Interactive mode - select provider from list\n")
-	help.WriteString("  tingly oauth <provider>   # Direct mode - authenticate specific provider\n")
-	help.WriteString("\n")
-	help.WriteString("Flags:\n")
-	help.WriteString("  -n, --name <name>         Custom name for the provider\n")
-	help.WriteString("  -p, --port <port>         Callback server port (default: 12580)\n")
-	help.WriteString("  -x, --proxy <url>         Proxy URL for OAuth requests\n")
-	help.WriteString("\n")
-	help.WriteString("Examples:\n")
-	help.WriteString("  tingly oauth              # Interactive selection\n")
-	help.WriteString("  tingly oauth claude_code  # Direct authentication\n")
-	help.WriteString("  tingly oauth qwen_code --name my-qwen\n")
-
-	return help.String()
-}
-
 // runInteractiveMode shows simple provider selection
 func runInteractiveMode(appConfig *config.AppConfig, customName string, callbackPort int, proxyURL string) error {
 	providers := supportedProviders()

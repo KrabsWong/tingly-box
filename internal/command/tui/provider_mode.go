@@ -6,12 +6,14 @@ import (
 	"strings"
 
 	"github.com/tingly-dev/tingly-box/internal/protocol"
+	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // RunProviderMode is the entry point for the Provider mode loop. It returns
 // nil when the user backs out to the top-level menu.
-func RunProviderMode(mgr TUIManager) error {
+func RunProviderMode(cfg *serverconfig.Config) error {
 	for {
 		items := []SelectItem[string]{
 			{Title: "List", Description: "Show all configured providers", Value: "list"},
@@ -36,15 +38,15 @@ func RunProviderMode(mgr TUIManager) error {
 		var opErr error
 		switch r.Value {
 		case "list":
-			opErr = providerList(mgr)
+			opErr = providerList(cfg)
 		case "add":
-			opErr = providerAdd(mgr)
+			opErr = providerAdd(cfg)
 		case "edit":
-			opErr = providerEdit(mgr)
+			opErr = providerEdit(cfg)
 		case "delete":
-			opErr = providerDelete(mgr)
+			opErr = providerDelete(cfg)
 		case "refresh":
-			opErr = providerRefreshModels(mgr)
+			opErr = providerRefreshModels(cfg)
 		}
 		if opErr != nil && opErr != ErrCancelled {
 			fmt.Println(errorStyle.Render(fmt.Sprintf("✗ %v", opErr)))
@@ -52,8 +54,8 @@ func RunProviderMode(mgr TUIManager) error {
 	}
 }
 
-func providerList(mgr TUIManager) error {
-	providers := mgr.ListProviders()
+func providerList(cfg *serverconfig.Config) error {
+	providers := configuredProviders(cfg)
 	if len(providers) == 0 {
 		fmt.Println(descStyle.Render("No providers configured."))
 		Pause("")
@@ -75,7 +77,7 @@ func providerList(mgr TUIManager) error {
 	return nil
 }
 
-func providerAdd(mgr TUIManager) error {
+func providerAdd(cfg *serverconfig.Config) error {
 	nameR, err := Input("Provider name:", InputOptions{Required: true, CanGoBack: true})
 	if err != nil || nameR.IsCancel() || nameR.IsBack() {
 		return nil
@@ -112,25 +114,20 @@ func providerAdd(mgr TUIManager) error {
 		return nil
 	}
 
-	uuid, err := mgr.AddProvider(nameR.Value, apiBase, tokenR.Value, styleR.Value)
+	res, err := usecase.NewProviderUseCase(cfg).Add(usecase.CreateProviderRequest{
+		Name: nameR.Value, APIBase: apiBase, Token: tokenR.Value,
+		APIStyle: styleR.Value, ProxyURL: proxyR.Value,
+	})
 	if err != nil {
 		return err
 	}
-	if proxyR.Value != "" {
-		if p, gerr := mgr.GetProvider(uuid); gerr == nil && p != nil {
-			p.ProxyURL = proxyR.Value
-			if uerr := mgr.UpdateProviderByUUID(uuid, p); uerr != nil {
-				return fmt.Errorf("save proxy: %w", uerr)
-			}
-		}
-	}
-	fmt.Println(successStyle.Render(fmt.Sprintf("✓ Provider '%s' added (uuid: %s).", nameR.Value, uuid)))
+	fmt.Println(successStyle.Render(fmt.Sprintf("✓ Provider '%s' added (uuid: %s).", nameR.Value, res.Provider.UUID)))
 	Pause("")
 	return nil
 }
 
-func pickProvider(mgr TUIManager, prompt string) (*typ.Provider, error) {
-	providers := mgr.ListProviders()
+func pickProvider(cfg *serverconfig.Config, prompt string) (*typ.Provider, error) {
+	providers := configuredProviders(cfg)
 	if len(providers) == 0 {
 		fmt.Println(descStyle.Render("No providers configured. Add one from Provider → Add first."))
 		Pause("")
@@ -162,8 +159,8 @@ func pickProvider(mgr TUIManager, prompt string) (*typ.Provider, error) {
 	return nil, nil
 }
 
-func providerEdit(mgr TUIManager) error {
-	p, err := pickProvider(mgr, "Select provider to edit:")
+func providerEdit(cfg *serverconfig.Config) error {
+	p, err := pickProvider(cfg, "Select provider to edit:")
 	if err != nil || p == nil {
 		return err
 	}
@@ -199,7 +196,10 @@ func providerEdit(mgr TUIManager) error {
 	if tokenR.Value != "" {
 		p.Token = tokenR.Value
 	}
-	if err := mgr.UpdateProviderByUUID(p.UUID, p); err != nil {
+	if _, err := usecase.NewProviderUseCase(cfg).Update(usecase.UpdateProviderRequest{
+		UUID: p.UUID, Name: p.Name, APIBase: p.APIBase, Token: p.Token,
+		APIStyle: p.APIStyle, ProxyURL: p.ProxyURL,
+	}); err != nil {
 		return err
 	}
 	fmt.Println(successStyle.Render(fmt.Sprintf("✓ Provider '%s' updated.", p.Name)))
@@ -207,8 +207,8 @@ func providerEdit(mgr TUIManager) error {
 	return nil
 }
 
-func providerDelete(mgr TUIManager) error {
-	p, err := pickProvider(mgr, "Select provider to delete:")
+func providerDelete(cfg *serverconfig.Config) error {
+	p, err := pickProvider(cfg, "Select provider to delete:")
 	if err != nil || p == nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func providerDelete(mgr TUIManager) error {
 	if err != nil || !confirm.IsConfirm() || !confirm.Value {
 		return nil
 	}
-	if err := mgr.DeleteProviderByUUID(p.UUID); err != nil {
+	if err := usecase.NewProviderUseCase(cfg).Delete(usecase.DeleteProviderRequest{UUID: p.UUID}); err != nil {
 		return err
 	}
 	fmt.Println(successStyle.Render(fmt.Sprintf("✓ Provider '%s' deleted.", p.Name)))
@@ -227,20 +227,19 @@ func providerDelete(mgr TUIManager) error {
 	return nil
 }
 
-func providerRefreshModels(mgr TUIManager) error {
-	p, err := pickProvider(mgr, "Refresh models for which provider?")
+func providerRefreshModels(cfg *serverconfig.Config) error {
+	p, err := pickProvider(cfg, "Refresh models for which provider?")
 	if err != nil || p == nil {
 		return err
 	}
-	_, err = WithSpinner(fmt.Sprintf("Fetching models from %s", p.Name), func() (struct{}, error) {
-		return struct{}{}, mgr.FetchAndSaveProviderModels(p.UUID)
+	res, err := WithSpinner(fmt.Sprintf("Fetching models from %s", p.Name), func() (usecase.RefreshModelsResult, error) {
+		return usecase.NewProviderUseCase(cfg).RefreshModels(usecase.RefreshModelsRequest{UUID: p.UUID})
 	})
 	if err != nil {
 		return err
 	}
-	models := availableModels(mgr, p)
-	fmt.Println(successStyle.Render(fmt.Sprintf("✓ %d model(s) available for %s.", len(models), p.Name)))
-	for _, m := range models {
+	fmt.Println(successStyle.Render(fmt.Sprintf("✓ %d model(s) available for %s.", len(res.Models), p.Name)))
+	for _, m := range res.Models {
 		fmt.Println(descStyle.Render("  - " + m))
 	}
 	fmt.Println()

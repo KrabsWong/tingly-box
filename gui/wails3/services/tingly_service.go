@@ -14,50 +14,15 @@ import (
 
 	"github.com/tingly-dev/tingly-box/internal/command"
 	exportpkg "github.com/tingly-dev/tingly-box/internal/dataio"
-	"github.com/tingly-dev/tingly-box/internal/server"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // TinglyService manages the web UI and HTTP server functionality
 type TinglyService struct {
 	appManager    *command.AppManager
 	serverManager *command.ServerManager
-	httpServer    *server.Server
-	shutdownChan  chan struct{}
-	isRunning     bool
 	app           *application.App
-}
-
-// NewTinglyService creates a new UI service instance
-func NewTinglyService(configDir string, port int, debug bool) (*TinglyService, error) {
-	// Create AppManager
-	appManager, err := command.NewAppManager(configDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create app manager: %w", err)
-	}
-
-	// Set port
-	if err := appManager.SetServerPort(port); err != nil {
-		return nil, fmt.Errorf("failed to set server port: %w", err)
-	}
-
-	serverManager := command.NewServerManager(
-		appManager.AppConfig(),
-		server.WithDebug(debug),
-		server.WithUI(true),
-		server.WithOpenBrowser(false), // GUI doesn't need browser auto-open
-	)
-
-	res := &TinglyService{
-		appManager:    appManager,
-		serverManager: serverManager,
-		shutdownChan:  make(chan struct{}),
-		isRunning:     false,
-	}
-
-	log.Printf("config file: %s\n", appManager.AppConfig().GetGlobalConfig().ConfigFile)
-
-	return res, nil
 }
 
 // NewTinglyServiceWithServerManager creates a new UI service instance with a pre-configured ServerManager
@@ -65,8 +30,6 @@ func NewTinglyServiceWithServerManager(appManager *command.AppManager, serverMan
 	res := &TinglyService{
 		appManager:    appManager,
 		serverManager: serverManager,
-		shutdownChan:  make(chan struct{}),
-		isRunning:     false,
 	}
 
 	log.Printf("config file: %s\n", appManager.AppConfig().GetGlobalConfig().ConfigFile)
@@ -83,22 +46,6 @@ func (s *TinglyService) Start(ctx context.Context) error {
 		}
 	}()
 	return nil
-}
-
-// Stop stops the UI service gracefully
-func (s *TinglyService) Stop() error {
-	if !s.isRunning {
-		return nil
-	}
-
-	fmt.Println("Stopping UI service...")
-	err := s.serverManager.Stop()
-	s.isRunning = false
-
-	// Close shutdown channel to notify any waiting goroutines
-	close(s.shutdownChan)
-
-	return err
 }
 
 func (s *TinglyService) GetGinEngine() *gin.Engine {
@@ -146,13 +93,15 @@ func (s *TinglyService) ServiceShutdown(ctx context.Context) error {
 // ============
 
 func (s *TinglyService) GetUserAuthToken() string {
-	logrus.Debugf("Getting auth token %s\n", s.appManager.GetUserToken())
-	return s.appManager.GetUserToken()
+	token := s.appManager.GetGlobalConfig().GetUserToken()
+	logrus.Debugf("Getting auth token %s\n", token)
+	return token
 }
 
 func (s *TinglyService) GetPort() int {
-	logrus.Debugf("Getting port %d\n", s.appManager.GetServerPort())
-	return s.appManager.GetServerPort()
+	port := s.appManager.GetGlobalConfig().GetServerPort()
+	logrus.Debugf("Getting port %d\n", port)
+	return port
 }
 
 // ChoosePath opens a native file dialog and returns a selected file or directory path.
@@ -175,22 +124,31 @@ func (s *TinglyService) ChoosePath() (string, error) {
 
 // ListProviders returns all configured providers
 func (s *TinglyService) ListProviders() []*typ.Provider {
-	return s.appManager.ListProviders()
+	return usecase.NewProviderUseCase(s.appManager.GetGlobalConfig()).List().Providers
 }
 
 // AddProvider adds a new AI provider
 func (s *TinglyService) AddProvider(name, apiBase, token, apiStyle string) (string, error) {
-	return s.appManager.AddProvider(name, apiBase, token, protocol.APIStyle(apiStyle))
+	result, err := usecase.NewProviderUseCase(s.appManager.GetGlobalConfig()).Add(usecase.CreateProviderRequest{
+		Name: name, APIBase: apiBase, Token: token, APIStyle: protocol.APIStyle(apiStyle),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to add provider: %w", err)
+	}
+	return result.Provider.UUID, nil
 }
 
-// DeleteProvider removes an AI provider by name
-func (s *TinglyService) DeleteProvider(name string) error {
-	return s.appManager.DeleteProvider(name)
+// DeleteProvider removes an AI provider by UUID.
+func (s *TinglyService) DeleteProvider(uuid string) error {
+	if err := usecase.NewProviderUseCase(s.appManager.GetGlobalConfig()).Delete(usecase.DeleteProviderRequest{UUID: uuid}); err != nil {
+		return fmt.Errorf("failed to delete provider: %w", err)
+	}
+	return nil
 }
 
-// GetProvider returns a provider by name
-func (s *TinglyService) GetProvider(name string) (*typ.Provider, error) {
-	return s.appManager.GetProvider(name)
+// GetProvider returns a provider by UUID.
+func (s *TinglyService) GetProvider(uuid string) (*typ.Provider, error) {
+	return s.appManager.GetGlobalConfig().GetProviderByUUID(uuid)
 }
 
 // ============
@@ -199,14 +157,14 @@ func (s *TinglyService) GetProvider(name string) (*typ.Provider, error) {
 
 // ListRules returns all configured rules
 func (s *TinglyService) ListRules() []typ.Rule {
-	return s.appManager.ListRules()
+	return usecase.NewRuleUseCase(s.appManager.GetGlobalConfig()).List().Rules
 }
 
 // ImportRule imports providers from JSONL/base64 export data. Despite the
 // name (kept for call-site compatibility), only providers are imported —
 // dataio export/import no longer carries rule data.
 func (s *TinglyService) ImportRule(data string) (*command.ImportResult, error) {
-	return s.appManager.ImportRule(data, exportpkg.FormatAuto, command.ImportOptions{
+	return command.ImportProviders(s.appManager.GetGlobalConfig(), data, exportpkg.FormatAuto, command.ImportOptions{
 		OnProviderConflict: "use",
 		Quiet:              true,
 	})

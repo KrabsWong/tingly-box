@@ -12,45 +12,27 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // TUIManager is the surface the TUI needs from the host (the CLI's
 // AppManager). Defined here as an interface so this package stays a leaf.
 // It covers Quickstart, Provider, Rule, and Agent modes.
 type TUIManager interface {
-	// Providers
-	ListProviders() []*typ.Provider
-	GetProvider(name string) (*typ.Provider, error)
-	AddProvider(name, apiBase, token string, apiStyle protocol.APIStyle) (string, error)
-	UpdateProviderByUUID(uuid string, provider *typ.Provider) error
-	DeleteProviderByUUID(uuid string) error
-	FetchAndSaveProviderModels(providerUUID string) error
-
-	// Rules
-	ListRules() []typ.Rule
-	GetRuleByUUID(uuid string) *typ.Rule
-	AddRule(rule typ.Rule) error
-	UpdateRule(uuid string, rule typ.Rule) error
-	DeleteRule(uuid string) error
-
-	// Config + server
-	SaveConfig() error
+	// Config + server startup are the only host-owned capabilities. Provider,
+	// rule, profile, and agent operations are reached through internal/usecase.
 	GetGlobalConfig() *serverconfig.Config
-	GetServerPort() int
-	SetupServerWithPort(port int) error
-	StartServer() error
+	StartServerAt(port int) error
 }
-
-// QuickstartManager is kept as an alias for backward compatibility.
-type QuickstartManager = TUIManager
 
 // quickstartState is the wizard's accumulated state.
 type quickstartState struct {
 	mgr TUIManager
 
-	apiStyle    protocol.APIStyle
-	provider    *typ.Provider
-	useExisting bool
+	apiStyle        protocol.APIStyle
+	provider        *typ.Provider
+	providerCreated bool
+	useExisting     bool
 
 	selectedTemplate *data.ProviderTemplate // nil = custom provider
 	providerName     string
@@ -101,9 +83,17 @@ func RunQuickstart(mgr TUIManager) error {
 
 // ---------- skip predicates ----------
 
-func qsHasNoProviders(s quickstartState) bool { return len(s.mgr.ListProviders()) == 0 }
-func qsHasProviders(s quickstartState) bool   { return len(s.mgr.ListProviders()) > 0 }
-func qsUsingExisting(s quickstartState) bool  { return s.useExisting }
+func qsHasNoProviders(s quickstartState) bool {
+	return len(configuredProviders(s.mgr.GetGlobalConfig())) == 0
+}
+func qsHasProviders(s quickstartState) bool {
+	return len(configuredProviders(s.mgr.GetGlobalConfig())) > 0
+}
+func qsUsingExisting(s quickstartState) bool { return s.useExisting }
+
+func configuredProviders(cfg *serverconfig.Config) []*typ.Provider {
+	return usecase.NewProviderUseCase(cfg).List().Providers
+}
 
 // ---------- steps ----------
 
@@ -126,7 +116,7 @@ func qsWelcome(ctx StepContext, s quickstartState) (quickstartState, StepResult,
 }
 
 func qsCredential(ctx StepContext, s quickstartState) (quickstartState, StepResult, error) {
-	providers := s.mgr.ListProviders()
+	providers := configuredProviders(s.mgr.GetGlobalConfig())
 
 	items := []SelectItem[string]{
 		{Title: "Add new credential", Description: "Configure a fresh AI provider", Value: "new"},
@@ -334,7 +324,16 @@ func qsDetails(ctx StepContext, s quickstartState) (quickstartState, StepResult,
 		s.providerName = r.Value
 	}
 
-	if existing, err := s.mgr.GetProvider(s.providerName); err == nil && existing != nil {
+	var existing *typ.Provider
+	if !s.providerCreated {
+		for _, provider := range configuredProviders(s.mgr.GetGlobalConfig()) {
+			if provider.Name == s.providerName {
+				existing = provider
+				break
+			}
+		}
+	}
+	if existing != nil {
 		r, err := Confirm(fmt.Sprintf("Provider '%s' already exists - reuse it?", s.providerName), ConfirmOptions{
 			Header:     ctx.Header,
 			DefaultYes: true,
@@ -410,33 +409,53 @@ func qsDetails(ctx StepContext, s quickstartState) (quickstartState, StepResult,
 	}
 	s.proxyURL = proxyR.Value
 
-	uuid, err := s.mgr.AddProvider(s.providerName, s.apiBase, s.apiToken, s.apiStyle)
-	if err != nil {
-		return s, StepCancel, fmt.Errorf("failed to add provider: %w", err)
-	}
-	provider, err := s.mgr.GetProvider(uuid)
+	s, err = persistQuickstartProvider(s)
 	if err != nil {
 		return s, StepCancel, err
 	}
-	if s.proxyURL != "" {
-		provider.ProxyURL = s.proxyURL
-		if err := s.mgr.SaveConfig(); err != nil {
-			return s, StepCancel, fmt.Errorf("failed to save proxy: %w", err)
-		}
-	}
-	s.provider = provider
 	return s, StepContinue, nil
+}
+
+// persistQuickstartProvider makes the Details step re-entrant. The first
+// submission creates a provider; returning to Details and submitting again
+// updates that same UUID instead of creating a duplicate as a navigation side
+// effect.
+func persistQuickstartProvider(s quickstartState) (quickstartState, error) {
+	providerUC := usecase.NewProviderUseCase(s.mgr.GetGlobalConfig())
+	if s.provider == nil {
+		res, err := providerUC.Add(usecase.CreateProviderRequest{
+			Name: s.providerName, APIBase: s.apiBase, Token: s.apiToken,
+			APIStyle: s.apiStyle, ProxyURL: s.proxyURL,
+		})
+		if err != nil {
+			return s, fmt.Errorf("failed to add provider: %w", err)
+		}
+		s.provider = res.Provider
+		s.providerCreated = true
+		return s, nil
+	}
+
+	res, err := providerUC.Update(usecase.UpdateProviderRequest{
+		UUID: s.provider.UUID, Name: s.providerName, APIBase: s.apiBase,
+		Token: s.apiToken, APIStyle: s.apiStyle, ProxyURL: s.proxyURL,
+	})
+	if err != nil {
+		return s, fmt.Errorf("failed to update provider: %w", err)
+	}
+	s.provider = res.Provider
+	return s, nil
 }
 
 func qsModel(ctx StepContext, s quickstartState) (quickstartState, StepResult, error) {
 	models, _ := WithSpinner("Fetching models from provider", func() ([]string, error) {
-		if err := s.mgr.FetchAndSaveProviderModels(s.provider.UUID); err != nil {
+		// RefreshModels walks the full cache→vmodel→API→template fallback
+		// chain, so providers whose catalogs only exist as build-time data
+		// (Anthropic, OAuth-only) still produce a non-empty list.
+		res, err := usecase.NewProviderUseCase(s.mgr.GetGlobalConfig()).RefreshModels(usecase.RefreshModelsRequest{UUID: s.provider.UUID})
+		if err != nil {
 			return nil, err
 		}
-		// availableModels does the DB-cached → embedded-template cascade so
-		// providers whose catalogs only exist as build-time data (Anthropic,
-		// OAuth-only) still produce a non-empty list.
-		return availableModels(s.mgr, s.provider), nil
+		return res.Models, nil
 	})
 
 	if len(models) == 0 {
@@ -617,7 +636,7 @@ func qsShowToken(ctx StepContext, s quickstartState) (quickstartState, StepResul
 		return s, StepContinue, nil
 	}
 
-	port := s.mgr.GetServerPort()
+	port := s.mgr.GetGlobalConfig().GetServerPort()
 	if port == 0 {
 		port = 12580
 	}
@@ -706,7 +725,7 @@ func qsAgent(ctx StepContext, s quickstartState) (quickstartState, StepResult, e
 		s.ccInstallStatusLine = sl.Value
 	}
 
-	apply := agent.NewAgentApply(s.mgr.GetGlobalConfig(), "localhost")
+	agentUC := usecase.NewAgentUseCase(s.mgr.GetGlobalConfig(), "localhost")
 	for _, t := range s.selectedAgents {
 		t := t
 		req := &agent.ApplyAgentRequest{
@@ -722,7 +741,7 @@ func qsAgent(ctx StepContext, s quickstartState) (quickstartState, StepResult, e
 			label = info.Name
 		}
 		res, err := WithSpinner(fmt.Sprintf("Applying %s configuration", label), func() (*agent.ApplyAgentResult, error) {
-			return apply.ApplyAgent(req)
+			return agentUC.Apply(req)
 		})
 		if err != nil {
 			fmt.Println(errorStyle.Render(fmt.Sprintf("  ✗ %s: %v", label, err)))
@@ -746,7 +765,7 @@ func agentItemDescription(info agent.AgentInfo) string {
 }
 
 func qsDone(ctx StepContext, s quickstartState) (quickstartState, StepResult, error) {
-	port := s.mgr.GetServerPort()
+	port := s.mgr.GetGlobalConfig().GetServerPort()
 	if port == 0 {
 		port = 12580
 	}
@@ -817,14 +836,11 @@ func isRuleConfigured(rule *typ.Rule, cfg *serverconfig.Config) bool {
 }
 
 func startServer(mgr TUIManager) error {
-	port := mgr.GetServerPort()
+	port := mgr.GetGlobalConfig().GetServerPort()
 	if port == 0 {
 		port = 12580
 	}
-	if err := mgr.SetupServerWithPort(port); err != nil {
-		return fmt.Errorf("failed to setup server: %w", err)
-	}
-	if err := mgr.StartServer(); err != nil {
+	if err := mgr.StartServerAt(port); err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
 	}
 	fmt.Println(successStyle.Render(fmt.Sprintf("Server started at http://localhost:%d", port)))

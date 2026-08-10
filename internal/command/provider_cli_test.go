@@ -56,7 +56,7 @@ func newTestAppManager(t *testing.T) *AppManager {
 func TestRunProviderGetByUUID(t *testing.T) {
 	am := newTestAppManager(t)
 
-	uuid, err := am.AddProvider("my-provider", "https://api.example.com", "tok", protocol.APIStyleOpenAI)
+	uuid, err := addProviderForTest(am, "my-provider", "https://api.example.com", "tok", protocol.APIStyleOpenAI)
 	if err != nil {
 		t.Fatalf("AddProvider failed: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestRunProviderGetByUUID(t *testing.T) {
 func TestRunProviderListDisplaysUUID(t *testing.T) {
 	am := newTestAppManager(t)
 
-	uuid, err := am.AddProvider("listed", "https://api.example.com", "tok", protocol.APIStyleOpenAI)
+	uuid, err := addProviderForTest(am, "listed", "https://api.example.com", "tok", protocol.APIStyleOpenAI)
 	if err != nil {
 		t.Fatalf("AddProvider failed: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestRunAddAllowsDuplicateNames(t *testing.T) {
 	})
 
 	count := 0
-	for _, p := range am.ListProviders() {
+	for _, p := range am.GetGlobalConfig().ListProviders() {
 		if p.Name == "dup" {
 			count++
 		}
@@ -210,7 +210,7 @@ func TestConfigProviderGetCmdKongUsesUUID(t *testing.T) {
 func TestConfigProviderGetCmdKongRunWithUUID(t *testing.T) {
 	am := newTestAppManager(t)
 
-	uuid, err := am.AddProvider("p", "https://api.example.com", "tok", protocol.APIStyleOpenAI)
+	uuid, err := addProviderForTest(am, "p", "https://api.example.com", "tok", protocol.APIStyleOpenAI)
 	if err != nil {
 		t.Fatalf("AddProvider failed: %v", err)
 	}

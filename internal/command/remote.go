@@ -23,6 +23,7 @@ import (
 	builtinserver "github.com/tingly-dev/tingly-box/internal/mcp/builtin_server"
 	"github.com/tingly-dev/tingly-box/internal/tbclient"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 	"github.com/tingly-dev/tingly-box/remote/session"
 )
 
@@ -185,9 +186,9 @@ func selectBotInteractively(store *db.ImBotSettingsStore) (string, error) {
 
 // promptForSmartGuideModel prompts the user to select provider and model for SmartGuide
 func promptForSmartGuideModel(reader *bufio.Reader, appManager *AppManager) (string, string, error) {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 	if len(providers) == 0 {
-		return "", "", fmt.Errorf("no providers configured. Please add a provider first using 'tingly-box provider add'")
+		return "", "", fmt.Errorf("no providers configured. Please add a provider first using 'tingly-box config provider add'")
 	}
 
 	// Select provider
@@ -621,7 +622,7 @@ func runRemoteStart(appManager *AppManager, uuid, dataPath, provider, model stri
 
 	// Validate provider exists (skip if force is enabled)
 	if !force && provider != "" {
-		prov, err := appManager.GetProvider(provider)
+		prov, err := appManager.GetGlobalConfig().GetProviderByUUID(provider)
 		if err != nil {
 			return fmt.Errorf("provider %s not found: %w", provider, err)
 		}
@@ -683,7 +684,7 @@ func runRemoteConfig(appManager *AppManager, uuid string, show bool, provider, m
 		fmt.Printf("Platform: %s\n", setting.Platform)
 		if setting.SmartGuideProvider != "" {
 			// Look up provider name
-			prov, err := appManager.GetProvider(setting.SmartGuideProvider)
+			prov, err := appManager.GetGlobalConfig().GetProviderByUUID(setting.SmartGuideProvider)
 			if err == nil && prov != nil {
 				fmt.Printf("Provider: %s (%s)\n", prov.Name, setting.SmartGuideProvider)
 			} else {
@@ -710,7 +711,7 @@ func runRemoteConfig(appManager *AppManager, uuid string, show bool, provider, m
 	} else if provider != "" || model != "" {
 		// If any flag is provided, validate provider when specified
 		if provider != "" {
-			prov, err := appManager.GetProvider(provider)
+			prov, err := appManager.GetGlobalConfig().GetProviderByUUID(provider)
 			if err != nil {
 				return fmt.Errorf("provider %s not found: %w", provider, err)
 			}
@@ -729,7 +730,7 @@ func runRemoteConfig(appManager *AppManager, uuid string, show bool, provider, m
 
 	// Look up provider name for output
 	providerName := provider
-	if prov, err := appManager.GetProvider(provider); err == nil && prov != nil {
+	if prov, err := appManager.GetGlobalConfig().GetProviderByUUID(provider); err == nil && prov != nil {
 		providerName = prov.Name
 	}
 

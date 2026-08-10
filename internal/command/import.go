@@ -9,7 +9,7 @@ import (
 	dataimportpkg "github.com/tingly-dev/tingly-box/internal/dataio"
 )
 
-// runImport imports a rule with providers from file or stdin
+// runImport imports providers from a file or stdin.
 func runImport(appManager *AppManager, formatStr string, args []string) error {
 	var data string
 
@@ -47,8 +47,7 @@ func runImport(appManager *AppManager, formatStr string, args []string) error {
 		return fmt.Errorf("invalid format '%s': supported formats are auto, jsonl, and base64", formatStr)
 	}
 
-	// Import using AppManager with defaults for conflicts
-	result, err := appManager.ImportRule(data, format, ImportOptions{
+	result, err := ImportProviders(appManager.GetGlobalConfig(), data, format, ImportOptions{
 		OnProviderConflict: "use", // Use existing provider by default
 		Quiet:              false,
 	})

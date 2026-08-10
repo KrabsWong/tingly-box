@@ -10,16 +10,25 @@ strings them together with a shared header, breadcrumb, and help line.
 
 ```
 internal/command/tui/
-  tui.go          core types, shared theme, run() helper
-  prompts.go      Confirm, Input, Select, MultiSelect
-  wizard.go       Step[S], RunWizard[S], WithSpinner[T]
-  quickstart.go   Quickstart wizard — the only consumer
+  tui.go            core types, shared theme, run() helper
+  prompts.go        Confirm, Input, Select, MultiSelect
+  wizard.go         Step[S], RunWizard[S], WithSpinner[T]
+  quickstart.go     Quickstart wizard, and the TUIManager interface
+  menu.go           top-level TUI mode menu (QuickStart / Provider / Rule / Agent)
+  pickers.go        shared pickers (scenario) used across modes
+  provider_mode.go  Provider mode: list/add/edit/delete/refresh models
+  rule_mode.go      Rule mode: list/add/edit/delete
+  agent_mode.go     Agent mode: apply/show/restore
 ```
 
-Everything is in one flat package. The package is a leaf: only
-`internal/command/quickstart.go` imports it. To avoid a cycle, the
-`QuickstartManager` interface is defined here; `AppManager` satisfies it
-implicitly.
+Everything is in one flat package. The package is a leaf: imported by
+`internal/command/quickstart.go`, `config.go`, `config_rule.go`, and
+`config_provider.go`. To avoid a cycle, the `TUIManager` interface (defined
+in `quickstart.go`) is defined here; `AppManager` satisfies it implicitly. It
+contains only `GetGlobalConfig` and the atomic `StartServerAt` operation.
+Provider, Rule, and Agent modes take the global config directly and construct
+their concrete `internal/usecase` types, so they do not depend on server
+lifecycle or grow a second business API on `AppManager`.
 
 ---
 

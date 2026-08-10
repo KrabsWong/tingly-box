@@ -424,7 +424,7 @@ jobs:
 
           cd bin
           Get-ChildItem
-          Compress-Archive -Path TinglyBox.exe -DestinationPath ../dist/tingly-box-gui-windows-amd64.zip
+          Compress-Archive -Path tingly-box.exe -DestinationPath ../dist/tingly-box-gui-windows-amd64.zip
           cd ..
 
           cd dist

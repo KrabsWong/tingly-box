@@ -2,15 +2,15 @@ package command
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"github.com/tingly-dev/tingly-box/internal/command/tui"
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // ConfigRuleCmdKong groups rule operations under `config rule`. Rule operations
@@ -32,7 +32,7 @@ type ConfigRuleCmdKong struct {
 type ConfigRuleInteractiveCmdKong struct{}
 
 func (c *ConfigRuleInteractiveCmdKong) Run(appManager *AppManager) error {
-	return tui.RunRuleMode(appManager)
+	return tui.RunRuleMode(appManager.GetGlobalConfig())
 }
 
 // ConfigRuleAddCmdKong adds a rule. The flag form is the CI path: provide
@@ -69,13 +69,8 @@ func runRuleAddCI(appManager *AppManager, scenario, requestModel, providerRef, m
 		return err
 	}
 
-	if existing := appManager.AppConfig().GetGlobalConfig().GetRuleByRequestModelAndScenario(requestModel, scn); existing != nil {
-		return fmt.Errorf("rule for %q + %q already exists (uuid %s); use `config rule update` instead",
-			requestModel, scn, existing.UUID)
-	}
-
-	rule := typ.Rule{
-		UUID:         uuid.New().String(),
+	ruleUC := usecase.NewRuleUseCase(appManager.GetGlobalConfig())
+	res, err := ruleUC.Create(usecase.CreateRuleRequest{
 		Scenario:     scn,
 		RequestModel: requestModel,
 		Services: []*loadbalance.Service{{
@@ -84,27 +79,28 @@ func runRuleAddCI(appManager *AppManager, scenario, requestModel, providerRef, m
 			Weight:   1,
 			Active:   true,
 		}},
-		LBTactic: typ.Tactic{
-			Type:   loadbalance.TacticRandom,
-			Params: typ.DefaultRandomParams(),
-		},
-		Active: true,
-	}
-	if err := appManager.AddRule(rule); err != nil {
+	})
+	if err != nil {
+		var exists usecase.ErrRuleExists
+		if errors.As(err, &exists) {
+			return fmt.Errorf("rule for %q + %q already exists (uuid %s); use `config rule update` instead",
+				exists.RequestModel, exists.Scenario, exists.UUID)
+		}
 		return err
 	}
-	fmt.Printf("✓ Rule added (uuid: %s)\n", rule.UUID)
+	fmt.Printf("✓ Rule added (uuid: %s)\n", res.Rule.UUID)
 	return nil
 }
 
 // resolveProviderRef accepts a UUID or a name and returns the provider's UUID.
 // Name lookup is case-insensitive; ambiguous names (more than one match) error.
 func resolveProviderRef(appManager *AppManager, ref string) (string, error) {
-	if p, err := appManager.GetProvider(ref); err == nil && p != nil {
-		return p.UUID, nil
+	providerUC := usecase.NewProviderUseCase(appManager.GetGlobalConfig())
+	if result, err := providerUC.Get(usecase.GetProviderRequest{UUID: ref}); err == nil {
+		return result.Provider.UUID, nil
 	}
 	var matches []*typ.Provider
-	for _, p := range appManager.ListProviders() {
+	for _, p := range providerUC.List().Providers {
 		if strings.EqualFold(p.Name, ref) {
 			matches = append(matches, p)
 		}
@@ -196,11 +192,11 @@ func (c *ConfigRuleExportCmdKong) Run(appManager *AppManager) error {
 		}
 		uid = picked
 	}
-	rule := appManager.GetRuleByUUID(uid)
-	if rule == nil {
-		return fmt.Errorf("rule not found: %s", uid)
+	result, err := usecase.NewRuleUseCase(appManager.GetGlobalConfig()).Get(usecase.GetRuleRequest{UUID: uid})
+	if err != nil {
+		return err
 	}
-	return runExport(appManager, rule.RequestModel, string(rule.Scenario), c.Format, c.Output)
+	return runExport(appManager, result.Rule.RequestModel, string(result.Rule.Scenario), c.Format, c.Output)
 }
 
 // ConfigRuleImportCmdKong imports a rule (with its providers) from a bundle.
@@ -222,7 +218,7 @@ func (c *ConfigRuleImportCmdKong) Run(appManager *AppManager) error {
 // runRuleList prints the table of rules in the compact form
 // "index | request-model | scenario | service | uuid[:8]".
 func runRuleList(appManager *AppManager) error {
-	rules := appManager.ListRules()
+	rules := usecase.NewRuleUseCase(appManager.GetGlobalConfig()).List().Rules
 	if len(rules) == 0 {
 		fmt.Println("No rules configured. Use 'config rule add' to create one.")
 		return nil
@@ -250,8 +246,8 @@ func formatPrimaryService(appManager *AppManager, r *typ.Rule) string {
 	}
 	svc := r.Services[0]
 	providerLabel := svc.Provider
-	if p, err := appManager.GetProvider(svc.Provider); err == nil && p != nil {
-		providerLabel = p.Name
+	if result, err := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).Get(usecase.GetProviderRequest{UUID: svc.Provider}); err == nil {
+		providerLabel = result.Provider.Name
 	} else if len(providerLabel) > 8 {
 		providerLabel = providerLabel[:8]
 	}
@@ -266,7 +262,7 @@ func formatPrimaryService(appManager *AppManager, r *typ.Rule) string {
 // index from the user. Returns the chosen rule's UUID (empty string means
 // the user backed out with "0").
 func selectRuleInteractive(appManager *AppManager, reader *bufio.Reader, verb string) (string, error) {
-	rules := appManager.ListRules()
+	rules := usecase.NewRuleUseCase(appManager.GetGlobalConfig()).List().Rules
 	if len(rules) == 0 {
 		fmt.Println("No rules configured.")
 		return "", nil
@@ -318,11 +314,6 @@ func runRuleAddInteractive(appManager *AppManager, reader *bufio.Reader) error {
 		return err
 	}
 
-	if existing := appManager.AppConfig().GetGlobalConfig().GetRuleByRequestModelAndScenario(requestModel, scenario); existing != nil {
-		return fmt.Errorf("rule for request-model %q + scenario %q already exists (UUID %s); use 'config rule update' instead",
-			requestModel, scenario, existing.UUID)
-	}
-
 	service, err := pickServiceInteractive(appManager, reader)
 	if err != nil {
 		return err
@@ -333,15 +324,9 @@ func runRuleAddInteractive(appManager *AppManager, reader *bufio.Reader) error {
 	}
 
 	rule := typ.Rule{
-		UUID:         uuid.New().String(),
 		Scenario:     scenario,
 		RequestModel: requestModel,
 		Services:     []*loadbalance.Service{service},
-		LBTactic: typ.Tactic{
-			Type:   loadbalance.TacticRandom,
-			Params: typ.DefaultRandomParams(),
-		},
-		Active: true,
 	}
 
 	fmt.Println("\n--- Rule Summary ---")
@@ -358,20 +343,33 @@ func runRuleAddInteractive(appManager *AppManager, reader *bufio.Reader) error {
 		return nil
 	}
 
-	if err := appManager.AddRule(rule); err != nil {
+	ruleUC := usecase.NewRuleUseCase(appManager.GetGlobalConfig())
+	res, err := ruleUC.Create(usecase.CreateRuleRequest{
+		Scenario:     scenario,
+		RequestModel: requestModel,
+		Services:     []*loadbalance.Service{service},
+	})
+	if err != nil {
+		var exists usecase.ErrRuleExists
+		if errors.As(err, &exists) {
+			return fmt.Errorf("rule for request-model %q + scenario %q already exists (UUID %s); use 'config rule update' instead",
+				exists.RequestModel, exists.Scenario, exists.UUID)
+		}
 		return err
 	}
-	fmt.Printf("✓ Rule added (UUID: %s)\n", rule.UUID)
+	fmt.Printf("✓ Rule added (UUID: %s)\n", res.Rule.UUID)
 	return nil
 }
 
 // runRuleUpdateService re-picks the service for an existing rule. Everything
 // else on the rule (request-model, scenario, flags, tactic) stays as-is.
 func runRuleUpdateService(appManager *AppManager, reader *bufio.Reader, ruleUUID string) error {
-	rule := appManager.GetRuleByUUID(ruleUUID)
-	if rule == nil {
-		return fmt.Errorf("rule not found: %s", ruleUUID)
+	ruleUC := usecase.NewRuleUseCase(appManager.GetGlobalConfig())
+	result, err := ruleUC.Get(usecase.GetRuleRequest{UUID: ruleUUID})
+	if err != nil {
+		return err
 	}
+	rule := &result.Rule
 
 	fmt.Printf("\nUpdating rule '%s' (scenario: %s)\n", rule.RequestModel, rule.Scenario)
 	fmt.Printf("Current service: %s\n", formatPrimaryService(appManager, rule))
@@ -402,7 +400,10 @@ func runRuleUpdateService(appManager *AppManager, reader *bufio.Reader, ruleUUID
 		return nil
 	}
 
-	if err := appManager.UpdateRule(rule.UUID, updated); err != nil {
+	if _, err := ruleUC.UpdateService(usecase.UpdateServiceRequest{
+		UUID:     rule.UUID,
+		Services: []*loadbalance.Service{service},
+	}); err != nil {
 		return err
 	}
 	fmt.Println("✓ Rule updated.")
@@ -411,10 +412,12 @@ func runRuleUpdateService(appManager *AppManager, reader *bufio.Reader, ruleUUID
 
 // runRuleDelete deletes a rule with confirmation.
 func runRuleDelete(appManager *AppManager, reader *bufio.Reader, ruleUUID string) error {
-	rule := appManager.GetRuleByUUID(ruleUUID)
-	if rule == nil {
-		return fmt.Errorf("rule not found: %s", ruleUUID)
+	ruleUC := usecase.NewRuleUseCase(appManager.GetGlobalConfig())
+	result, err := ruleUC.Get(usecase.GetRuleRequest{UUID: ruleUUID})
+	if err != nil {
+		return err
 	}
+	rule := &result.Rule
 
 	fmt.Printf("\nAbout to delete rule:\n  Request model: %s\n  Scenario:      %s\n  UUID:          %s\n",
 		rule.RequestModel, rule.Scenario, rule.UUID)
@@ -429,7 +432,7 @@ func runRuleDelete(appManager *AppManager, reader *bufio.Reader, ruleUUID string
 		return nil
 	}
 
-	if err := appManager.DeleteRule(rule.UUID); err != nil {
+	if err := ruleUC.Delete(usecase.DeleteRuleRequest{UUID: rule.UUID}); err != nil {
 		return err
 	}
 	fmt.Println("✓ Rule deleted.")
@@ -440,7 +443,7 @@ func runRuleDelete(appManager *AppManager, reader *bufio.Reader, ruleUUID string
 // model string, building a single weighted Service. Returns (nil, nil) when
 // the operator cancels with "0".
 func pickServiceInteractive(appManager *AppManager, reader *bufio.Reader) (*loadbalance.Service, error) {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 	if len(providers) == 0 {
 		return nil, fmt.Errorf("no providers configured; add a provider first via 'config provider add'")
 	}
@@ -504,5 +507,3 @@ func promptForScenario(reader *bufio.Reader) (typ.RuleScenario, error) {
 	}
 	return typ.RuleScenario(choice), nil
 }
-
-

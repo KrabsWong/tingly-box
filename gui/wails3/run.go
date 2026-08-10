@@ -116,21 +116,6 @@ func useSlimSystray(app *application.App, tinglyService *services.TinglyService)
 
 	// Use custom icon
 	SystemTray.SetIcon(slimIcon)
-
-	//// Create a window similar to GUI mode but hidden by default
-	//WindowSlim = app.Window.NewWithOptions(application.WebviewWindowOptions{
-	//	Name:  "window-slim",
-	//	Title: AppName,
-	//	Mac: application.MacWindow{
-	//		Backdrop: application.MacBackdropTranslucent,
-	//		TitleBar: application.MacTitleBarDefault,
-	//	},
-	//	BackgroundColour: application.NewRGB(27, 38, 54),
-	//	URL:              fmt.Sprintf("/?token=%s", tinglyService.GetUserAuthToken()),
-	//	Hidden:           true, // Start hidden
-	//})
-	//
-	//SystemTray.AttachWindow(WindowSlim)
 }
 
 func useWebSystray(app *application.App, tinglyService *services.TinglyService) {

@@ -32,13 +32,10 @@ func runExport(appManager *AppManager, requestModel, scenarioStr, formatStr, out
 	}
 
 	// Collect providers from the rule
-	providers, err := appManager.CollectProvidersFromRule(rule)
-	if err != nil {
-		return fmt.Errorf("failed to collect providers: %w", err)
-	}
+	providers := collectProvidersFromRule(globalConfig, rule)
 
 	// Export the providers referenced by the rule
-	content, err := appManager.ExportRule(rule, providers, format)
+	content, err := exportProviders(providers, format)
 	if err != nil {
 		return fmt.Errorf("failed to export providers: %w", err)
 	}

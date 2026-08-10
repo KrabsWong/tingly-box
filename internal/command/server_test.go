@@ -100,13 +100,13 @@ func TestServerPortConfiguration(t *testing.T) {
 		}
 
 		testPort := 12580
-		err = appManager.SetServerPort(testPort)
+		err = appManager.AppConfig().SetServerPort(testPort)
 		if err != nil {
 			t.Fatalf("Failed to set server port: %v", err)
 		}
 
-		if appManager.GetServerPort() != testPort {
-			t.Errorf("Expected port %d, got %d", testPort, appManager.GetServerPort())
+		if appManager.GetGlobalConfig().GetServerPort() != testPort {
+			t.Errorf("Expected port %d, got %d", testPort, appManager.GetGlobalConfig().GetServerPort())
 		}
 	})
 
@@ -116,7 +116,7 @@ func TestServerPortConfiguration(t *testing.T) {
 			t.Fatalf("Failed to create app manager: %v", err)
 		}
 
-		configPort := appManager.GetServerPort()
+		configPort := appManager.GetGlobalConfig().GetServerPort()
 
 		// No server running: falls back to the configured port even if a
 		// stale port file exists.
@@ -156,14 +156,14 @@ func TestServerPortConfiguration(t *testing.T) {
 		}
 
 		testPort := 12582
-		err = appManager1.SetServerPort(testPort)
+		err = appManager1.AppConfig().SetServerPort(testPort)
 		if err != nil {
 			t.Fatalf("Failed to set server port: %v", err)
 		}
 
 		// Verify it was set
-		if appManager1.GetServerPort() != testPort {
-			t.Errorf("Expected port %d, got %d", testPort, appManager1.GetServerPort())
+		if appManager1.GetGlobalConfig().GetServerPort() != testPort {
+			t.Errorf("Expected port %d, got %d", testPort, appManager1.GetGlobalConfig().GetServerPort())
 		}
 
 		// Note: Port persistence is handled by config file, not by SaveConfig

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tingly-dev/tingly-box/internal/protocol"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // APIStyle is re-exported from internal/protocol for the CLI prompts.
@@ -14,7 +15,7 @@ type APIStyle = protocol.APIStyle
 
 // runProviderList lists all providers
 func runProviderList(appManager *AppManager) error {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 
 	if len(providers) == 0 {
 		fmt.Println("No providers configured. Use 'config provider add' to add a provider.")
@@ -42,7 +43,7 @@ func runProviderList(appManager *AppManager) error {
 
 // runProviderUpdateInteractive runs interactive update mode
 func runProviderUpdateInteractive(appManager *AppManager, reader *bufio.Reader) error {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 
 	if len(providers) == 0 {
 		fmt.Println("No providers configured. Use 'config provider add' to add a provider first.")
@@ -138,7 +139,15 @@ func runProviderUpdateInteractive(appManager *AppManager, reader *bufio.Reader) 
 	provider.APIStyle = apiStyle
 
 	// Save to database using UUID
-	if err := appManager.UpdateProviderByUUID(providerUUID, provider); err != nil {
+	providerUC := usecase.NewProviderUseCase(appManager.GetGlobalConfig())
+	if _, err := providerUC.Update(usecase.UpdateProviderRequest{
+		UUID:     providerUUID,
+		Name:     provider.Name,
+		APIBase:  apiBase,
+		Token:    token,
+		APIStyle: apiStyle,
+		ProxyURL: provider.ProxyURL,
+	}); err != nil {
 		return fmt.Errorf("failed to save updated provider: %w", err)
 	}
 
@@ -148,7 +157,7 @@ func runProviderUpdateInteractive(appManager *AppManager, reader *bufio.Reader) 
 
 // runProviderDeleteInteractive runs interactive delete mode
 func runProviderDeleteInteractive(appManager *AppManager, reader *bufio.Reader) error {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 
 	if len(providers) == 0 {
 		fmt.Println("No providers configured.")
@@ -195,7 +204,7 @@ func runProviderDeleteByUUID(appManager *AppManager, uuid, name string) error {
 		return nil
 	}
 
-	if err := appManager.DeleteProviderByUUID(uuid); err != nil {
+	if err := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).Delete(usecase.DeleteProviderRequest{UUID: uuid}); err != nil {
 		return fmt.Errorf("failed to delete provider: %w", err)
 	}
 
@@ -207,7 +216,7 @@ func runProviderDeleteByUUID(appManager *AppManager, uuid, name string) error {
 // menu number so we can pass the chosen provider's UUID downstream (names
 // aren't unique, so picking by name is ambiguous).
 func runProviderGetInteractive(appManager *AppManager, reader *bufio.Reader) error {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 
 	if len(providers) == 0 {
 		fmt.Println("❌ No providers configured.")
@@ -239,10 +248,11 @@ func runProviderGetInteractive(appManager *AppManager, reader *bufio.Reader) err
 // runProviderGet displays provider details for the given UUID. Providers are
 // keyed by UUID; names are not unique and must not be used as lookup keys.
 func runProviderGet(appManager *AppManager, uuid string) error {
-	provider, err := appManager.GetProvider(uuid)
-	if err != nil || provider == nil {
-		return fmt.Errorf("provider not found: %s", uuid)
+	result, err := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).Get(usecase.GetProviderRequest{UUID: uuid})
+	if err != nil {
+		return err
 	}
+	provider := result.Provider
 
 	fmt.Println("\n🔍 Provider Details")
 	fmt.Println(strings.Repeat("=", 60))

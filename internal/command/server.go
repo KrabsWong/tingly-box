@@ -21,6 +21,7 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/obs"
 	"github.com/tingly-dev/tingly-box/internal/server"
 	serverconfig "github.com/tingly-dev/tingly-box/internal/server/config"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 	"github.com/tingly-dev/tingly-box/pkg/daemon"
 	"github.com/tingly-dev/tingly-box/pkg/lock"
 	"github.com/tingly-dev/tingly-box/pkg/network"
@@ -222,7 +223,7 @@ func newKongShimCmd(debugSet bool) *cobra.Command {
 
 // runStatusCmd extracts status logic
 func runStatusCmd(appManager *AppManager) error {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 	appConfig := appManager.AppConfig()
 	fileLock := lock.NewFileLock(appConfig.ConfigDir())
 	serverRunning := fileLock.IsLocked()
@@ -645,31 +646,4 @@ func startServerWithHook(appManager *AppManager, opts options.StartServerOptions
 		fileLock.Unlock()
 		return serverManager.Stop()
 	}
-}
-
-// CreateAppManagerForDir creates a new AppManager for the specified config directory.
-// This is used when a command specifies a different config directory than the global one.
-func CreateAppManagerForDir(configDir string) (*AppManager, error) {
-	// Create app config for the specified directory
-	appConfig, err := config.NewAppConfig(config.WithConfigDir(configDir))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create app config for directory %s: %w", configDir, err)
-	}
-	return NewAppManagerWithConfig(appConfig), nil
-}
-
-// doStopServerWithFileLock stops the server using the provided file lock
-func doStopServerWithFileLock(fileLock *lock.FileLock) error {
-	if !fileLock.IsLocked() {
-		fmt.Println("Server is not running")
-		return nil
-	}
-
-	fmt.Println("Stopping server...")
-	if err := stopServerWithFileLock(fileLock); err != nil {
-		return fmt.Errorf("failed to stop server: %w", err)
-	}
-
-	fmt.Println("Server stopped successfully")
-	return nil
 }

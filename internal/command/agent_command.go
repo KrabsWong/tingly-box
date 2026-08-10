@@ -10,6 +10,7 @@ import (
 
 	"github.com/tingly-dev/tingly-box/internal/agent"
 	"github.com/tingly-dev/tingly-box/internal/typ"
+	"github.com/tingly-dev/tingly-box/internal/usecase"
 )
 
 // ============== Kong Command Structures ==============
@@ -179,11 +180,7 @@ func (a *AgentRestoreFlagCmdKong) Run(appManager *AppManager) error {
 
 // executeAgentRestore performs the agent restore and prints the result.
 func executeAgentRestore(appManager *AppManager, req *agent.RestoreAgentRequest) error {
-	globalConfig := appManager.GetGlobalConfig()
-	host := "localhost"
-
-	agentApply := agent.NewAgentApply(globalConfig, host)
-	result, err := agentApply.RestoreAgent(req)
+	result, err := usecase.NewAgentUseCase(appManager.GetGlobalConfig(), "localhost").Restore(req)
 	if err != nil {
 		return fmt.Errorf("failed to restore configuration: %w", err)
 	}
@@ -241,9 +238,9 @@ func promptForAgentTypeChoice(reader *bufio.Reader) (agent.AgentType, error) {
 
 // promptForAgentConfig prompts user for provider and model selection
 func promptForAgentConfig(reader *bufio.Reader, appManager *AppManager, req *agent.ApplyAgentRequest) error {
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 	if len(providers) == 0 {
-		return fmt.Errorf("no providers configured. Please add a provider first using 'tingly-box provider add'")
+		return fmt.Errorf("no providers configured. Please add a provider first using 'tingly-box config provider add'")
 	}
 
 	// Prompt for provider if not specified
@@ -283,34 +280,24 @@ func promptForAgentConfig(reader *bufio.Reader, appManager *AppManager, req *age
 // Falls back to prompting if no rules are configured.
 func resolveAgentConfigFromRules(appManager *AppManager, req *agent.ApplyAgentRequest) error {
 	globalConfig := appManager.GetGlobalConfig()
+	agentUC := usecase.NewAgentUseCase(globalConfig, "localhost")
 
-	requestModel, scenario, err := agentRoutingKey(req.AgentType)
+	routing, err := agentUC.ResolveRouting(usecase.ResolveRoutingRequest{AgentType: req.AgentType})
 	if err != nil {
 		return err
 	}
 
-	// Look for existing routing rule
-	rule := globalConfig.GetRuleByRequestModelAndScenario(requestModel, scenario)
-
-	// If rule exists and has services, use provider/model from it
-	if rule != nil && len(rule.Services) > 0 {
-		service := rule.Services[0]
-		if service.Provider != "" && service.Model != "" {
-			// Verify the provider still exists
-			provider, err := globalConfig.GetProviderByUUID(service.Provider)
-			if err == nil && provider != nil {
-				// Use the provider and model from the routing rule
-				if req.Provider == "" {
-					req.Provider = service.Provider
-				}
-				if req.Model == "" {
-					req.Model = service.Model
-				}
-				fmt.Printf("Using existing routing rule '%s' with provider '%s' and model '%s'\n",
-					requestModel, provider.Name, service.Model)
-				return nil
-			}
+	// If the rule exists with a usable provider, use it.
+	if routing.ServiceUsable {
+		if req.Provider == "" {
+			req.Provider = routing.ProviderUUID
 		}
+		if req.Model == "" {
+			req.Model = routing.Model
+		}
+		fmt.Printf("Using existing routing rule '%s' with provider '%s' and model '%s'\n",
+			routing.RequestModel, routing.ProviderName, routing.Model)
+		return nil
 	}
 
 	// No rule or no usable service is configured yet. This is not fatal:
@@ -320,11 +307,11 @@ func resolveAgentConfigFromRules(appManager *AppManager, req *agent.ApplyAgentRe
 	// are providers available AND we're on a TTY; otherwise just warn.
 	fmt.Fprintf(os.Stderr,
 		"Warning: no routing service configured for '%s' (scenario '%s').\n",
-		requestModel, scenario)
+		routing.RequestModel, routing.Scenario)
 	fmt.Fprintln(os.Stderr,
 		"Config files will still be applied. Run 'tingly-box tui' to set up routing rules later.")
 
-	providers := appManager.ListProviders()
+	providers := usecase.NewProviderUseCase(appManager.GetGlobalConfig()).List().Providers
 	if len(providers) == 0 || !isStdinTTY() {
 		// Nothing to prompt for, or stdin is non-interactive — proceed
 		// without provider/model. applyClaudeCode/applyOpenCode handles
@@ -496,7 +483,7 @@ func showPreview(appManager *AppManager, req *agent.ApplyAgentRequest) error {
 
 		// Get provider info
 		if req.Provider != "" {
-			if provider, err := appManager.GetProvider(req.Provider); err == nil && provider != nil {
+			if provider, err := appManager.GetGlobalConfig().GetProviderByUUID(req.Provider); err == nil && provider != nil {
 				fmt.Printf("  Provider:  %s\n", provider.Name)
 			}
 		}
@@ -519,16 +506,7 @@ func showPreview(appManager *AppManager, req *agent.ApplyAgentRequest) error {
 
 // executeAgentApply executes the agent configuration apply
 func executeAgentApply(appManager *AppManager, req *agent.ApplyAgentRequest) error {
-	globalConfig := appManager.GetGlobalConfig()
-
-	// Get host for configuration (pure hostname, port is handled by AgentApply)
-	host := "localhost"
-
-	// Create agent apply instance
-	agentApply := agent.NewAgentApply(globalConfig, host)
-
-	// Apply configuration
-	result, err := agentApply.ApplyAgent(req)
+	result, err := usecase.NewAgentUseCase(appManager.GetGlobalConfig(), "localhost").Apply(req)
 	if err != nil {
 		return fmt.Errorf("failed to apply configuration: %w", err)
 	}
@@ -557,53 +535,29 @@ func listAgentTypes() error {
 	return nil
 }
 
-// agentRoutingKey returns the canonical request model + scenario pair that
-// identifies the routing rule for an agent type. apply / show / restore must
-// agree on this mapping or they will look at different rules and disagree
-// about whether the agent is configured.
-func agentRoutingKey(agentType agent.AgentType) (string, typ.RuleScenario, error) {
-	switch agentType {
-	case agent.AgentTypeClaudeCode:
-		return "tingly/cc", typ.ScenarioClaudeCode, nil
-	case agent.AgentTypeOpenCode:
-		return "tingly-opencode", typ.ScenarioOpenCode, nil
-	case agent.AgentTypeCodex:
-		return "tingly-codex", typ.ScenarioCodex, nil
-	default:
-		return "", "", fmt.Errorf("unsupported agent type: %s", agentType)
-	}
-}
-
 // showAgentConfig shows current configuration for an agent type
 func showAgentConfig(appManager *AppManager, agentType agent.AgentType) error {
-	globalConfig := appManager.GetGlobalConfig()
-
-	info, ok := agent.GetAgentInfo(agentType)
-	if !ok {
-		return fmt.Errorf("unknown agent type: %s", agentType)
-	}
-
-	fmt.Printf("Agent:  %s\n", info.Name)
-	fmt.Printf("Scenario:  %s\n", info.Scenario)
-	fmt.Println()
-
-	requestModel, _, err := agentRoutingKey(agentType)
+	result, err := usecase.NewAgentUseCase(appManager.GetGlobalConfig(), "localhost").Show(usecase.ShowRequest{
+		AgentType: agentType,
+	})
 	if err != nil {
 		return err
 	}
 
-	rule := globalConfig.GetRuleByRequestModelAndScenario(requestModel, typ.RuleScenario(info.Scenario))
-	if rule != nil {
+	fmt.Printf("Agent:  %s\n", result.Info.Name)
+	fmt.Printf("Scenario:  %s\n", result.Info.Scenario)
+	fmt.Println()
+
+	if result.Routing.RuleFound {
 		fmt.Println("Routing rule:")
-		fmt.Printf("  Request Model:  %s\n", rule.RequestModel)
-		fmt.Printf("  Response Model:  %s\n", rule.ResponseModel)
-		fmt.Printf("  Active:  %v\n", rule.Active)
-		if len(rule.Services) > 0 {
-			service := rule.Services[0]
-			if provider, err := globalConfig.GetProviderByUUID(service.Provider); err == nil && provider != nil {
-				fmt.Printf("  Provider:  %s\n", provider.Name)
-			}
-			fmt.Printf("  Model:  %s\n", service.Model)
+		fmt.Printf("  Request Model:  %s\n", result.Routing.RequestModel)
+		fmt.Printf("  Response Model:  %s\n", result.Routing.ResponseModel)
+		fmt.Printf("  Active:  %v\n", result.Routing.RuleActive)
+		if result.Routing.ProviderName != "" {
+			fmt.Printf("  Provider:  %s\n", result.Routing.ProviderName)
+		}
+		if result.Routing.Model != "" {
+			fmt.Printf("  Model:  %s\n", result.Routing.Model)
 		}
 	} else {
 		fmt.Println("No routing rule configured.")
@@ -611,7 +565,7 @@ func showAgentConfig(appManager *AppManager, agentType agent.AgentType) error {
 
 	fmt.Println()
 	fmt.Println("Config files:")
-	for _, f := range info.ConfigFiles {
+	for _, f := range result.Info.ConfigFiles {
 		fmt.Printf("  - %s\n", f)
 	}
 

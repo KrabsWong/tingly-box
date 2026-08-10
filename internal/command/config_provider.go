@@ -24,7 +24,7 @@ type ConfigProviderCmdKong struct {
 type ConfigProviderInteractiveCmdKong struct{}
 
 func (c *ConfigProviderInteractiveCmdKong) Run(appManager *AppManager) error {
-	return tui.RunProviderMode(appManager)
+	return tui.RunProviderMode(appManager.GetGlobalConfig())
 }
 
 // ConfigProviderAddCmdKong adds a new provider.
@@ -86,4 +86,3 @@ func (c *ConfigProviderGetCmdKong) Run(appManager *AppManager) error {
 	}
 	return runProviderGet(appManager, c.UUID)
 }
-
