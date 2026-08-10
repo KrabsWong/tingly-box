@@ -1,14 +1,19 @@
 import CardGrid from '@/components/CardGrid';
+import { parseExperimentalFeature, sanitizeFeatureReturnPath } from '@/components/ExperimentalFeatureGate';
 import GlobalExperimentalFeatures from '@/components/GlobalExperimentalFeatures';
 import { PageLayout } from '@/components/PageLayout';
 import UnifiedCard from '@/components/UnifiedCard';
 import { Stack, Typography } from '@mui/material';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 
 const CARD_MAX_WIDTH = 720;
 
 const ExperimentalPage = () => {
     const { t } = useTranslation();
+    const [searchParams] = useSearchParams();
+    const requestedFeature = parseExperimentalFeature(searchParams.get('feature'));
+    const returnTo = sanitizeFeatureReturnPath(searchParams.get('returnTo'));
 
     return (
         <PageLayout loading={false}>
@@ -28,7 +33,10 @@ const ExperimentalPage = () => {
                             }}>
                             {t('system.experimentalFeatures.description')}
                         </Typography>
-                        <GlobalExperimentalFeatures />
+                        <GlobalExperimentalFeatures
+                            requestedFeature={requestedFeature}
+                            returnTo={returnTo}
+                        />
                     </Stack>
                 </UnifiedCard>
             </CardGrid>

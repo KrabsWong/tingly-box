@@ -803,8 +803,10 @@ export default {
       "title": "Experimental Features",
       "description": "These experimental features apply globally to all scenarios. Individual scenarios can override these settings.",
       "skills": "Skills",
+      "userPrompts": "User prompts",
       "guardrails": "Guardrails",
       "mcp": "MCP",
+      "enableUserPrompts": "Manage reusable instructions for user requests",
       "enableIdeSkills": "Manage code snippets and skills from your IDE",
       "enableGuardrails": "Block risky tool calls and filter sensitive outputs",
       "enableMCP": "MCP (Model Context Protocol) tools such as web search and web fetch",
@@ -813,7 +815,9 @@ export default {
       "enabled": "enabled",
       "disabled": "disabled - Click to enable",
       "guardrailsEnabledInfo": "Guardrails is enabled. A \"Guardrails\" page is available in the sidebar for rule management.",
-      "mcpEnabledInfo": "MCP Tools is enabled. An \"MCP Tools\" page is available under System in the sidebar for configuration."
+      "mcpEnabledInfo": "MCP Tools is enabled. An \"MCP Tools\" page is available under System in the sidebar for configuration.",
+      "requiredMessage": "{{feature}} is off. Turn it on below to continue.",
+      "enableFailed": "Could not enable this feature. Check the server connection and try again."
     },
     "about": {
       "title": "About",

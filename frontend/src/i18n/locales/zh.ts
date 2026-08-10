@@ -805,8 +805,10 @@ export default {
       "title": "实验性功能",
       "description": "这些实验性功能适用于所有场景。各个场景可以覆盖这些设置。",
       "skills": "Skills",
+      "userPrompts": "用户提示词",
       "guardrails": "Guardrails",
       "mcp": "MCP",
+      "enableUserPrompts": "管理用户请求可复用的指令",
       "enableIdeSkills": "管理来自 IDE 的代码片段和技能",
       "enableGuardrails": "阻止有风险的工具调用并过滤敏感输出",
       "enableMCP": "MCP（Model Context Protocol）工具，如网页搜索和网页获取",
@@ -815,7 +817,9 @@ export default {
       "enabled": "已启用",
       "disabled": "已禁用 - 点击启用",
       "guardrailsEnabledInfo": "Guardrails 已启用。侧边栏中提供了「Guardrails」页面用于规则管理。",
-      "mcpEnabledInfo": "MCP Tools 已启用。侧边栏 System 下方提供了「MCP Tools」页面进行配置。"
+      "mcpEnabledInfo": "MCP Tools 已启用。侧边栏 System 下方提供了「MCP Tools」页面进行配置。",
+      "requiredMessage": "{{feature}} 尚未开启，请在下方启用后继续。",
+      "enableFailed": "无法启用此功能，请检查服务器连接后重试。"
     },
     "about": {
       "title": "关于",
