@@ -166,8 +166,8 @@ func MCPEnabled(cfg *config.Config) bool {
 	if cfg == nil {
 		return false
 	}
-	return cfg.GetScenarioFlag(typ.ScenarioGlobal, config.ExtensionMCP) ||
-		cfg.GetScenarioFlag(typ.ScenarioClaudeCode, config.ExtensionMCP)
+	return cfg.GetScenarioFlag(typ.ScenarioGlobal, constant.ExtensionMCP) ||
+		cfg.GetScenarioFlag(typ.ScenarioClaudeCode, constant.ExtensionMCP)
 }
 
 // applyVisionProxy is the single entry point for the vision proxy plugin,

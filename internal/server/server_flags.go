@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/internal/constant"
 	"github.com/tingly-dev/tingly-box/internal/db"
 	"github.com/tingly-dev/tingly-box/internal/guardrails"
 	guardrailscore "github.com/tingly-dev/tingly-box/internal/guardrails/core"
@@ -18,8 +19,8 @@ func (s *Server) guardrailsEnabled() bool {
 	if s.config == nil {
 		return false
 	}
-	return s.config.GetScenarioFlag(typ.ScenarioGlobal, config.ExtensionGuardrails) ||
-		s.config.GetScenarioFlag(typ.ScenarioClaudeCode, config.ExtensionGuardrails)
+	return s.config.GetScenarioFlag(typ.ScenarioGlobal, constant.ExtensionGuardrails) ||
+		s.config.GetScenarioFlag(typ.ScenarioClaudeCode, constant.ExtensionGuardrails)
 }
 
 // mcpEnabled checks if MCP feature is enabled via scenario flag

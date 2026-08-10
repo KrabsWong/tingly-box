@@ -7,8 +7,8 @@ package visionproxytest
 import (
 	"context"
 
+	"github.com/tingly-dev/tingly-box/internal/constant"
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
-	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 	"github.com/tingly-dev/tingly-box/internal/visionproxy"
 )
@@ -50,7 +50,7 @@ func NewProcessor() *visionproxy.VisionProxyProcessor {
 // scenario-level vision proxy service.
 func ScenarioExt(provider, model string) map[string]interface{} {
 	return map[string]interface{}{
-		config.ExtensionVisionProxyService: map[string]interface{}{
+		constant.ExtensionVisionProxyService: map[string]interface{}{
 			"provider": provider,
 			"model":    model,
 		},

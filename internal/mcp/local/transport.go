@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/internal/constant"
 	"github.com/tingly-dev/tingly-box/internal/mcp/runtime"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
@@ -37,8 +38,8 @@ func (t *TransportHandler) isMCPEnabled() bool {
 	if t.cfg == nil {
 		return false
 	}
-	return t.cfg.GetScenarioFlag(typ.ScenarioGlobal, config.ExtensionMCP) ||
-		t.cfg.GetScenarioFlag(typ.ScenarioClaudeCode, config.ExtensionMCP)
+	return t.cfg.GetScenarioFlag(typ.ScenarioGlobal, constant.ExtensionMCP) ||
+		t.cfg.GetScenarioFlag(typ.ScenarioClaudeCode, constant.ExtensionMCP)
 }
 
 // GetServer returns the MCPServer for a client, creating it if needed.

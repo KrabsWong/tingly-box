@@ -235,7 +235,7 @@ func NewTestEnvForCLI(opts ...TestEnvOption) (*TestEnv, error) {
 
 	core, err := newGatewayCore("pv-env-*", func(ac *config.AppConfig) {
 		if cfg.mcpEnabled {
-			_ = ac.GetGlobalConfig().SetScenarioFlag(typ.ScenarioGlobal, serverconfig.ExtensionMCP, true)
+			_ = ac.GetGlobalConfig().SetScenarioFlag(typ.ScenarioGlobal, constant.ExtensionMCP, true)
 		}
 	}, serverOpts...)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tingly-dev/tingly-box/internal/constant"
 	"github.com/tingly-dev/tingly-box/internal/db"
 	"github.com/tingly-dev/tingly-box/internal/mcp/local"
 	mcpruntime "github.com/tingly-dev/tingly-box/internal/mcp/runtime"
@@ -74,8 +75,8 @@ func (h *Handler) IsMCPEnabled() bool {
 	if h.cfg == nil {
 		return false
 	}
-	return h.cfg.GetScenarioFlag(typ.ScenarioGlobal, config.ExtensionMCP) ||
-		h.cfg.GetScenarioFlag(typ.ScenarioClaudeCode, config.ExtensionMCP)
+	return h.cfg.GetScenarioFlag(typ.ScenarioGlobal, constant.ExtensionMCP) ||
+		h.cfg.GetScenarioFlag(typ.ScenarioClaudeCode, constant.ExtensionMCP)
 }
 
 // MCPRuntimeConfigResponse is the API response for MCP runtime config

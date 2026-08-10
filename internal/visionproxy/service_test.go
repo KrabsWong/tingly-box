@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/tingly-dev/tingly-box/internal/constant"
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
@@ -153,7 +154,7 @@ func TestApply_ProfiledScenario(t *testing.T) {
 
 func scenarioVisionExt(provider, model string) map[string]interface{} {
 	return map[string]interface{}{
-		config.ExtensionVisionProxyService: map[string]interface{}{
+		constant.ExtensionVisionProxyService: map[string]interface{}{
 			"provider": provider,
 			"model":    model,
 		},

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+	"github.com/tingly-dev/tingly-box/internal/constant"
 	"github.com/tingly-dev/tingly-box/internal/mcp/runtime"
 	"github.com/tingly-dev/tingly-box/internal/server/config"
 	"github.com/tingly-dev/tingly-box/internal/typ"
@@ -36,8 +37,8 @@ func (h *Handler) isMCPEnabled() bool {
 	if h.cfg == nil {
 		return false
 	}
-	return h.cfg.GetScenarioFlag(typ.ScenarioGlobal, config.ExtensionMCP) ||
-		h.cfg.GetScenarioFlag(typ.ScenarioClaudeCode, config.ExtensionMCP)
+	return h.cfg.GetScenarioFlag(typ.ScenarioGlobal, constant.ExtensionMCP) ||
+		h.cfg.GetScenarioFlag(typ.ScenarioClaudeCode, constant.ExtensionMCP)
 }
 
 // MCPModeResponse is the API response for MCP mode

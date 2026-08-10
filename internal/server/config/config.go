@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	constant2 "github.com/tingly-dev/tingly-box/internal/server/constant"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/tingly-dev/tingly-box/internal/client"
@@ -1811,13 +1812,13 @@ func (c *Config) GetScenarioFlag(scenario typ.RuleScenario, flagName string) boo
 	}
 	flags := config.GetDefaultFlags()
 	switch flagName {
-	case FlagUnified:
+	case constant2.FlagUnified:
 		return flags.Unified
-	case FlagSeparate:
+	case constant2.FlagSeparate:
 		return flags.Separate
-	case FlagSmartCompact:
+	case constant2.FlagSmartCompact:
 		return flags.SmartCompact
-	case FlagSkipUsage:
+	case constant2.FlagSkipUsage:
 		return flags.SkipUsage
 	default:
 		if config.Extensions == nil {
@@ -1869,42 +1870,42 @@ func (c *Config) SetScenarioFlag(scenario typ.RuleScenario, flagName string, val
 
 	// Set the specific flag
 	switch flagName {
-	case FlagUnified:
+	case constant2.FlagUnified:
 		config.Flags.Unified = value
 		if scenario == typ.ScenarioClaudeCode && value {
 			config.Flags.Separate = false
 			c.setClaudeCodeModeRulesActiveLocked(true, false)
 		}
-	case FlagSeparate:
+	case constant2.FlagSeparate:
 		config.Flags.Separate = value
 		if scenario == typ.ScenarioClaudeCode && value {
 			config.Flags.Unified = false
 			c.setClaudeCodeModeRulesActiveLocked(false, true)
 		}
-	case FlagSmartCompact:
+	case constant2.FlagSmartCompact:
 		config.Flags.SmartCompact = value
-	case FlagSkipUsage:
+	case constant2.FlagSkipUsage:
 		config.Flags.SkipUsage = value
-	case ExtensionSkillUser:
+	case constant2.ExtensionSkillUser:
 		if config.Extensions == nil {
 			config.Extensions = make(map[string]interface{})
 		}
-		config.Extensions[ExtensionSkillUser] = value
-	case ExtensionSkillIDE:
+		config.Extensions[constant2.ExtensionSkillUser] = value
+	case constant2.ExtensionSkillIDE:
 		if config.Extensions == nil {
 			config.Extensions = make(map[string]interface{})
 		}
-		config.Extensions[ExtensionSkillIDE] = value
-	case ExtensionGuardrails:
+		config.Extensions[constant2.ExtensionSkillIDE] = value
+	case constant2.ExtensionGuardrails:
 		if config.Extensions == nil {
 			config.Extensions = make(map[string]interface{})
 		}
-		config.Extensions[ExtensionGuardrails] = value
-	case ExtensionMCP:
+		config.Extensions[constant2.ExtensionGuardrails] = value
+	case constant2.ExtensionMCP:
 		if config.Extensions == nil {
 			config.Extensions = make(map[string]interface{})
 		}
-		config.Extensions[ExtensionMCP] = value
+		config.Extensions[constant2.ExtensionMCP] = value
 	default:
 		return fmt.Errorf("unknown flag name: %s", flagName)
 	}
@@ -1922,11 +1923,11 @@ func (c *Config) GetScenarioStringFlag(scenario typ.RuleScenario, flagName strin
 	}
 	flags := config.GetDefaultFlags()
 	switch flagName {
-	case FlagThinkingEffort:
+	case constant2.FlagThinkingEffort:
 		return flags.ThinkingEffort
-	case FlagRecordingV2:
+	case constant2.FlagRecordingV2:
 		return string(flags.RecordingV2)
-	case FlagCustomUserAgent:
+	case constant2.FlagCustomUserAgent:
 		return flags.CustomUserAgent
 	default:
 		return ""
@@ -1943,14 +1944,14 @@ func (c *Config) SetScenarioStringFlag(scenario typ.RuleScenario, flagName strin
 
 	// Set the specific flag
 	switch flagName {
-	case FlagThinkingEffort:
+	case constant2.FlagThinkingEffort:
 		config.Flags.ThinkingEffort = typ.ThinkingEffortLevel(value)
-	case FlagRecordingV2:
+	case constant2.FlagRecordingV2:
 		if !typ.IsValidRecordingMode(value) {
 			return fmt.Errorf("invalid recording_v2 value: %s (must be one of: request, request_response, staged_request_response, or empty)", value)
 		}
 		config.Flags.RecordingV2 = typ.RecordingMode(value)
-	case FlagCustomUserAgent:
+	case constant2.FlagCustomUserAgent:
 		config.Flags.CustomUserAgent = value
 	default:
 		return fmt.Errorf("unknown string flag name: %s", flagName)
