@@ -19,10 +19,9 @@ import { getThemeOptions } from '@/theme/options.ts';
 // (the actual visual anchor) vertically aligned across cards.
 const LABEL_WIDTH = 140;
 
-// Constrain the rows inside each full-width card so controls don't stretch
-// edge-to-edge across wide viewports. The card itself still spans the column
-// (UnifiedCard size="full"); only the inner content is capped.
-const CONTENT_MAX_WIDTH = 560;
+// Cap each card's width on wide viewports (via UnifiedCard.maxWidth) so the
+// settings cards don't stretch edge-to-edge. Cards still shrink responsively.
+const CARD_MAX_WIDTH = 560;
 
 /**
  * SettingsRow — the shared label-column rhythm for this page.
@@ -192,8 +191,9 @@ const System = () => {
                     title={t('system.serverStatus.title')}
                     titleHeadingLevel={1}
                     size="full"
+                    maxWidth={CARD_MAX_WIDTH}
                 >
-                    <Stack spacing={1.5} sx={{ maxWidth: CONTENT_MAX_WIDTH }}>
+                    <Stack spacing={1.5}>
                         <SettingsRow
                             icon={
                                 serverStatus?.server_running ? (
@@ -247,8 +247,8 @@ const System = () => {
 
                 {/* Proxy — "How does TB reach upstream?" Env-proxy policy +
                     reusable URL preset, kept on their own card. */}
-                <UnifiedCard title={t('system.proxy.title')} size="full">
-                    <Stack spacing={2} sx={{ maxWidth: CONTENT_MAX_WIDTH }}>
+                <UnifiedCard title={t('system.proxy.title')} size="full" maxWidth={CARD_MAX_WIDTH}>
+                    <Stack spacing={2}>
                         {/* Env-proxy policy — an honest switch, not a flip-chip.
                             The off-state is just "off" (no `common.direct`
                             reuse, which collided with the network "direct"). */}
@@ -314,8 +314,8 @@ const System = () => {
                 </UnifiedCard>
 
                 {/* Preferences — "How do I want the UI to behave?" */}
-                <UnifiedCard title={t('system.preferences.title')} size="full">
-                    <Stack spacing={1.5} sx={{ maxWidth: CONTENT_MAX_WIDTH }}>
+                <UnifiedCard title={t('system.preferences.title')} size="full" maxWidth={CARD_MAX_WIDTH}>
+                    <Stack spacing={1.5}>
                         <SettingsRow icon={<IconLanguage sx={{ fontSize: 16 }} />} label={t('system.language.title')}>
                             <Chip label={t('system.language.en')} onClick={() => changeLanguage('en')} size="small" sx={chipSx(i18n.language === 'en')} />
                             <Chip label={t('system.language.zh')} onClick={() => changeLanguage('zh')} size="small" sx={chipSx(i18n.language === 'zh')} />
@@ -339,8 +339,8 @@ const System = () => {
                 </UnifiedCard>
 
                 {/* About — "What is this?" */}
-                <UnifiedCard title={t('system.about.title')} size="full">
-                    <Stack spacing={1.5} sx={{ maxWidth: CONTENT_MAX_WIDTH }}>
+                <UnifiedCard title={t('system.about.title')} size="full" maxWidth={CARD_MAX_WIDTH}>
+                    <Stack spacing={1.5}>
                         <SettingsRow
                             icon={<IconInfoCircle sx={{ fontSize: 16, color: 'text.secondary' }} />}
                             label={t('system.about.version')}
