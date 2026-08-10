@@ -29,11 +29,14 @@ import { api } from '@/services/api.ts';
 import { useAuth } from '@/contexts/AuthContext.tsx';
 import { PageLayout } from '@/components/PageLayout.tsx';
 import UnifiedCard from '@/components/UnifiedCard.tsx';
+import CardGrid from "@/components/CardGrid.tsx";
 
 interface TokenInfo {
     token: string;
     is_default: boolean;
 }
+
+const CARD_MAX_WIDTH = 720;
 
 // Shared shape for both the User Token and Model Token rows: masked value,
 // show/hide toggle, copy button. Behavior (what's shown, what copy does)
@@ -272,7 +275,7 @@ const AccessControl = () => {
 
     return (
         <PageLayout loading={loading} notification={{ open: false }}>
-            <Stack spacing={3}>
+            <CardGrid>
                 {/* Page Header Card. The two bullets below are the facts that
                     AREN'T already said by each token row's own description
                     (point2's specific endpoint list, point3's "share one but
@@ -280,7 +283,7 @@ const AccessControl = () => {
                     User Token row's description almost verbatim and the
                     subtitle/intro paragraph above it were pure preamble, so
                     they're dropped rather than repeated a second time. */}
-                <UnifiedCard size="full">
+                <UnifiedCard maxWidth={CARD_MAX_WIDTH} size="full">
                     <Stack spacing={2}>
                         <Box>
                             <Typography component="h1" variant="h5" sx={{
@@ -306,6 +309,7 @@ const AccessControl = () => {
                         </Stack>
                     </Stack>
                 </UnifiedCard>
+
 
                 {/* Security Warning for Default Token */}
                 {isUsingDefaultToken && (
@@ -363,7 +367,7 @@ const AccessControl = () => {
                     kind of thing (a bearer credential you can view/copy/reset),
                     just scoped to different audiences (control panel vs API
                     clients), so they share one card instead of two. */}
-                <UnifiedCard size="full">
+                <UnifiedCard maxWidth={CARD_MAX_WIDTH} size="full">
                     <Stack spacing={3}>
                         <Box>
                             <Stack direction="row" spacing={2} sx={{ alignItems: 'center', mb: 1.5 }}>
@@ -443,7 +447,7 @@ const AccessControl = () => {
                         </Box>
                     </Stack>
                 </UnifiedCard>
-            </Stack>
+            </CardGrid>
             {/* User Reset Confirmation Dialog */}
             <Dialog open={resetUserDialogOpen} onClose={() => setResetUserDialogOpen(false)} maxWidth="sm" fullWidth>
                 <DialogTitle>

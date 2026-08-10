@@ -16,6 +16,7 @@ export default {
     "done": "Done",
     "applying": "Applying...",
     "copy": "Copy",
+    "copied": "Copied",
     "refresh": "Refresh",
     "verify": "Verify",
     "saveChanges": "Save Changes",
@@ -819,7 +820,11 @@ export default {
       "license": "License",
       "github": "GitHub",
       "devMode": "Dev Mode",
-      "available": "available"
+      "available": "available",
+      "copyVersion": "Copy version",
+      "versionCopied": "Version copied to clipboard",
+      "checkUpdate": "Click to check for updates",
+      "updateAvailable": "Version {{version}} available — click to view"
     },
     "serverStatus": {
       "title": "Server Status",
