@@ -81,3 +81,8 @@ func (mm *ModelListManager) RemoveProvider(providerUUID string) error {
 func (mm *ModelListManager) GetProviderInfo(uid string) (apiBase string, lastUpdated string, exists bool) {
 	return mm.modelStore.GetProviderInfo(uid)
 }
+
+// GetFetchFailure returns the last recorded fetch error for a provider, if any.
+func (mm *ModelListManager) GetFetchFailure(uid string) (string, bool) {
+	return mm.modelStore.GetFetchFailure(uid)
+}

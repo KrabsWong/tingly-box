@@ -2116,8 +2116,9 @@ func (c *Config) ResolveProviderModels(forceRefresh, forceUpstream bool, uid str
 		return ResolvedModels{Models: models, Source: src, LastUpdated: lastUpdated}
 	}
 
-	// Step 1: DB cache (unless forcing a refresh).
-	if !forceRefresh {
+	// A forced upstream fetch re-queries the real upstream by definition, so it
+	// bypasses the DB cache. (forceRefresh alone also bypasses it.)
+	if !forceRefresh && !forceUpstream {
 		if cached := c.modelManager.GetModels(uid); len(cached) > 0 {
 			return finalize(cached, ModelListSourceCache), nil
 		}
@@ -2127,8 +2128,11 @@ func (c *Config) ResolveProviderModels(forceRefresh, forceUpstream bool, uid str
 		return ResolvedModels{}, fmt.Errorf("provider with UUID %s not found: %w", uid, provErr)
 	}
 
-	// Step 2: VModel static list (virtual providers).
-	if provider.IsVirtual() {
+	// Step 2: VModel static list (virtual providers). A forced upstream fetch
+	// skips this — virtual providers have no upstream to hit, but forcing means
+	// the operator wants the real path, and falling through to the (empty)
+	// upstream step is the honest answer for a virtual provider.
+	if !forceUpstream && provider.IsVirtual() {
 		var models []string
 		if provider.VModelDetail != nil {
 			models = provider.VModelDetail.Models
@@ -2137,7 +2141,7 @@ func (c *Config) ResolveProviderModels(forceRefresh, forceUpstream bool, uid str
 	}
 
 	// Step 3: Upstream API (persisted on success).
-	if err := c.fetchAndSaveAPIModels(provider); err == nil {
+	if err := c.fetchAndSaveAPIModels(provider, forceUpstream); err == nil {
 		if fresh := c.modelManager.GetModels(uid); len(fresh) > 0 {
 			return finalize(fresh, ModelListSourceAPI), nil
 		}
@@ -2163,35 +2167,81 @@ func (c *Config) fetchAndSaveAPIModels(provider *typ.Provider, forceUpstream boo
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	lister, closer, err := c.newModelLister(provider)
+	lister, closer, err := c.newModelLister(ctx, provider)
 	if closer != nil {
-		defer closer()
+		defer func() { _ = closer() }()
 	}
 	if err != nil || lister == nil {
 		logrus.Errorf("Failed to create client for provider %s: %v", provider.Name, err)
 		return fmt.Errorf("failed to create client for provider %s: %w", provider.Name, err)
 	}
 
-	models, apiErr := lister.ListModels(ctx)
-	if apiErr != nil {
-		if client.IsModelsEndpointNotSupported(apiErr) {
-			logrus.Infof("Provider %s does not support models endpoint, using template fallback", provider.Name)
+	var result *client.ModelListResult
+	var apiErr error
+
+	// do some guard here to avoid model list for some special provider like claude code oauth
+	if provider.IsClaudeCodeProvider() {
+		if forceUpstream {
+			result, apiErr = lister.ListModels(ctx)
 		} else {
-			logrus.Errorf("Failed to fetch models from API: %v", apiErr)
+			apiErr = errors.New("do not allow to list models from claude code upstream")
 		}
+	} else {
+		result, apiErr = lister.ListModels(ctx)
+	}
+
+	if apiErr != nil {
+		// Persist the failure for triage — a not-supported endpoint is expected
+		// and still recorded for visibility. The operator can see the genuine
+		// upstream error on a force fetch.
+		if persistErr := c.modelManager.SaveFetchFailure(provider, apiErr.Error(), nil); persistErr != nil {
+			logrus.Warnf("Failed to persist model fetch failure for %s: %v", provider.Name, persistErr)
+		}
+
+		logrus.Errorf("Failed to fetch models from API: %v", apiErr)
+
 		return apiErr
 	}
-	if len(models) == 0 {
-		return fmt.Errorf("provider %s returned no models", provider.Name)
+
+	if result == nil || len(result.Models) == 0 {
+		errMsg := fmt.Sprintf("provider %s returned no models", provider.Name)
+		if persistErr := c.modelManager.SaveFetchFailure(provider, errMsg, nil); persistErr != nil {
+			logrus.Warnf("Failed to persist model fetch failure for %s: %v", provider.Name, persistErr)
+		}
+		return errors.New(errMsg)
 	}
 
 	// Persist the upstream list verbatim. It is authoritative for both
 	// additions and removals, so the embedded template snapshot must not be
 	// merged in here — that would resurrect retired models. Apply canonical
 	// ordering before persisting; the same sort is reapplied at the serving
-	// boundary so cached order is irrelevant.
-	SortProviderModels(provider, models)
-	return c.modelManager.SaveModels(provider, models, db.ModelSourceAPI)
+	// boundary so cached order is irrelevant. Raw is the genuine upstream
+	// payload, marshalled for persistence/triage.
+	SortProviderModels(provider, result.Models)
+	return c.modelManager.SaveModelsWithRaw(provider, result.Models, db.ModelSourceAPI, marshalRaw(result.Raw))
+}
+
+// marshalRaw serializes a client's raw upstream payload (an SDK response
+// struct, a json.RawMessage body, etc.) to bytes for persistence. nil and
+// already-raw values pass through. A marshal error yields nil rather than
+// failing the model save — the parsed Models list is still authoritative.
+func marshalRaw(raw any) json.RawMessage {
+	if raw == nil {
+		return nil
+	}
+	switch v := raw.(type) {
+	case json.RawMessage:
+		return v
+	case []byte:
+		return v
+	case string:
+		return []byte(v)
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // FetchAndSaveProviderModels fetches a provider's models and persists API
@@ -2217,7 +2267,7 @@ func (c *Config) FetchAndSaveProviderModels(uid string) error {
 		return c.modelManager.SaveModels(provider, models, db.ModelSourceAPI)
 	}
 
-	apiErr := c.fetchAndSaveAPIModels(provider)
+	apiErr := c.fetchAndSaveAPIModels(provider, false)
 	if apiErr == nil {
 		return nil
 	}
@@ -2243,7 +2293,7 @@ func (c *Config) FetchAndSaveProviderModels(uid string) error {
 //
 // The closer is non-nil whenever the lister is, so the caller can defer it
 // without checking the lister separately.
-func (c *Config) newModelLister(provider *typ.Provider) (client.ModelLister, func() error, error) {
+func (c *Config) newModelLister(ctx context.Context, provider *typ.Provider) (client.ModelLister, func() error, error) {
 	if strings.Contains(strings.ToLower(strings.TrimSpace(provider.APIBase)), "api.deepseek.com") {
 		providerForModels := *provider
 		providerForModels.APIBase = "https://api.deepseek.com"
@@ -2254,26 +2304,19 @@ func (c *Config) newModelLister(provider *typ.Provider) (client.ModelLister, fun
 		return oClient, oClient.Close, nil
 	}
 
+	pool := client.NewClientPool()
+
 	switch provider.APIStyle {
 	case protocol.APIStyleAnthropic:
-		aClient, err := client.NewAnthropicClient(provider, "", typ.SessionID{})
-		if err != nil {
-			return nil, nil, err
-		}
+		aClient := pool.GetAnthropicClient(ctx, provider, "")
 		return aClient, aClient.Close, nil
 	case protocol.APIStyleGoogle:
-		gClient, err := client.NewGoogleClient(provider, "", typ.SessionID{})
-		if err != nil {
-			return nil, nil, err
-		}
+		gClient := pool.GetGoogleClient(ctx, provider, "")
 		return gClient, gClient.Close, nil
 	case protocol.APIStyleOpenAI:
 		fallthrough
 	default:
-		oClient, err := client.NewOpenAIClient(provider, "", typ.SessionID{})
-		if err != nil {
-			return nil, nil, err
-		}
+		oClient := pool.GetOpenAIClient(ctx, provider, "")
 		return oClient, oClient.Close, nil
 	}
 }

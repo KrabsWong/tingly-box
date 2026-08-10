@@ -89,3 +89,59 @@ func TestResolveProviderModels_UnknownProvider_Errors(t *testing.T) {
 	_, err := cfg.ResolveProviderModels(true, false, "does-not-exist")
 	require.Error(t, err)
 }
+
+// claudeCodeResolveProvider builds a Claude Code OAuth provider, for which the
+// upstream /models endpoint is normally unreachable (the OAuth token 404s).
+func claudeCodeResolveProvider() *typ.Provider {
+	return &typ.Provider{
+		Name:     "Claude Code OAuth",
+		APIBase:  "https://api.anthropic.com",
+		APIStyle: protocol.APIStyleAnthropic,
+		AuthType: typ.AuthTypeOAuth,
+		Enabled:  true,
+		OAuthDetail: &typ.OAuthDetail{
+			AccessToken: "sk-ant-oat01-testtoken",
+			Issuer:      ai.IssuerClaudeCode,
+		},
+	}
+}
+
+// By default the gateway bans model-list fetches from a Claude Code OAuth
+// upstream (the token cannot reach /models). The ban is recorded as a fetch
+// failure and the resolver falls through to the embedded template — the same
+// observable source as a provider whose /models is genuinely unsupported.
+func TestResolveProviderModels_ClaudeCode_BannedByDefault(t *testing.T) {
+	cfg := newResolveTestConfig(t)
+	p := claudeCodeResolveProvider()
+	require.NoError(t, cfg.AddProvider(p))
+
+	got, err := cfg.ResolveProviderModels(true, false, p.UUID)
+	require.NoError(t, err)
+	assert.Equal(t, ModelListSourceTemplate, got.Source, "banned fetch falls back to template")
+
+	// The ban must be recorded for triage — not just silently swallowed.
+	lastErr, exists := cfg.GetModelManager().GetFetchFailure(p.UUID)
+	require.True(t, exists, "expected a recorded fetch failure for the banned Claude Code fetch")
+	assert.Contains(t, lastErr, "claude code upstream")
+}
+
+// With force_upstream, the ban is lifted and a real upstream fetch is
+// attempted. This test points the provider at a dead local address so the
+// fetch fails fast without depending on network reachability, and asserts the
+// ban was NOT applied (no "do not allow ..." record) — the failure, if any,
+// is the genuine connection error, not the ban.
+func TestResolveProviderModels_ClaudeCode_ForceLiftsBan(t *testing.T) {
+	cfg := newResolveTestConfig(t)
+	p := claudeCodeResolveProvider()
+	// Dead local address: the real fetch fails instantly, deterministically.
+	p.APIBase = "http://127.0.0.1:1"
+	require.NoError(t, cfg.AddProvider(p))
+
+	_, _ = cfg.ResolveProviderModels(true, true, p.UUID)
+
+	lastErr, exists := cfg.GetModelManager().GetFetchFailure(p.UUID)
+	if exists {
+		assert.NotContains(t, lastErr, "do not allow to list models from claude code upstream",
+			"force_upstream must lift the ban, not record it")
+	}
+}
