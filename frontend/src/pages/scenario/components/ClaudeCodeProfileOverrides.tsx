@@ -345,6 +345,7 @@ const ClaudeCodeProfileOverrides: React.FC<ClaudeCodeProfileOverridesProps> = ({
             size="full"
             title={text.title}
             subtitle={text.hint}
+            titleMarginBottom={loading || orderedSelectedKeys.length > 0 ? 2 : 0.5}
             sx={{
                 '& > .MuiCardContent-root': {
                     p: 2.5,
@@ -422,7 +423,7 @@ const ClaudeCodeProfileOverrides: React.FC<ClaudeCodeProfileOverridesProps> = ({
             {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}><CircularProgress size={20} /></Box>
             ) : orderedSelectedKeys.length === 0 ? (
-                <Box sx={{ py: 0.5 }}>
+                <Box>
                     <Typography variant="body2" color="text.secondary">{isDirty ? text.pendingInheritance : text.inherited}</Typography>
                 </Box>
             ) : null}
