@@ -15,6 +15,14 @@ interface UnifiedCardProps {
   width?: number | string;
   // Custom height, prioritized if provided
   height?: number | string;
+  /**
+   * Cap the card's width on wide viewports. Unlike `width`, the card still
+   * fills its column (`width: 100%`) and only stops growing past this value —
+   * so it remains responsive on narrow screens. Use for settings-style pages
+   * with many narrow cards that would otherwise stretch edge-to-edge. The
+   * card stays left-aligned within its column.
+   */
+  maxWidth?: number | string;
   // Message support
   message?: { type: 'success' | 'error'; text: string } | null;
   onClearMessage?: () => void;
@@ -110,6 +118,7 @@ export const UnifiedCard = forwardRef<HTMLDivElement, UnifiedCardProps>(({
   variant = 'default',
   width,
   height,
+  maxWidth,
   message,
   onClearMessage,
   leftAction,
@@ -123,6 +132,9 @@ export const UnifiedCard = forwardRef<HTMLDivElement, UnifiedCardProps>(({
       id={id}
       sx={{
         ...getCardDimensions(size, width, height),
+        ...(maxWidth !== undefined && {
+          maxWidth,
+        }),
         ...cardVariants[variant],
         borderRadius: 2,
         border: '1px solid',
