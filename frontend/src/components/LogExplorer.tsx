@@ -62,9 +62,26 @@ const LogExplorer = ({ initialScenario }: LogExplorerProps) => {
 
     return (
         <Stack sx={{ height: '100%', minHeight: 0 }} spacing={0}>
-            <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
-                <Tab label="AI Logs" />
-                <Tab label="System Logs" />
+            <Tabs
+                value={tab}
+                onChange={(_, v) => setTab(v)}
+                aria-label="Log views"
+                sx={{
+                    minHeight: 40,
+                    borderBottom: 1,
+                    borderColor: 'divider',
+                    '& .MuiTab-root': {
+                        minWidth: 0,
+                        minHeight: 40,
+                        px: 2,
+                        py: 0.75,
+                        textTransform: 'none',
+                        fontWeight: 600,
+                    },
+                }}
+            >
+                <Tab label="Requests" />
+                <Tab label="System" />
             </Tabs>
 
             <Box sx={{ flex: 1, minHeight: 0, display: tab === 0 ? 'flex' : 'none', flexDirection: 'column' }}>

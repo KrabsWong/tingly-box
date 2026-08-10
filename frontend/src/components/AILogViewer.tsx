@@ -1,9 +1,9 @@
 import {
     Alert,
     Box,
-    Button,
     Chip,
     Collapse,
+    FormControlLabel,
     IconButton,
     Stack,
     Table,
@@ -14,6 +14,8 @@ import {
     TableRow,
     Typography,
     TableSortLabel,
+    Switch,
+    Tooltip,
 } from '@mui/material';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { KeyboardArrowDown as KeyboardArrowDownIcon, KeyboardArrowUp as KeyboardArrowUpIcon, Refresh as RefreshIcon, ErrorOutline as ErrorOutlineIcon } from '@/components/icons';
@@ -372,31 +374,36 @@ const AILogViewer = ({ getRequests, getRequestDetail, initialScenario }: Request
                 <Stack direction="row" spacing={1} sx={{
                     alignItems: "center"
                 }}>
-                    <Button
-                        variant={autoRefresh ? 'contained' : 'outlined'}
-                        size="small"
-                        onClick={() => setAutoRefresh(!autoRefresh)}
-                        sx={{ fontSize: '0.75rem' }}
-                    >
-                        Auto
-                    </Button>
-                    <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={loadRequests}
-                        disabled={loading}
-                        startIcon={<RefreshIcon />}
-                        sx={{ fontSize: '0.75rem' }}
-                    >
-                        Refresh
-                    </Button>
+                    <FormControlLabel
+                        control={(
+                            <Switch
+                                size="small"
+                                checked={autoRefresh}
+                                onChange={(_, checked) => setAutoRefresh(checked)}
+                            />
+                        )}
+                        label={<Typography variant="body2">Auto-refresh</Typography>}
+                        sx={{ m: 0, mr: 0.25 }}
+                    />
+                    <Tooltip title="Refresh now" arrow>
+                        <span>
+                            <IconButton
+                                size="small"
+                                aria-label="Refresh requests"
+                                onClick={loadRequests}
+                                disabled={loading}
+                            >
+                                <RefreshIcon fontSize="small" />
+                            </IconButton>
+                        </span>
+                    </Tooltip>
                     <Typography
-                        variant="body2"
+                        variant="caption"
                         sx={{
                             color: "text.secondary",
                             whiteSpace: 'nowrap'
                         }}>
-                        {requests.length} requests
+                        {loading ? 'Refreshing…' : `${requests.length} requests`}
                     </Typography>
                 </Stack>
                 <Stack direction="row" spacing={1} sx={{
