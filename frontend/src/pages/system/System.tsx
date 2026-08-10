@@ -242,6 +242,58 @@ const System = () => {
                                 </Typography>
                             </SettingsRow>
                         )}
+                        <SettingsRow
+                            icon={<IconInfoCircle sx={{ fontSize: 16, color: 'text.secondary' }} />}
+                            label={t('system.about.version')}
+                            action={
+                                <Tooltip title={copiedVersion ? t('common.copied') : t('system.about.copyVersion')} placement="top" arrow>
+                                    <IconButton
+                                        size="small"
+                                        onClick={handleCopyVersion}
+                                        aria-label={t('system.about.copyVersion')}
+                                        sx={{ color: 'text.secondary' }}
+                                    >
+                                        {copiedVersion ? <IconCheck sx={{ fontSize: 16, color: 'success.main' }} /> : <IconContentCopy sx={{ fontSize: 16 }} />}
+                                    </IconButton>
+                                </Tooltip>
+                            }
+                        >
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                                <Tooltip
+                                    title={hasUpdate && latestVersion ? t('system.about.updateAvailable', { version: latestVersion.split('+')[0] }) : t('system.about.checkUpdate')}
+                                    placement="top"
+                                    arrow
+                                >
+                                    <Typography
+                                        component="span"
+                                        variant="body2"
+                                        onClick={showUpdateDialog}
+                                        sx={{
+                                            color: 'text.primary',
+                                            cursor: 'pointer',
+                                            transition: 'color 0.2s ease',
+                                            '&:hover': { color: 'primary.main' },
+                                        }}
+                                    >
+                                        version {(currentVersion || 'Unknown').split('+')[0]}
+                                    </Typography>
+                                </Tooltip>
+                                {hasUpdate && latestVersion && (
+                                    <Typography
+                                        component="span"
+                                        variant="caption"
+                                        onClick={showUpdateDialog}
+                                        sx={{
+                                            color: 'warning.main',
+                                            cursor: 'pointer',
+                                            '&:hover': { textDecoration: 'underline' },
+                                        }}
+                                    >
+                                        {t('system.about.available')} → {latestVersion.split('+')[0]}
+                                    </Typography>
+                                )}
+                            </Box>
+                        </SettingsRow>
                     </Stack>
                 </UnifiedCard>
 
@@ -341,59 +393,6 @@ const System = () => {
                 {/* About — "What is this?" */}
                 <UnifiedCard title={t('system.about.title')} size="full" maxWidth={CARD_MAX_WIDTH}>
                     <Stack spacing={1.5}>
-                        <SettingsRow
-                            icon={<IconInfoCircle sx={{ fontSize: 16, color: 'text.secondary' }} />}
-                            label={t('system.about.version')}
-                            action={
-                                <Tooltip title={copiedVersion ? t('common.copied') : t('system.about.copyVersion')} placement="top" arrow>
-                                    <IconButton
-                                        size="small"
-                                        onClick={handleCopyVersion}
-                                        aria-label={t('system.about.copyVersion')}
-                                        sx={{ color: 'text.secondary' }}
-                                    >
-                                        {copiedVersion ? <IconCheck sx={{ fontSize: 16, color: 'success.main' }} /> : <IconContentCopy sx={{ fontSize: 16 }} />}
-                                    </IconButton>
-                                </Tooltip>
-                            }
-                        >
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                                <Tooltip
-                                    title={hasUpdate && latestVersion ? t('system.about.updateAvailable', { version: latestVersion.split('+')[0] }) : t('system.about.checkUpdate')}
-                                    placement="top"
-                                    arrow
-                                >
-                                    <Typography
-                                        component="span"
-                                        variant="body2"
-                                        onClick={showUpdateDialog}
-                                        sx={{
-                                            color: 'text.primary',
-                                            cursor: 'pointer',
-                                            transition: 'color 0.2s ease',
-                                            '&:hover': { color: 'primary.main' },
-                                        }}
-                                    >
-                                        version {(currentVersion || 'Unknown').split('+')[0]}
-                                    </Typography>
-                                </Tooltip>
-                                {hasUpdate && latestVersion && (
-                                    <Typography
-                                        component="span"
-                                        variant="caption"
-                                        onClick={showUpdateDialog}
-                                        sx={{
-                                            color: 'warning.main',
-                                            cursor: 'pointer',
-                                            '&:hover': { textDecoration: 'underline' },
-                                        }}
-                                    >
-                                        {t('system.about.available')} → {latestVersion.split('+')[0]}
-                                    </Typography>
-                                )}
-                            </Box>
-                        </SettingsRow>
-
                         <SettingsRow icon={<IconLicense sx={{ fontSize: 16, color: 'text.secondary' }} />} label={t('system.about.license')}>
                             <Typography variant="body2" sx={{ color: 'text.primary' }}>
                                 MPL-2.0 + Commercial
