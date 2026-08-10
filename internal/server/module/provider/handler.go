@@ -483,7 +483,14 @@ func (h *Handler) UpdateProviderModelsByUUID(c *gin.Context) {
 		return
 	}
 
-	resolved, err := h.config.ResolveProviderModels(true, uid)
+	// force_upstream is an undocumented, operator-only escape hatch: when set
+	// a normally-banned provider (e.g. Claude Code OAuth) performs a real
+	// upstream /models fetch instead of falling back to the template. The
+	// frontend never sends it; it exists for special cases where the
+	// provider's APIBase/credential does expose /models.
+	forceUpstream := c.Query("force_upstream") == "1"
+
+	resolved, err := h.config.ResolveProviderModels(true, forceUpstream, uid)
 	if err == nil && len(resolved.Models) == 0 {
 		// A manual refresh that surfaces nothing is a failure worth reporting,
 		// unlike the display path which tolerates an empty list.
@@ -544,7 +551,7 @@ func (h *Handler) GetProviderModelsByUUID(c *gin.Context) {
 	// Resolve through the shared fallback chain (cache → vmodel → api →
 	// template). A resolve error (e.g. provider not found) is non-fatal for the
 	// display path: serve an empty list rather than an error.
-	resolved, _ := h.config.ResolveProviderModels(false, uid)
+	resolved, _ := h.config.ResolveProviderModels(false, false, uid)
 
 	providerModels := ProviderModelInfo{
 		Models:      resolved.Models,

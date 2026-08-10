@@ -45,7 +45,7 @@ func TestResolveProviderModels_Codex_TemplateFallback(t *testing.T) {
 	p := codexResolveProvider()
 	require.NoError(t, cfg.AddProvider(p))
 
-	got, err := cfg.ResolveProviderModels(true, p.UUID)
+	got, err := cfg.ResolveProviderModels(true, false, p.UUID)
 	require.NoError(t, err)
 	assert.Equal(t, ModelListSourceTemplate, got.Source)
 	assert.Contains(t, got.Models, "gpt-5.5")
@@ -59,7 +59,7 @@ func TestResolveProviderModels_CacheHit_NotRefetched(t *testing.T) {
 	require.NoError(t, cfg.AddProvider(p))
 	require.NoError(t, cfg.GetModelManager().SaveModels(p, []string{"cached-only"}, db.ModelSourceAPI))
 
-	got, err := cfg.ResolveProviderModels(false, p.UUID)
+	got, err := cfg.ResolveProviderModels(false, false, p.UUID)
 	require.NoError(t, err)
 	assert.Equal(t, ModelListSourceCache, got.Source)
 	assert.Equal(t, []string{"cached-only"}, got.Models)
@@ -74,7 +74,7 @@ func TestResolveProviderModels_ForceRefresh_BypassesCache(t *testing.T) {
 	require.NoError(t, cfg.AddProvider(p))
 	require.NoError(t, cfg.GetModelManager().SaveModels(p, []string{"stale-cached"}, db.ModelSourceAPI))
 
-	got, err := cfg.ResolveProviderModels(true, p.UUID)
+	got, err := cfg.ResolveProviderModels(true, false, p.UUID)
 	require.NoError(t, err)
 	assert.Equal(t, ModelListSourceTemplate, got.Source)
 	assert.NotContains(t, got.Models, "stale-cached")
@@ -86,6 +86,6 @@ func TestResolveProviderModels_ForceRefresh_BypassesCache(t *testing.T) {
 func TestResolveProviderModels_UnknownProvider_Errors(t *testing.T) {
 	cfg := newResolveTestConfig(t)
 
-	_, err := cfg.ResolveProviderModels(true, "does-not-exist")
+	_, err := cfg.ResolveProviderModels(true, false, "does-not-exist")
 	require.Error(t, err)
 }
