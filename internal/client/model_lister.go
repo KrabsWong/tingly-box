@@ -20,6 +20,7 @@ type ModelLister interface {
 	// Returns ErrModelsEndpointNotSupported if the provider does not support the
 	// models endpoint.
 	ListModels(ctx context.Context) (*ModelListResult, error)
+	Close() error
 }
 
 // ModelListResult carries a fetched model list together with the raw upstream

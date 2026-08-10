@@ -2167,14 +2167,12 @@ func (c *Config) fetchAndSaveAPIModels(provider *typ.Provider, forceUpstream boo
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	lister, closer, err := c.newModelLister(ctx, provider)
-	if closer != nil {
-		defer func() { _ = closer() }()
-	}
+	lister, err := c.newModelLister(ctx, provider)
 	if err != nil || lister == nil {
 		logrus.Errorf("Failed to create client for provider %s: %v", provider.Name, err)
 		return fmt.Errorf("failed to create client for provider %s: %w", provider.Name, err)
 	}
+	defer lister.Close()
 
 	var result *client.ModelListResult
 	var apiErr error
@@ -2293,15 +2291,15 @@ func (c *Config) FetchAndSaveProviderModels(uid string) error {
 //
 // The closer is non-nil whenever the lister is, so the caller can defer it
 // without checking the lister separately.
-func (c *Config) newModelLister(ctx context.Context, provider *typ.Provider) (client.ModelLister, func() error, error) {
+func (c *Config) newModelLister(ctx context.Context, provider *typ.Provider) (client.ModelLister, error) {
 	if strings.Contains(strings.ToLower(strings.TrimSpace(provider.APIBase)), "api.deepseek.com") {
 		providerForModels := *provider
 		providerForModels.APIBase = "https://api.deepseek.com"
 		oClient, err := client.NewOpenAIClient(&providerForModels, "", typ.SessionID{})
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return oClient, oClient.Close, nil
+		return oClient, nil
 	}
 
 	pool := client.NewClientPool()
@@ -2309,15 +2307,15 @@ func (c *Config) newModelLister(ctx context.Context, provider *typ.Provider) (cl
 	switch provider.APIStyle {
 	case protocol.APIStyleAnthropic:
 		aClient := pool.GetAnthropicClient(ctx, provider, "")
-		return aClient, aClient.Close, nil
+		return aClient, nil
 	case protocol.APIStyleGoogle:
 		gClient := pool.GetGoogleClient(ctx, provider, "")
-		return gClient, gClient.Close, nil
+		return gClient, nil
 	case protocol.APIStyleOpenAI:
 		fallthrough
 	default:
 		oClient := pool.GetOpenAIClient(ctx, provider, "")
-		return oClient, oClient.Close, nil
+		return oClient, nil
 	}
 }
 
