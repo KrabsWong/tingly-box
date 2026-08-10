@@ -1,8 +1,22 @@
-import { Alert, Box, Card, CardContent, Typography } from '@mui/material';
+import { Alert, Box, Card, CardContent, Grid, Typography } from '@mui/material';
 import type { SxProps, Theme } from '@mui/material/styles';
 import type { ElementType, ReactNode } from 'react';
 import { forwardRef } from 'react';
 import { EMPTY_SX } from '@/constants/defaults';
+
+/**
+ * Responsive column span for a card placed inside a `CardGrid` (MUI Grid v7).
+ * Each value is the number of columns (out of the grid's total, default 12)
+ * the card occupies at that breakpoint. Omit a breakpoint to let it default.
+ * Omit `grid` entirely to keep the legacy "auto" behavior (bare card, stacked).
+ */
+export interface UnifiedCardGridSpan {
+  xs?: number;
+  sm?: number;
+  md?: number;
+  lg?: number;
+  xl?: number;
+}
 
 interface UnifiedCardProps {
   title?: string | ReactNode;
@@ -32,6 +46,13 @@ interface UnifiedCardProps {
   sx?: SxProps<Theme>;
   // DOM id forwarded to the root Card — useful as a scroll/anchor target
   id?: string;
+  /**
+   * Make this card a grid item with the given responsive column span, so it
+   * can sit beside other `grid`-enabled cards in an n×m layout inside a
+   * `CardGrid`. Default `auto` (omitted) renders a bare card with no grid
+   * wrapping — the legacy stacked-full-width behavior.
+   */
+  grid?: UnifiedCardGridSpan;
 }
 
 
@@ -125,8 +146,9 @@ export const UnifiedCard = forwardRef<HTMLDivElement, UnifiedCardProps>(({
   rightAction,
   sx = EMPTY_SX,
   id,
+  grid,
 }, ref) => {
-  return (
+  const card = (
     <Card
       ref={ref}
       id={id}
@@ -232,6 +254,11 @@ export const UnifiedCard = forwardRef<HTMLDivElement, UnifiedCardProps>(({
       </CardContent>
     </Card>
   );
+
+  // When `grid` is provided, become a responsive Grid item so the card can sit
+  // beside other grid-enabled cards in an n×m layout. Omit `grid` for the
+  // legacy "auto" stacked-full-width behavior.
+  return grid ? <Grid size={grid}>{card}</Grid> : card;
 });
 
 UnifiedCard.displayName = 'UnifiedCard';
