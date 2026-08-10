@@ -2102,7 +2102,7 @@ type ResolvedModels struct {
 // effect immediately and a template snapshot never pollutes a real cached
 // list. This method always fetches on a cache miss — callers that must not
 // touch the network (e.g. TUI render) should read the cache/template directly.
-func (c *Config) ResolveProviderModels(forceRefresh bool, uid string) (ResolvedModels, error) {
+func (c *Config) ResolveProviderModels(forceRefresh, forceUpstream bool, uid string) (ResolvedModels, error) {
 	provider, provErr := c.GetProviderByUUID(uid)
 
 	finalize := func(models []string, src ModelListSource) ResolvedModels {
@@ -2159,7 +2159,7 @@ func (c *Config) ResolveProviderModels(forceRefresh bool, uid string) (ResolvedM
 // on success, persists the sorted list (ModelSourceAPI). It returns an error
 // when the endpoint is unsupported or the call fails; the caller falls back to
 // the template. It never persists template data.
-func (c *Config) fetchAndSaveAPIModels(provider *typ.Provider) error {
+func (c *Config) fetchAndSaveAPIModels(provider *typ.Provider, forceUpstream bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
