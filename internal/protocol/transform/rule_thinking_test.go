@@ -7,6 +7,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
+	"github.com/tingly-dev/tingly-box/internal/protocol"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 
@@ -22,6 +23,52 @@ func TestRuleThinkingTransform_AnthropicBudget(t *testing.T) {
 	}
 	if got := req.Thinking.OfEnabled.BudgetTokens; got != typ.ThinkingBudgetMapping[typ.ThinkingEffortHigh] {
 		t.Errorf("budget = %d, want %d", got, typ.ThinkingBudgetMapping[typ.ThinkingEffortHigh])
+	}
+	if req.OutputConfig.Effort != anthropic.OutputConfigEffortHigh {
+		t.Errorf("output_config.effort = %q, want high", req.OutputConfig.Effort)
+	}
+}
+
+func TestRuleThinkingTransform_AnthropicAdaptivePreserved(t *testing.T) {
+	// A request already using adaptive thinking (Claude 4.6+ dialect) keeps
+	// adaptive; the forced level lands on output_config.effort only.
+	req := &anthropic.MessageNewParams{
+		Thinking: anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}},
+	}
+	ctx := &TransformContext{Request: req}
+
+	if err := NewRuleThinkingTransform(typ.ThinkingEffortMax).Apply(ctx); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if req.Thinking.OfAdaptive == nil {
+		t.Fatalf("adaptive thinking should be preserved, got %#v", req.Thinking)
+	}
+	if req.OutputConfig.Effort != anthropic.OutputConfigEffortMax {
+		t.Errorf("output_config.effort = %q, want max", req.OutputConfig.Effort)
+	}
+}
+
+func TestRuleThinkingTransform_AnthropicEffortMapping(t *testing.T) {
+	// Anthropic has no minimal level, while xhigh is a distinct native level
+	// on supported models. Model-specific clamping happens in the vendor stage.
+	for level, want := range map[string]anthropic.OutputConfigEffort{
+		typ.ThinkingEffortMinimal: anthropic.OutputConfigEffortLow,
+		typ.ThinkingEffortXHigh:   anthropic.OutputConfigEffortXhigh,
+	} {
+		req := &anthropic.MessageNewParams{}
+		ctx := &TransformContext{Request: req}
+		if err := NewRuleThinkingTransform(level).Apply(ctx); err != nil {
+			t.Fatalf("apply(%s): %v", level, err)
+		}
+		if req.OutputConfig.Effort != want {
+			t.Errorf("effort %s: output_config.effort = %q, want %q", level, req.OutputConfig.Effort, want)
+		}
+		if req.Thinking.OfEnabled == nil {
+			t.Fatalf("effort %s: expected budget thinking enabled", level)
+		}
+		if got := req.Thinking.OfEnabled.BudgetTokens; got != typ.ThinkingBudgetMapping[level] {
+			t.Errorf("effort %s: budget = %d, want %d", level, got, typ.ThinkingBudgetMapping[level])
+		}
 	}
 }
 
@@ -74,7 +121,7 @@ func TestRuleThinkingTransform_OpenAIChatEffort(t *testing.T) {
 }
 
 func TestRuleThinkingTransform_OpenAIFullLadderIsNative(t *testing.T) {
-	// All six ladder levels are OpenAI-defined — no collapsing.
+	// All six ladder levels are OpenAI-defined now — no collapsing.
 	cases := map[string]shared.ReasoningEffort{
 		typ.ThinkingEffortMinimal: shared.ReasoningEffortMinimal,
 		typ.ThinkingEffortLow:     shared.ReasoningEffortLow,
@@ -105,7 +152,13 @@ func TestRuleThinkingTransform_OpenAIOffStripsThinkingExtra(t *testing.T) {
 		"thinking": map[string]interface{}{"type": "enabled"},
 	})
 
-	ctx := &TransformContext{Request: req}
+	ctx := &TransformContext{
+		Request: req,
+		Config: TransformConfig{OpenAIConfig: &protocol.OpenAIConfig{
+			HasThinking:     true,
+			ReasoningEffort: shared.ReasoningEffortMedium,
+		}},
+	}
 	if err := NewRuleThinkingTransform(typ.ThinkingEffortOff).Apply(ctx); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -114,6 +167,12 @@ func TestRuleThinkingTransform_OpenAIOffStripsThinkingExtra(t *testing.T) {
 	}
 	if _, has := req.ExtraFields()["thinking"]; has {
 		t.Errorf("expected `thinking` extra field to be stripped, still present: %#v", req.ExtraFields())
+	}
+	if ctx.Config.OpenAIConfig.HasThinking {
+		t.Error("stale base config still reports thinking enabled")
+	}
+	if ctx.Config.OpenAIConfig.ReasoningEffort != "" {
+		t.Errorf("config reasoning_effort = %q, want empty", ctx.Config.OpenAIConfig.ReasoningEffort)
 	}
 }
 
@@ -187,13 +246,25 @@ func TestRuleThinkingTransform_AnthropicBetaOffDisables(t *testing.T) {
 func TestRuleThinkingTransform_ResponsesOff(t *testing.T) {
 	req := &responses.ResponseNewParams{}
 	req.Reasoning.Effort = shared.ReasoningEffortMedium
-	ctx := &TransformContext{Request: req}
+	ctx := &TransformContext{
+		Request: req,
+		Config: TransformConfig{ResponsesConfig: &protocol.OpenAIConfig{
+			HasThinking:     true,
+			ReasoningEffort: shared.ReasoningEffortMedium,
+		}},
+	}
 
 	if err := NewRuleThinkingTransform(typ.ThinkingEffortOff).Apply(ctx); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if req.Reasoning.Effort != "" {
 		t.Errorf("reasoning.effort = %q, want empty", req.Reasoning.Effort)
+	}
+	if ctx.Config.ResponsesConfig.HasThinking {
+		t.Error("stale responses config still reports thinking enabled")
+	}
+	if ctx.Config.ResponsesConfig.ReasoningEffort != "" {
+		t.Errorf("config reasoning_effort = %q, want empty", ctx.Config.ResponsesConfig.ReasoningEffort)
 	}
 }
 
@@ -210,33 +281,29 @@ func TestRuleThinkingTransform_AnthropicCapsBudgetToMaxTokens(t *testing.T) {
 	if req.MaxTokens != budget/2 {
 		t.Errorf("max_tokens changed from %d to %d — must not be raised", budget/2, req.MaxTokens)
 	}
-	// budget must be capped at max_tokens so Anthropic doesn't reject
+	// budget must be strictly below max_tokens so Anthropic doesn't reject it.
 	if got := req.Thinking.OfEnabled; got == nil {
 		t.Fatalf("expected thinking enabled")
-	} else if got.BudgetTokens > req.MaxTokens {
-		t.Errorf("budget_tokens %d exceeds max_tokens %d", got.BudgetTokens, req.MaxTokens)
+	} else if got.BudgetTokens != req.MaxTokens-1 {
+		t.Errorf("budget_tokens = %d, want max_tokens-1 = %d", got.BudgetTokens, req.MaxTokens-1)
 	}
 }
 
 func TestRuleThinkingTransform_AnthropicCapsBudgetToMaxTokensWhenBelowMinimum(t *testing.T) {
-	// max_tokens=512 is below Anthropic's 1024 thinking minimum. The old code used
-	// max(1024, MaxTokens) which would set budget=1024 > MaxTokens=512 and cause a
-	// 400 from Anthropic. The correct behavior is to cap at MaxTokens and let the
-	// API surface the conflict rather than silently exceeding the operator limit.
+	// No budget can be both >=1024 and <512, so reject the impossible rule
+	// locally instead of emitting a request guaranteed to fail upstream.
 	req := &anthropic.MessageNewParams{}
 	req.MaxTokens = 512
 	ctx := &TransformContext{Request: req}
 
-	if err := NewRuleThinkingTransform(typ.ThinkingEffortLow).Apply(ctx); err != nil {
-		t.Fatalf("apply: %v", err)
+	if err := NewRuleThinkingTransform(typ.ThinkingEffortLow).Apply(ctx); err == nil {
+		t.Fatal("expected impossible thinking budget to return an error")
 	}
 	if req.MaxTokens != 512 {
 		t.Errorf("max_tokens changed from 512 to %d — must not be raised", req.MaxTokens)
 	}
-	if got := req.Thinking.OfEnabled; got == nil {
-		t.Fatalf("expected thinking enabled")
-	} else if got.BudgetTokens > req.MaxTokens {
-		t.Errorf("budget_tokens %d exceeds max_tokens %d — would cause Anthropic 400", got.BudgetTokens, req.MaxTokens)
+	if req.Thinking.OfEnabled != nil {
+		t.Errorf("invalid thinking config was applied: %#v", req.Thinking.OfEnabled)
 	}
 }
 
