@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -97,18 +99,34 @@ func TestNewClaudeClient_StripV1FromBase(t *testing.T) {
 // ListModels
 // ===================================================================
 
-func TestClaudeClient_ListModels_ReturnsError(t *testing.T) {
+func TestClaudeClient_ListModels_UsesUpstream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Errorf("unexpected model-list path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data":[{"id":"claude-test","type":"model","display_name":"Claude Test","created_at":"2025-01-01T00:00:00Z"}],
+			"has_more":false,
+			"first_id":"claude-test",
+			"last_id":"claude-test"
+		}`))
+	}))
+	t.Cleanup(server.Close)
+
 	provider := newOAuthProvider()
+	provider.APIBase = server.URL
 	c, err := NewClaudeClient(context.Background(), provider, "", typ.SessionID{Value: "s"})
 	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, c.Close()) })
 
-	models, err := c.ListModels(context.Background())
-	assert.Nil(t, models)
-	require.Error(t, err)
-
-	var modelsErr *ErrModelsEndpointNotSupported
-	require.ErrorAs(t, err, &modelsErr)
-	assert.Equal(t, provider.Name, modelsErr.Provider)
+	result, err := c.ListModels(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, []string{"claude-test"}, result.Models)
+	assert.NotNil(t, result.Raw)
 }
 
 // ===================================================================

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -483,12 +484,9 @@ func (h *Handler) UpdateProviderModelsByUUID(c *gin.Context) {
 		return
 	}
 
-	// force_upstream is an undocumented, operator-only escape hatch: when set
-	// a normally-banned provider (e.g. Claude Code OAuth) performs a real
-	// upstream /models fetch instead of falling back to the template. The
-	// frontend never sends it; it exists for special cases where the
-	// provider's APIBase/credential does expose /models.
-	forceUpstream := c.Query("force_upstream") == "1"
+	// force_upstream allows an upstream attempt for providers normally skipped,
+	// such as Claude Code OAuth. The regular template fallback still applies.
+	forceUpstream, _ := strconv.ParseBool(c.Query("force_upstream"))
 
 	resolved, err := h.config.ResolveProviderModels(true, forceUpstream, uid)
 	if err == nil && len(resolved.Models) == 0 {

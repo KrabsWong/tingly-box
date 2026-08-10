@@ -33,13 +33,11 @@ type ProviderModelRecord struct {
 	Source       ModelSource `gorm:"column:source"`
 	LastUpdated  time.Time   `gorm:"column:last_updated"`
 
-	// RawResponse holds the raw upstream payload from the fetch that produced
-	// Models, for development triage and data accumulation (mirrors
-	// provider_usage.raw_response). Populated on every real API fetch where the
-	// client captured it; nil for template-sourced rows.
+	// RawResponse holds the latest captured upstream payload. After a failed
+	// refresh it may describe the failure while Models retains the last success.
 	RawResponse *string `gorm:"column:raw_response;type:text"`
-	// LastError records the most recent fetch error string. Nil on success or
-	// when the endpoint is simply unsupported.
+	// LastError records the most recent fetch error, including an unsupported
+	// endpoint. It is cleared by the next successful fetch.
 	LastError *string `gorm:"column:last_error;type:text"`
 	// LastErrorAt is when LastError was captured.
 	LastErrorAt *time.Time `gorm:"column:last_error_at"`
@@ -145,8 +143,23 @@ func (ms *ModelStore) saveModels(provider *typ.Provider, models []string, source
 		whenAt = now
 	}
 
-	// Build the field map to update. Fields that should be preserved on a
-	// failure-only write (models == nil) are omitted from the map.
+	var modelsJSON string
+	if models != nil {
+		encoded, err := json.Marshal(models)
+		if err != nil {
+			return fmt.Errorf("failed to marshal models: %w", err)
+		}
+		modelsJSON = string(encoded)
+	}
+
+	var rawResponse *string
+	if len(raw) > 0 {
+		value := string(raw)
+		rawResponse = &value
+	}
+
+	// Failure-only writes omit model fields so the last successful list remains
+	// available as a stale fallback.
 	updates := map[string]any{
 		"provider_name": provider.Name,
 		"api_base":      provider.APIBase,
@@ -154,27 +167,19 @@ func (ms *ModelStore) saveModels(provider *typ.Provider, models []string, source
 	}
 
 	if models != nil {
-		modelsJSON, err := json.Marshal(models)
-		if err != nil {
-			return fmt.Errorf("failed to marshal models: %w", err)
-		}
-		updates["models"] = string(modelsJSON)
+		updates["models"] = modelsJSON
 		updates["source"] = source
 		updates["last_updated"] = now
 	}
 
-	// Raw payload: write when provided, clear when this is a clean success.
-	if len(raw) > 0 {
-		rawStr := string(raw)
-		updates["raw_response"] = rawStr
+	if rawResponse != nil {
+		updates["raw_response"] = *rawResponse
 	} else if models != nil {
 		updates["raw_response"] = nil
 	}
 
-	// Error fields: set on failure, cleared on success.
 	if lastErr != nil {
-		errStr := *lastErr
-		updates["last_error"] = errStr
+		updates["last_error"] = *lastErr
 		updates["last_error_at"] = whenAt
 	} else if models != nil {
 		updates["last_error"] = nil
@@ -192,21 +197,13 @@ func (ms *ModelStore) saveModels(provider *typ.Provider, models []string, source
 			UpdatedAt:    now,
 		}
 		if models != nil {
-			modelsJSON, mErr := json.Marshal(models)
-			if mErr != nil {
-				return fmt.Errorf("failed to marshal models: %w", mErr)
-			}
-			record.Models = string(modelsJSON)
+			record.Models = modelsJSON
 			record.Source = source
 			record.LastUpdated = now
 		}
-		if len(raw) > 0 {
-			rawStr := string(raw)
-			record.RawResponse = &rawStr
-		}
+		record.RawResponse = rawResponse
 		if lastErr != nil {
-			errStr := *lastErr
-			record.LastError = &errStr
+			record.LastError = lastErr
 			record.LastErrorAt = &whenAt
 		}
 		if err := ms.db.Create(&record).Error; err != nil {
@@ -255,7 +252,7 @@ func (ms *ModelStore) GetAllProviders() []string {
 	defer ms.mu.RUnlock()
 
 	var records []ProviderModelRecord
-	if err := ms.db.Find(&records).Error; err != nil {
+	if err := ms.db.Where("models <> ''").Find(&records).Error; err != nil {
 		return []string{}
 	}
 
@@ -274,7 +271,7 @@ func (ms *ModelStore) HasModels(providerUUID string) bool {
 
 	var count int64
 	if err := ms.db.Model(&ProviderModelRecord{}).
-		Where("provider_uuid = ?", providerUUID).
+		Where("provider_uuid = ? AND models <> ''", providerUUID).
 		Count(&count).Error; err != nil {
 		return false
 	}
@@ -299,6 +296,9 @@ func (ms *ModelStore) GetProviderInfo(providerUUID string) (apiBase string, last
 	err := ms.db.Where("provider_uuid = ?", providerUUID).First(&record).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) || err != nil {
+		return "", "", false
+	}
+	if record.Models == "" || record.LastUpdated.IsZero() {
 		return "", "", false
 	}
 

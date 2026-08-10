@@ -203,3 +203,17 @@ func TestSaveFetchFailure_EmptyErrorIsNoop(t *testing.T) {
 	require.NoError(t, store.SaveFetchFailure(provider, "", []byte(`{}`), time.Time{}))
 	assert.Empty(t, store.GetAllModelRecords())
 }
+
+func TestSaveFetchFailure_DoesNotCreateModelCache(t *testing.T) {
+	store := setupTestStore(t)
+	provider := &typ.Provider{UUID: "failure-only", Name: "P", APIBase: "x"}
+	require.NoError(t, store.SaveFetchFailure(provider, "upstream failed", nil, time.Time{}))
+
+	assert.False(t, store.HasModels(provider.UUID))
+	assert.Empty(t, store.GetAllProviders())
+	_, updated, exists := store.GetProviderInfo(provider.UUID)
+	assert.False(t, exists)
+	assert.Empty(t, updated)
+	_, failureExists := store.GetFetchFailure(provider.UUID)
+	assert.True(t, failureExists)
+}

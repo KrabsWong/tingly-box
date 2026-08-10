@@ -252,21 +252,19 @@ func (c *AnthropicClient) ListModels(ctx context.Context) (*ModelListResult, err
 			Reason:   "cloud-credential providers use template model lists",
 		}
 	}
-	models, err := c.client.Models.List(ctx, anthropic.ModelListParams{})
+	res, err := c.client.Models.List(ctx, anthropic.ModelListParams{})
 	if err != nil {
 		return nil, err
 	}
 
-	var result []string
-	for _, model := range models.Data {
-		result = append(result, model.ID)
+	var models []string
+	for _, model := range res.Data {
+		models = append(models, model.ID)
 	}
 
-	if len(result) == 0 {
-		return nil, fmt.Errorf("no models found in provider response")
+	if len(models) == 0 {
+		return &ModelListResult{Raw: res}, fmt.Errorf("no models found in provider response")
 	}
 
-	// Raw carries the SDK response slice for persistence/triage (mirrors
-	// provider_usage.raw_response). The caller marshals it.
-	return &ModelListResult{Models: result, Raw: models.Data}, nil
+	return &ModelListResult{Models: models, Raw: res}, nil
 }

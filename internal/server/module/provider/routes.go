@@ -54,6 +54,7 @@ func RegisterRoutes(api *swagger.RouteGroup, h *Handler) {
 	api.POST("/provider-models/:uuid", h.UpdateProviderModelsByUUID,
 		swagger.WithDescription("Fetch models for a specific provider"),
 		swagger.WithTags("models"),
+		swagger.WithQuery("force_upstream", "bool", "Attempt the upstream models endpoint even when normally skipped"),
 		swagger.WithResponseModel(ProviderModelsResponse{}),
 	)
 

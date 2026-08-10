@@ -285,7 +285,7 @@ func (c *OpenAIClient) ListModels(ctx context.Context) (*ModelListResult, error)
 	// Check response status
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("provider returned status %d (len=%d)", resp.StatusCode, len(bodyBytes))
+		return &ModelListResult{Raw: json.RawMessage(bodyBytes)}, fmt.Errorf("provider returned status %d (len=%d)", resp.StatusCode, len(bodyBytes))
 	}
 
 	// Parse response body
@@ -306,12 +306,12 @@ func (c *OpenAIClient) ListModels(ctx context.Context) (*ModelListResult, error)
 	}
 
 	if err := json.Unmarshal(body, &modelsResponse); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
+		return &ModelListResult{Raw: json.RawMessage(body)}, fmt.Errorf("failed to parse JSON response: %w", err)
 	}
 
 	// Check for API error
 	if modelsResponse.Error != nil {
-		return nil, fmt.Errorf("API error: %s (type: %s)", modelsResponse.Error.Message, modelsResponse.Error.Type)
+		return &ModelListResult{Raw: json.RawMessage(body)}, fmt.Errorf("API error: %s (type: %s)", modelsResponse.Error.Message, modelsResponse.Error.Type)
 	}
 
 	// Extract model IDs
@@ -331,7 +331,7 @@ func (c *OpenAIClient) ListModels(ctx context.Context) (*ModelListResult, error)
 	}
 
 	if len(models) == 0 {
-		return nil, fmt.Errorf("no models found in provider response")
+		return &ModelListResult{Raw: json.RawMessage(body)}, fmt.Errorf("no models found in provider response")
 	}
 
 	// Raw carries the response body (already JSON) for persistence/triage.

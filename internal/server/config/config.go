@@ -2128,10 +2128,7 @@ func (c *Config) ResolveProviderModels(forceRefresh, forceUpstream bool, uid str
 		return ResolvedModels{}, fmt.Errorf("provider with UUID %s not found: %w", uid, provErr)
 	}
 
-	// Step 2: VModel static list (virtual providers). A forced upstream fetch
-	// skips this — virtual providers have no upstream to hit, but forcing means
-	// the operator wants the real path, and falling through to the (empty)
-	// upstream step is the honest answer for a virtual provider.
+	// Step 2: VModel static list. A forced upstream attempt skips this shortcut.
 	if !forceUpstream && provider.IsVirtual() {
 		var models []string
 		if provider.VModelDetail != nil {
@@ -2176,23 +2173,15 @@ func (c *Config) fetchAndSaveAPIModels(provider *typ.Provider, forceUpstream boo
 
 	var result *client.ModelListResult
 	var apiErr error
-
-	// do some guard here to avoid model list for some special provider like claude code oauth
-	if provider.IsClaudeCodeProvider() {
-		if forceUpstream {
-			result, apiErr = lister.ListModels(ctx)
-		} else {
-			apiErr = errors.New("do not allow to list models from claude code upstream")
-		}
+	if provider.IsClaudeCodeProvider() && !forceUpstream {
+		apiErr = errors.New("model listing from Claude Code upstream is disabled")
 	} else {
 		result, apiErr = lister.ListModels(ctx)
 	}
 
 	if apiErr != nil {
-		// Persist the failure for triage — a not-supported endpoint is expected
-		// and still recorded for visibility. The operator can see the genuine
-		// upstream error on a force fetch.
-		if persistErr := c.modelManager.SaveFetchFailure(provider, apiErr.Error(), nil); persistErr != nil {
+		// Unsupported endpoints are expected but still useful during triage.
+		if persistErr := c.modelManager.SaveFetchFailure(provider, apiErr.Error(), modelListRaw(result)); persistErr != nil {
 			logrus.Warnf("Failed to persist model fetch failure for %s: %v", provider.Name, persistErr)
 		}
 
@@ -2203,7 +2192,7 @@ func (c *Config) fetchAndSaveAPIModels(provider *typ.Provider, forceUpstream boo
 
 	if result == nil || len(result.Models) == 0 {
 		errMsg := fmt.Sprintf("provider %s returned no models", provider.Name)
-		if persistErr := c.modelManager.SaveFetchFailure(provider, errMsg, nil); persistErr != nil {
+		if persistErr := c.modelManager.SaveFetchFailure(provider, errMsg, modelListRaw(result)); persistErr != nil {
 			logrus.Warnf("Failed to persist model fetch failure for %s: %v", provider.Name, persistErr)
 		}
 		return errors.New(errMsg)
@@ -2217,6 +2206,13 @@ func (c *Config) fetchAndSaveAPIModels(provider *typ.Provider, forceUpstream boo
 	// payload, marshalled for persistence/triage.
 	SortProviderModels(provider, result.Models)
 	return c.modelManager.SaveModelsWithRaw(provider, result.Models, db.ModelSourceAPI, marshalRaw(result.Raw))
+}
+
+func modelListRaw(result *client.ModelListResult) json.RawMessage {
+	if result == nil {
+		return nil
+	}
+	return marshalRaw(result.Raw)
 }
 
 // marshalRaw serializes a client's raw upstream payload (an SDK response
@@ -2279,18 +2275,13 @@ func (c *Config) FetchAndSaveProviderModels(uid string) error {
 	return fmt.Errorf("failed to fetch models (API: %v, template fallback: not available)", apiErr)
 }
 
-// newModelLister builds the client used to list models for a provider.
-//
-// It returns a ModelLister, an optional closer the caller must defer, and any
-// construction error. Two special cases sit alongside the default APIStyle
-// dispatch:
+// newModelLister builds the provider-specific client used to list models.
+// ClientPool handles OAuth issuer dispatch; DeepSeek is the only endpoint
+// override because its model list lives on the bare host rather than /v1.
 //
 //   - DeepSeek exposes its model list only on the bare host (no /v1 path), so
 //     we override APIBase to https://api.deepseek.com before constructing the
 //     OpenAI client.
-//
-// The closer is non-nil whenever the lister is, so the caller can defer it
-// without checking the lister separately.
 func (c *Config) newModelLister(ctx context.Context, provider *typ.Provider) (client.ModelLister, error) {
 	if strings.Contains(strings.ToLower(strings.TrimSpace(provider.APIBase)), "api.deepseek.com") {
 		providerForModels := *provider
@@ -2303,20 +2294,21 @@ func (c *Config) newModelLister(ctx context.Context, provider *typ.Provider) (cl
 	}
 
 	pool := client.NewClientPool()
-
+	var lister client.ModelLister
 	switch provider.APIStyle {
 	case protocol.APIStyleAnthropic:
-		aClient := pool.GetAnthropicClient(ctx, provider, "")
-		return aClient, nil
+		lister = pool.GetAnthropicClient(ctx, provider, "")
 	case protocol.APIStyleGoogle:
-		gClient := pool.GetGoogleClient(ctx, provider, "")
-		return gClient, nil
+		lister = pool.GetGoogleClient(ctx, provider, "")
 	case protocol.APIStyleOpenAI:
 		fallthrough
 	default:
-		oClient := pool.GetOpenAIClient(ctx, provider, "")
-		return oClient, nil
+		lister = pool.GetOpenAIClient(ctx, provider, "")
 	}
+	if lister == nil {
+		return nil, fmt.Errorf("failed to create model-list client for provider %s", provider.Name)
+	}
+	return lister, nil
 }
 
 // SortProviderModels applies the canonical display ordering to a provider's

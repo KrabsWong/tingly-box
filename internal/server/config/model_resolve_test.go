@@ -2,6 +2,8 @@ package config
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -122,26 +124,33 @@ func TestResolveProviderModels_ClaudeCode_BannedByDefault(t *testing.T) {
 	// The ban must be recorded for triage — not just silently swallowed.
 	lastErr, exists := cfg.GetModelManager().GetFetchFailure(p.UUID)
 	require.True(t, exists, "expected a recorded fetch failure for the banned Claude Code fetch")
-	assert.Contains(t, lastErr, "claude code upstream")
+	assert.Contains(t, lastErr, "Claude Code upstream")
 }
 
-// With force_upstream, the ban is lifted and a real upstream fetch is
-// attempted. This test points the provider at a dead local address so the
-// fetch fails fast without depending on network reachability, and asserts the
-// ban was NOT applied (no "do not allow ..." record) — the failure, if any,
-// is the genuine connection error, not the ban.
+// With force_upstream, the normal Claude Code guard is bypassed and the real
+// model endpoint is used.
 func TestResolveProviderModels_ClaudeCode_ForceLiftsBan(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data":[{"id":"claude-upstream","type":"model","display_name":"Claude Upstream","created_at":"2025-01-01T00:00:00Z"}],
+			"has_more":false,
+			"first_id":"claude-upstream",
+			"last_id":"claude-upstream"
+		}`))
+	}))
+	t.Cleanup(server.Close)
+
 	cfg := newResolveTestConfig(t)
 	p := claudeCodeResolveProvider()
-	// Dead local address: the real fetch fails instantly, deterministically.
-	p.APIBase = "http://127.0.0.1:1"
+	p.APIBase = server.URL
 	require.NoError(t, cfg.AddProvider(p))
 
-	_, _ = cfg.ResolveProviderModels(true, true, p.UUID)
+	got, err := cfg.ResolveProviderModels(true, true, p.UUID)
+	require.NoError(t, err)
+	assert.Equal(t, ModelListSourceAPI, got.Source)
+	assert.Equal(t, []string{"claude-upstream"}, got.Models)
 
-	lastErr, exists := cfg.GetModelManager().GetFetchFailure(p.UUID)
-	if exists {
-		assert.NotContains(t, lastErr, "do not allow to list models from claude code upstream",
-			"force_upstream must lift the ban, not record it")
-	}
+	_, exists := cfg.GetModelManager().GetFetchFailure(p.UUID)
+	assert.False(t, exists)
 }
