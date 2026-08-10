@@ -32,8 +32,20 @@ type ProviderModelRecord struct {
 	Models       string      `gorm:"column:models;type:text"`
 	Source       ModelSource `gorm:"column:source"`
 	LastUpdated  time.Time   `gorm:"column:last_updated"`
-	CreatedAt    time.Time   `gorm:"column:created_at"`
-	UpdatedAt    time.Time   `gorm:"column:updated_at"`
+
+	// RawResponse holds the raw upstream payload from the fetch that produced
+	// Models, for development triage and data accumulation (mirrors
+	// provider_usage.raw_response). Populated on every real API fetch where the
+	// client captured it; nil for template-sourced rows.
+	RawResponse *string `gorm:"column:raw_response;type:text"`
+	// LastError records the most recent fetch error string. Nil on success or
+	// when the endpoint is simply unsupported.
+	LastError *string `gorm:"column:last_error;type:text"`
+	// LastErrorAt is when LastError was captured.
+	LastErrorAt *time.Time `gorm:"column:last_error_at"`
+
+	CreatedAt time.Time `gorm:"column:created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
 }
 
 // TableName specifies the table name for GORM
@@ -96,6 +108,31 @@ func (s *ModelStore) Close() error {
 
 // SaveModels saves models for a provider by UUID
 func (ms *ModelStore) SaveModels(provider *typ.Provider, models []string, source ModelSource) error {
+	return ms.saveModels(provider, models, source, nil, nil, time.Time{})
+}
+
+// SaveModelsWithRaw saves a successful real upstream fetch: the model list plus
+// the raw payload, and clears any prior error fields. source should be
+// ModelSourceAPI. A nil raw leaves RawResponse unset.
+func (ms *ModelStore) SaveModelsWithRaw(provider *typ.Provider, models []string, source ModelSource, raw json.RawMessage) error {
+	return ms.saveModels(provider, models, source, raw, nil, time.Time{})
+}
+
+// SaveFetchFailure records a fetch error for a provider without overwriting a
+// pre-existing Models list (a stale list from a prior successful fetch is more
+// useful than empty). lastErr is the error string; whenAt is the capture time
+// (pass time.Time{} to use now). A nil/empty lastErr clears nothing.
+func (ms *ModelStore) SaveFetchFailure(provider *typ.Provider, lastErr string, raw json.RawMessage, whenAt time.Time) error {
+	if lastErr == "" {
+		return nil
+	}
+	return ms.saveModels(provider, nil, "", raw, &lastErr, whenAt)
+}
+
+// saveModels is the single write path. It upserts the provider's row. When
+// models is nil (a failure-only write), the existing Models/Source values are
+// preserved and only the error/raw fields are touched.
+func (ms *ModelStore) saveModels(provider *typ.Provider, models []string, source ModelSource, raw json.RawMessage, lastErr *string, whenAt time.Time) error {
 	if provider == nil {
 		return errors.New("provider cannot be nil")
 	}
@@ -104,34 +141,81 @@ func (ms *ModelStore) SaveModels(provider *typ.Provider, models []string, source
 	defer ms.mu.Unlock()
 
 	now := time.Now()
-
-	modelsJSON, err := json.Marshal(models)
-	if err != nil {
-		return fmt.Errorf("failed to marshal models: %w", err)
+	if whenAt.IsZero() {
+		whenAt = now
 	}
 
-	record := ProviderModelRecord{
-		ProviderUUID: provider.UUID,
-		ProviderName: provider.Name,
-		APIBase:      provider.APIBase,
-		Models:       string(modelsJSON),
-		Source:       source,
-		LastUpdated:  now,
-		UpdatedAt:    now,
+	// Build the field map to update. Fields that should be preserved on a
+	// failure-only write (models == nil) are omitted from the map.
+	updates := map[string]any{
+		"provider_name": provider.Name,
+		"api_base":      provider.APIBase,
+		"updated_at":    now,
+	}
+
+	if models != nil {
+		modelsJSON, err := json.Marshal(models)
+		if err != nil {
+			return fmt.Errorf("failed to marshal models: %w", err)
+		}
+		updates["models"] = string(modelsJSON)
+		updates["source"] = source
+		updates["last_updated"] = now
+	}
+
+	// Raw payload: write when provided, clear when this is a clean success.
+	if len(raw) > 0 {
+		rawStr := string(raw)
+		updates["raw_response"] = rawStr
+	} else if models != nil {
+		updates["raw_response"] = nil
+	}
+
+	// Error fields: set on failure, cleared on success.
+	if lastErr != nil {
+		errStr := *lastErr
+		updates["last_error"] = errStr
+		updates["last_error_at"] = whenAt
+	} else if models != nil {
+		updates["last_error"] = nil
+		updates["last_error_at"] = nil
 	}
 
 	var existing ProviderModelRecord
-	err = ms.db.Where("provider_uuid = ?", provider.UUID).First(&existing).Error
+	err := ms.db.Where("provider_uuid = ?", provider.UUID).First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		record.CreatedAt = now
+		record := ProviderModelRecord{
+			ProviderUUID: provider.UUID,
+			ProviderName: provider.Name,
+			APIBase:      provider.APIBase,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+		if models != nil {
+			modelsJSON, mErr := json.Marshal(models)
+			if mErr != nil {
+				return fmt.Errorf("failed to marshal models: %w", mErr)
+			}
+			record.Models = string(modelsJSON)
+			record.Source = source
+			record.LastUpdated = now
+		}
+		if len(raw) > 0 {
+			rawStr := string(raw)
+			record.RawResponse = &rawStr
+		}
+		if lastErr != nil {
+			errStr := *lastErr
+			record.LastError = &errStr
+			record.LastErrorAt = &whenAt
+		}
 		if err := ms.db.Create(&record).Error; err != nil {
 			return fmt.Errorf("failed to create model record: %w", err)
 		}
 	} else if err != nil {
 		return fmt.Errorf("failed to query existing record: %w", err)
 	} else {
-		record.CreatedAt = existing.CreatedAt
-		if err := ms.db.Model(&existing).Updates(&record).Error; err != nil {
+		if err := ms.db.Model(&existing).Updates(updates).Error; err != nil {
 			return fmt.Errorf("failed to update model record: %w", err)
 		}
 	}
@@ -273,4 +357,35 @@ func (ms *ModelStore) GetAllModelRecords() []ProviderModelRecord {
 	}
 
 	return records
+}
+
+// GetRawResponse returns the cached raw upstream payload for a provider, or "".
+func (ms *ModelStore) GetRawResponse(providerUUID string) string {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	var record ProviderModelRecord
+	if err := ms.db.Where("provider_uuid = ?", providerUUID).First(&record).Error; err != nil {
+		return ""
+	}
+	if record.RawResponse == nil {
+		return ""
+	}
+	return *record.RawResponse
+}
+
+// GetFetchFailure returns the last recorded fetch error for a provider, if any.
+// Useful for triage and for tests asserting that a fetch was blocked/failed.
+func (ms *ModelStore) GetFetchFailure(providerUUID string) (lastErr string, exists bool) {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	var record ProviderModelRecord
+	if err := ms.db.Where("provider_uuid = ?", providerUUID).First(&record).Error; err != nil {
+		return "", false
+	}
+	if record.LastError == nil {
+		return "", false
+	}
+	return *record.LastError, true
 }

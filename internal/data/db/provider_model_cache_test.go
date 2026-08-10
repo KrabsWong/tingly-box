@@ -137,3 +137,69 @@ func TestRemoveProviderModels(t *testing.T) {
 	result = store.GetModels(provider.UUID, 1*time.Hour)
 	assert.Empty(t, result)
 }
+
+// TestSaveModelsWithRaw pins that a successful real upstream fetch persists
+// both the model list and the raw payload, and clears any prior error.
+func TestSaveModelsWithRaw(t *testing.T) {
+	store := setupTestStore(t)
+
+	provider := &typ.Provider{
+		UUID:    "raw-uuid",
+		Name:    "Raw Provider",
+		APIBase: "https://api.test.com",
+	}
+
+	// Seed a prior failure so we can verify SaveModelsWithRaw clears it.
+	require.NoError(t, store.SaveFetchFailure(provider, "boom", nil, time.Time{}))
+
+	models := []string{"m-1", "m-2"}
+	raw := []byte(`{"data":[{"id":"m-1"},{"id":"m-2"}]}`)
+	require.NoError(t, store.SaveModelsWithRaw(provider, models, ModelSourceAPI, raw))
+
+	// Models + raw persisted.
+	assert.Equal(t, models, store.GetModels(provider.UUID, time.Hour))
+	assert.Equal(t, string(raw), store.GetRawResponse(provider.UUID))
+
+	// Prior error cleared.
+	records := store.GetAllModelRecords()
+	require.Len(t, records, 1)
+	assert.Nil(t, records[0].LastError)
+	assert.Nil(t, records[0].LastErrorAt)
+}
+
+// TestSaveFetchFailure_PreservesModels pins that recording a fetch error does
+// not clobber a pre-existing model list — a stale list is more useful than
+// empty — while still recording the error and any partial raw body.
+func TestSaveFetchFailure_PreservesModels(t *testing.T) {
+	store := setupTestStore(t)
+
+	provider := &typ.Provider{
+		UUID:    "fail-uuid",
+		Name:    "Fail Provider",
+		APIBase: "https://api.test.com",
+	}
+	models := []string{"cached-1"}
+	require.NoError(t, store.SaveModels(provider, models, ModelSourceAPI))
+
+	raw := []byte(`{"error":"404"}`)
+	require.NoError(t, store.SaveFetchFailure(provider, "upstream returned 404", raw, time.Time{}))
+
+	// Existing models must survive.
+	assert.Equal(t, models, store.GetModels(provider.UUID, time.Hour))
+
+	records := store.GetAllModelRecords()
+	require.Len(t, records, 1)
+	require.NotNil(t, records[0].LastError)
+	assert.Equal(t, "upstream returned 404", *records[0].LastError)
+	require.NotNil(t, records[0].LastErrorAt)
+	assert.Equal(t, string(raw), *records[0].RawResponse)
+}
+
+// TestSaveFetchFailure_EmptyErrorIsNoop pins that an empty error string is a
+// no-op (the public guard in SaveFetchFailure).
+func TestSaveFetchFailure_EmptyErrorIsNoop(t *testing.T) {
+	store := setupTestStore(t)
+	provider := &typ.Provider{UUID: "noop-uuid", Name: "P", APIBase: "x"}
+	require.NoError(t, store.SaveFetchFailure(provider, "", []byte(`{}`), time.Time{}))
+	assert.Empty(t, store.GetAllModelRecords())
+}
