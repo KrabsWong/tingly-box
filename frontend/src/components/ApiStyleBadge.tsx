@@ -2,6 +2,7 @@ import {Box, Tooltip, useTheme} from '@mui/material';
 import {alpha, decomposeColor} from '@mui/material/styles';
 import type {SxProps, Theme} from '@mui/material';
 import { EMPTY_SX } from '@/constants/defaults';
+import { AnthropicStyleMark, GoogleStyleMark, OpenAIStyleMark } from '@/components/icons';
 
 interface ApiStyleBadgeProps {
     apiStyle: string;
@@ -65,9 +66,9 @@ export const ApiStyleBadge = ({
     // fill is the resting tint opacity over paper; hoverFill is the stronger
     // hover opacity. Dark mode gets a higher fill so tints stay visible on dark paper.
     const providers = {
-        openai:    { label: 'OpenAI',    letter: 'O', tint: theme.palette.info.main, fill: isDark ? 0.22 : 0.14, hoverFill: isDark ? 0.32 : 0.22, border: alpha(theme.palette.info.main, 0.4) },
-        anthropic: { label: 'Anthropic', letter: 'A', tint: '#E07A5F',               fill: isDark ? 0.26 : 0.16, hoverFill: isDark ? 0.36 : 0.26, border: alpha('#E07A5F', 0.5) },
-        google:    { label: 'Google',    letter: 'G', tint: '#4285F4',               fill: isDark ? 0.22 : 0.14, hoverFill: isDark ? 0.32 : 0.22, border: alpha('#4285F4', 0.4) },
+        openai:    { label: 'OpenAI',    Mark: OpenAIStyleMark, tint: theme.palette.info.main, fill: isDark ? 0.22 : 0.14, hoverFill: isDark ? 0.32 : 0.22, border: alpha(theme.palette.info.main, 0.4) },
+        anthropic: { label: 'Anthropic', Mark: AnthropicStyleMark, tint: '#E07A5F',               fill: isDark ? 0.26 : 0.16, hoverFill: isDark ? 0.36 : 0.26, border: alpha('#E07A5F', 0.5) },
+        google:    { label: 'Google',    Mark: GoogleStyleMark, tint: '#4285F4',               fill: isDark ? 0.22 : 0.14, hoverFill: isDark ? 0.32 : 0.22, border: alpha('#4285F4', 0.4) },
     } as const;
     const p = isOpenAI ? providers.openai : isAnthropic ? providers.anthropic : providers.google;
 
@@ -76,7 +77,7 @@ export const ApiStyleBadge = ({
 
     if (minimal) {
         const diameter = minimalSize === 'medium' ? 20 : 16;
-        const fontSize = minimalSize === 'medium' ? '11px' : '9px';
+        const ProtocolMark = p.Mark;
 
         return (
             <Tooltip title={`${p.label} Style`} arrow placement="top">
@@ -89,16 +90,18 @@ export const ApiStyleBadge = ({
                         alignItems: 'center',
                         justifyContent: 'center',
                         flexShrink: 0,
-                        fontSize,
-                        fontWeight: 700,
-                        lineHeight: 1,
-                        border: `1px solid ${p.border}`,
-                        backgroundColor,
                         color: p.tint,
+                        '& .api-style-mark-frame': {
+                            fill: backgroundColor,
+                            stroke: p.border,
+                        },
+                        '& .api-style-mark-glyph': {
+                            stroke: p.tint,
+                        },
                         ...sx,
                     }}
                 >
-                    {p.letter}
+                    <ProtocolMark aria-hidden sx={{ width: '100%', height: '100%', display: 'block' }} />
                 </Box>
             </Tooltip>
         );

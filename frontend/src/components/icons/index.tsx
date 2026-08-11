@@ -150,6 +150,7 @@ import {
 import { tablerMui } from './tablerMui';
 
 export { tablerMui };
+export { OpenAIStyleMark, AnthropicStyleMark, GoogleStyleMark } from './ApiStyleMarks';
 export type { SvgIconComponent } from '@mui/icons-material';
 
 // --- Navigation / chevrons ---------------------------------------------------
