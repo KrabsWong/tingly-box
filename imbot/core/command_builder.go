@@ -1,16 +1,16 @@
-// Package command provides a simple, generic command management system for bots.
-package command
+// command_builder.go provides the fluent builder for defining commands that
+// are registered with CommandRegistry.
 
-import "github.com/tingly-dev/tingly-box/imbot/core"
+package core
 
 // CommandBuilder provides a fluent API for command definition.
 type CommandBuilder struct {
 	cmd Command
 }
 
-// NewCommand creates a new command builder.
+// NewCommandBuilder creates a new command builder.
 // The ID should be unique, name is the primary command name (without slash).
-func NewCommand(id, name, description string) *CommandBuilder {
+func NewCommandBuilder(id, name, description string) *CommandBuilder {
 	return &CommandBuilder{
 		cmd: Command{
 			ID:          id,
@@ -53,7 +53,7 @@ func (b *CommandBuilder) Hidden() *CommandBuilder {
 
 // WithPlatforms restricts the command to specific platforms.
 // If not called, the command is available on all platforms.
-func (b *CommandBuilder) WithPlatforms(platforms ...core.Platform) *CommandBuilder {
+func (b *CommandBuilder) WithPlatforms(platforms ...Platform) *CommandBuilder {
 	b.cmd.Platforms = append(b.cmd.Platforms, platforms...)
 	return b
 }

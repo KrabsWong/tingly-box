@@ -1,12 +1,14 @@
-// Package command provides a simple, generic command management system for bots.
-package command
+// command_registry.go implements the command system: a registry of named
+// commands with aliases, descriptions, and handlers, plus the rendering of
+// those commands into platform-native menus (e.g. Telegram command list,
+// Feishu quick actions).
+
+package core
 
 import (
 	"fmt"
 	"strings"
 	"sync"
-
-	"github.com/tingly-dev/tingly-box/imbot/core"
 )
 
 // CommandHandler is the function signature for command handlers.
@@ -41,7 +43,7 @@ type Command struct {
 
 	// Platforms restricts this command to specific platforms.
 	// If nil/empty, the command is available on all platforms.
-	Platforms []core.Platform
+	Platforms []Platform
 
 	// MenuLabel overrides the display text in menus (optional, defaults to Name)
 	MenuLabel string
@@ -110,8 +112,8 @@ type CommandRegistry struct {
 	byName   map[string]*Command // by name/alias
 }
 
-// NewRegistry creates a new command registry.
-func NewRegistry() *CommandRegistry {
+// NewCommandRegistry creates a new command registry.
+func NewCommandRegistry() *CommandRegistry {
 	return &CommandRegistry{
 		commands: make(map[string]*Command),
 		byName:   make(map[string]*Command),
@@ -212,7 +214,7 @@ func (r *CommandRegistry) ForCategory(category string) []*Command {
 // ForPlatform returns commands visible for a specific platform.
 // Commands with no platform restriction are always included.
 // Commands with specific platforms are only included if the platform matches.
-func (r *CommandRegistry) ForPlatform(platform core.Platform) []*Command {
+func (r *CommandRegistry) ForPlatform(platform Platform) []*Command {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -320,7 +322,7 @@ func (r *CommandRegistry) BuildHelpText(isDirectMessage bool) string {
 // BuildPlatformCommands returns commands formatted as []map[string]string
 // for platform-specific command list APIs (e.g., Telegram BotCommand).
 // Each entry has "command" (with leading slash) and "description" keys.
-func (r *CommandRegistry) BuildPlatformCommands(platform core.Platform) []map[string]string {
+func (r *CommandRegistry) BuildPlatformCommands(platform Platform) []map[string]string {
 	commands := r.ForPlatform(platform)
 	result := make([]map[string]string, 0, len(commands))
 	for _, cmd := range commands {
@@ -335,13 +337,13 @@ func (r *CommandRegistry) BuildPlatformCommands(platform core.Platform) []map[st
 // BuildTelegramMenuCommands returns commands formatted as []models.BotCommand
 // for Telegram's SetCommandList API. Commands are sorted by priority.
 func (r *CommandRegistry) BuildTelegramMenuCommands() []map[string]string {
-	return r.BuildPlatformCommands(core.PlatformTelegram)
+	return r.BuildPlatformCommands(PlatformTelegram)
 }
 
 // BuildFeishuQuickActions returns quick actions formatted for Feishu/Lark.
 // Each action includes id, label, description, command, and optional icon.
 func (r *CommandRegistry) BuildFeishuQuickActions() []map[string]interface{} {
-	commands := r.ForPlatform(core.PlatformFeishu)
+	commands := r.ForPlatform(PlatformFeishu)
 	result := make([]map[string]interface{}, 0, len(commands))
 
 	for _, cmd := range commands {
@@ -365,6 +367,6 @@ func (r *CommandRegistry) BuildFeishuQuickActions() []map[string]interface{} {
 
 // GetCommandsForMenu returns commands filtered for menu display on a platform.
 // Returns visible commands sorted by priority, respecting platform restrictions.
-func (r *CommandRegistry) GetCommandsForMenu(platform core.Platform) []*Command {
+func (r *CommandRegistry) GetCommandsForMenu(platform Platform) []*Command {
 	return r.ForPlatform(platform)
 }

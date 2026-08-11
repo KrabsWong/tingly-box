@@ -1,14 +1,13 @@
 // Package command provides a simple, generic command management system for bots.
-package command
+package core
 
 import (
 	"context"
-	"github.com/tingly-dev/tingly-box/imbot/core"
 	"testing"
 )
 
 func TestNewRegistry(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewCommandRegistry()
 	if registry == nil {
 		t.Fatal("NewRegistry returned nil")
 	}
@@ -70,7 +69,7 @@ func TestCommandValidation(t *testing.T) {
 }
 
 func TestRegister(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewCommandRegistry()
 
 	cmd := Command{
 		ID:          "test",
@@ -98,7 +97,7 @@ func TestRegister(t *testing.T) {
 }
 
 func TestRegisterDuplicate(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewCommandRegistry()
 
 	cmd1 := Command{
 		ID:          "test",
@@ -121,7 +120,7 @@ func TestRegisterDuplicate(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewCommandRegistry()
 
 	cmd := Command{
 		ID:          "test",
@@ -154,7 +153,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestMatch(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewCommandRegistry()
 
 	handler := func(ctx *HandlerContext, args []string) error { return nil }
 
@@ -245,7 +244,7 @@ func TestAllNames(t *testing.T) {
 func TestBuilder(t *testing.T) {
 	handler := func(ctx *HandlerContext, args []string) error { return nil }
 
-	cmd, err := NewCommand("test", "test", "test command").
+	cmd, err := NewCommandBuilder("test", "test", "test command").
 		WithAliases("t", "testing").
 		WithHandler(handler).
 		WithCategory("test").
@@ -281,7 +280,7 @@ func TestBuilderMustBuild(t *testing.T) {
 	handler := func(ctx *HandlerContext, args []string) error { return nil }
 
 	// Should not panic
-	cmd := NewCommand("test", "test", "test command").
+	cmd := NewCommandBuilder("test", "test", "test command").
 		WithHandler(handler).
 		MustBuild()
 
@@ -296,7 +295,7 @@ func TestBuilderMustBuild(t *testing.T) {
 		}
 	}()
 
-	NewCommand("", "test", "test command").MustBuild()
+	NewCommandBuilder("", "test", "test command").MustBuild()
 }
 
 func TestHandlerContext(t *testing.T) {
@@ -331,7 +330,7 @@ func TestHandlerContext(t *testing.T) {
 }
 
 func TestPrioritySorting(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewCommandRegistry()
 
 	commands := []Command{
 		{ID: "low", Name: "low", Description: "low", Handler: func(ctx *HandlerContext, args []string) error { return nil }, Priority: 1},
@@ -360,7 +359,7 @@ func TestPrioritySorting(t *testing.T) {
 }
 
 func TestHiddenCommands(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewCommandRegistry()
 
 	_ = registry.Register(Command{
 		ID:          "visible",
@@ -402,7 +401,7 @@ func TestHiddenCommands(t *testing.T) {
 }
 
 func TestBuildHelpText(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewCommandRegistry()
 
 	_ = registry.Register(Command{
 		ID:          "help",
@@ -472,14 +471,14 @@ func (m *mockBot) UUID() string                         { return "mock-uuid" }
 func (m *mockBot) Connect(ctx context.Context) error    { return nil }
 func (m *mockBot) Disconnect(ctx context.Context) error { return nil }
 func (m *mockBot) IsConnected() bool                    { return true }
-func (m *mockBot) SendMessage(ctx context.Context, target string, opts *core.SendMessageOptions) (*core.SendResult, error) {
-	return &core.SendResult{}, nil
+func (m *mockBot) SendMessage(ctx context.Context, target string, opts *SendMessageOptions) (*SendResult, error) {
+	return &SendResult{}, nil
 }
-func (m *mockBot) SendText(ctx context.Context, target string, text string) (*core.SendResult, error) {
-	return &core.SendResult{}, nil
+func (m *mockBot) SendText(ctx context.Context, target string, text string) (*SendResult, error) {
+	return &SendResult{}, nil
 }
-func (m *mockBot) SendMedia(ctx context.Context, target string, media []core.MediaAttachment) (*core.SendResult, error) {
-	return &core.SendResult{}, nil
+func (m *mockBot) SendMedia(ctx context.Context, target string, media []MediaAttachment) (*SendResult, error) {
+	return &SendResult{}, nil
 }
 func (m *mockBot) React(ctx context.Context, messageID string, emoji string) error      { return nil }
 func (m *mockBot) EditMessage(ctx context.Context, messageID string, text string) error { return nil }
@@ -487,9 +486,9 @@ func (m *mockBot) DeleteMessage(ctx context.Context, messageID string) error    
 func (m *mockBot) ChunkText(text string) []string                                       { return []string{text} }
 func (m *mockBot) ValidateTextLength(text string) error                                 { return nil }
 func (m *mockBot) GetMessageLimit() int                                                 { return 4000 }
-func (m *mockBot) Status() *core.BotStatus                                              { return &core.BotStatus{} }
-func (m *mockBot) PlatformInfo() *core.PlatformInfo                                     { return &core.PlatformInfo{} }
-func (m *mockBot) OnMessage(handler func(core.Message))                                 {}
+func (m *mockBot) Status() *BotStatus                                                   { return &BotStatus{} }
+func (m *mockBot) PlatformInfo() *PlatformInfo                                          { return &PlatformInfo{} }
+func (m *mockBot) OnMessage(handler func(Message))                                      {}
 func (m *mockBot) OnError(handler func(error))                                          {}
 func (m *mockBot) OnConnected(handler func())                                           {}
 func (m *mockBot) OnDisconnected(handler func())                                        {}
