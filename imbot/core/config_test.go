@@ -48,17 +48,6 @@ func TestConfig_Validate(t *testing.T) {
 			errMsg:  "token is required",
 		},
 		{
-			name: "Basic auth without username",
-			config: &Config{
-				Platform: PlatformTelegram,
-				Auth: AuthConfig{
-					Type: "basic",
-				},
-			},
-			wantErr: true,
-			errMsg:  "username is required",
-		},
-		{
 			name: "OAuth without credentials",
 			config: &Config{
 				Platform: PlatformTelegram,
@@ -68,17 +57,6 @@ func TestConfig_Validate(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "clientId and clientSecret are required",
-		},
-		{
-			name: "Service account without JSON",
-			config: &Config{
-				Platform: PlatformGoogleChat,
-				Auth: AuthConfig{
-					Type: "serviceAccount",
-				},
-			},
-			wantErr: true,
-			errMsg:  "serviceAccountJson is required",
 		},
 		{
 			name: "Unknown auth type",
@@ -131,22 +109,6 @@ func TestAuthConfig_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "Valid basic auth",
-			auth: AuthConfig{
-				Type:     "basic",
-				Username: "user",
-				Password: "pass",
-			},
-			wantErr: false,
-		},
-		{
-			name: "Basic auth without username",
-			auth: AuthConfig{
-				Type: "basic",
-			},
-			wantErr: true,
-		},
-		{
 			name: "Valid oauth",
 			auth: AuthConfig{
 				Type:         "oauth",
@@ -160,21 +122,6 @@ func TestAuthConfig_Validate(t *testing.T) {
 			auth: AuthConfig{
 				Type:         "oauth",
 				ClientSecret: "secret",
-			},
-			wantErr: true,
-		},
-		{
-			name: "Valid service account",
-			auth: AuthConfig{
-				Type:               "serviceAccount",
-				ServiceAccountJSON: "{}",
-			},
-			wantErr: false,
-		},
-		{
-			name: "Service account without JSON",
-			auth: AuthConfig{
-				Type: "serviceAccount",
 			},
 			wantErr: true,
 		},
@@ -200,26 +147,20 @@ func TestAuthConfig_Validate(t *testing.T) {
 func TestConfig_ExpandEnvVars(t *testing.T) {
 	// Set test environment variables
 	os.Setenv("TEST_TOKEN", "env-token-value")
-	os.Setenv("TEST_PASSWORD", "env-password-value")
 	os.Setenv("TEST_CLIENT_ID", "env-client-id")
 	os.Setenv("TEST_CLIENT_SECRET", "env-client-secret")
-	os.Setenv("TEST_SERVICE_ACCOUNT", `{"key":"value"}`)
 	defer func() {
 		os.Unsetenv("TEST_TOKEN")
-		os.Unsetenv("TEST_PASSWORD")
 		os.Unsetenv("TEST_CLIENT_ID")
 		os.Unsetenv("TEST_CLIENT_SECRET")
-		os.Unsetenv("TEST_SERVICE_ACCOUNT")
 	}()
 
 	tests := []struct {
 		name           string
 		config         *Config
 		expectedToken  string
-		expectedPass   string
 		expectedClient string
 		expectedSecret string
-		expectedSA     string
 	}{
 		{
 			name: "Expand token",
@@ -231,18 +172,6 @@ func TestConfig_ExpandEnvVars(t *testing.T) {
 				},
 			},
 			expectedToken: "env-token-value",
-		},
-		{
-			name: "Expand password",
-			config: &Config{
-				Platform: PlatformTelegram,
-				Auth: AuthConfig{
-					Type:     "basic",
-					Username: "user",
-					Password: "$TEST_PASSWORD",
-				},
-			},
-			expectedPass: "env-password-value",
 		},
 		{
 			name: "Expand OAuth credentials",
@@ -257,17 +186,6 @@ func TestConfig_ExpandEnvVars(t *testing.T) {
 			expectedClient: "env-client-id",
 			expectedSecret: "env-client-secret",
 		},
-		{
-			name: "Expand service account",
-			config: &Config{
-				Platform: PlatformGoogleChat,
-				Auth: AuthConfig{
-					Type:               "serviceAccount",
-					ServiceAccountJSON: "$TEST_SERVICE_ACCOUNT",
-				},
-			},
-			expectedSA: `{"key":"value"}`,
-		},
 	}
 
 	for _, tt := range tests {
@@ -278,10 +196,6 @@ func TestConfig_ExpandEnvVars(t *testing.T) {
 				t.Errorf("Token = %v, want %v", tt.config.Auth.Token, tt.expectedToken)
 			}
 
-			if tt.expectedPass != "" && tt.config.Auth.Password != tt.expectedPass {
-				t.Errorf("Password = %v, want %v", tt.config.Auth.Password, tt.expectedPass)
-			}
-
 			if tt.expectedClient != "" && tt.config.Auth.ClientID != tt.expectedClient {
 				t.Errorf("ClientID = %v, want %v", tt.config.Auth.ClientID, tt.expectedClient)
 			}
@@ -289,19 +203,15 @@ func TestConfig_ExpandEnvVars(t *testing.T) {
 			if tt.expectedSecret != "" && tt.config.Auth.ClientSecret != tt.expectedSecret {
 				t.Errorf("ClientSecret = %v, want %v", tt.config.Auth.ClientSecret, tt.expectedSecret)
 			}
-
-			if tt.expectedSA != "" && tt.config.Auth.ServiceAccountJSON != tt.expectedSA {
-				t.Errorf("ServiceAccountJSON = %v, want %v", tt.config.Auth.ServiceAccountJSON, tt.expectedSA)
-			}
 		})
 	}
 }
 
-// TestConfig_ExpandEnvVars_UnsetIsConsistent pins down the fix for the
-// Token/Password-vs-OAuth inconsistency: an unset environment variable must
-// resolve to "" on every field, not leave a "$VAR" literal behind on Token while
-// clearing the OAuth fields. Previously Token kept "$MISSING" (because GetToken
-// errored and the assignment was skipped) and ClientID became "".
+// TestConfig_ExpandEnvVars_UnsetIsConsistent pins down that an unset
+// environment variable must resolve to "" on every field, not leave a "$VAR"
+// literal behind on Token while clearing the OAuth fields. Previously Token
+// kept "$MISSING" (because GetToken errored and the assignment was skipped)
+// and ClientID became "".
 func TestConfig_ExpandEnvVars_UnsetIsConsistent(t *testing.T) {
 	os.Unsetenv("DEFINITELY_UNSET_TOKEN")
 	os.Unsetenv("DEFINITELY_UNSET_CLIENT_ID")
@@ -523,110 +433,6 @@ func TestConfig_Clone(t *testing.T) {
 		// This is actually correct behavior - logging should be cloned
 	} else if clone.Logging.Level == "error" {
 		t.Error("Clone logging was affected by modification to original")
-	}
-}
-
-func TestConfigs_Validate(t *testing.T) {
-	tests := []struct {
-		name    string
-		configs *Configs
-		wantErr bool
-	}{
-		{
-			name: "All valid configs",
-			configs: &Configs{
-				Bots: []*Config{
-					{
-						Platform: PlatformTelegram,
-						Auth: AuthConfig{
-							Type:  "token",
-							Token: "token1",
-						},
-					},
-					{
-						Platform: PlatformDiscord,
-						Auth: AuthConfig{
-							Type:  "token",
-							Token: "token2",
-						},
-					},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "One invalid config",
-			configs: &Configs{
-				Bots: []*Config{
-					{
-						Platform: PlatformTelegram,
-						Auth: AuthConfig{
-							Type:  "token",
-							Token: "token1",
-						},
-					},
-					{
-						Platform: PlatformTelegram,
-						Auth: AuthConfig{
-							Type: "token", // Missing token
-						},
-					},
-				},
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.configs.Validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Configs.Validate() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestConfigs_GetEnabledConfigs(t *testing.T) {
-	configs := &Configs{
-		Bots: []*Config{
-			{
-				Platform: PlatformTelegram,
-				Enabled:  true,
-				Auth: AuthConfig{
-					Type:  "token",
-					Token: "token1",
-				},
-			},
-			{
-				Platform: PlatformDiscord,
-				Enabled:  false,
-				Auth: AuthConfig{
-					Type:  "token",
-					Token: "token2",
-				},
-			},
-			{
-				Platform: PlatformSlack,
-				Enabled:  true,
-				Auth: AuthConfig{
-					Type:  "token",
-					Token: "token3",
-				},
-			},
-		},
-	}
-
-	enabled := configs.GetEnabledConfigs()
-
-	if len(enabled) != 2 {
-		t.Errorf("GetEnabledConfigs() returned %d configs, want 2", len(enabled))
-	}
-
-	for _, cfg := range enabled {
-		if !cfg.Enabled {
-			t.Errorf("Config should be enabled, got enabled=%v", cfg.Enabled)
-		}
 	}
 }
 

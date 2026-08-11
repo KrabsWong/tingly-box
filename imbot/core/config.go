@@ -18,22 +18,14 @@ type Config struct {
 
 // AuthConfig represents authentication configuration
 type AuthConfig struct {
-	Type string `json:"type" yaml:"type"` // "token", "qr", "oauth", "basic", "serviceAccount"
+	Type string `json:"type" yaml:"type"` // "token", "qr", "oauth", "none"
 
 	// Token auth
 	Token string `json:"token,omitempty" yaml:"token,omitempty"`
 
-	// Basic auth
-	Username string `json:"username,omitempty" yaml:"username,omitempty"`
-	Password string `json:"password,omitempty" yaml:"password,omitempty"`
-
 	// OAuth
 	ClientID     string `json:"clientId,omitempty" yaml:"clientId,omitempty"`
 	ClientSecret string `json:"clientSecret,omitempty" yaml:"clientSecret,omitempty"`
-	RedirectURI  string `json:"redirectUri,omitempty" yaml:"redirectUri,omitempty"`
-
-	// Service Account
-	ServiceAccountJSON string `json:"serviceAccountJson,omitempty" yaml:"serviceAccountJson,omitempty"`
 
 	// QR Auth options
 	AuthDir   string `json:"authDir,omitempty" yaml:"authDir,omitempty"`
@@ -83,17 +75,9 @@ func (a *AuthConfig) Validate() error {
 		if a.Token == "" {
 			return fmt.Errorf("token is required for token auth")
 		}
-	case "basic":
-		if a.Username == "" {
-			return fmt.Errorf("username is required for basic auth")
-		}
 	case "oauth":
 		if a.ClientID == "" || a.ClientSecret == "" {
 			return fmt.Errorf("clientId and clientSecret are required for oauth")
-		}
-	case "serviceAccount":
-		if a.ServiceAccountJSON == "" {
-			return fmt.Errorf("serviceAccountJson is required for service account auth")
 		}
 	case "qr":
 		// QR auth has no required fields
@@ -108,9 +92,7 @@ func (a *AuthConfig) Validate() error {
 
 // expandEnvVar returns the value of the environment variable named by s (s must
 // start with "$"), or "" when the variable is unset. It is the single rule for
-// "$VAR" expansion across every auth field — previously Token/Password went
-// through GetToken/GetPassword while the OAuth/SA fields called os.Getenv
-// directly, which made an unset variable behave differently per field.
+// "$VAR" expansion across every auth field.
 func expandEnvVar(s string) string {
 	return os.Getenv(strings.TrimPrefix(s, "$"))
 }
@@ -140,35 +122,20 @@ func (a *AuthConfig) GetToken() (string, error) {
 	return v, nil
 }
 
-// GetPassword returns the password, resolving a "$VAR" reference. See GetToken.
-func (a *AuthConfig) GetPassword() (string, error) {
-	v, wasRef := expandField(a.Password)
-	if wasRef && v == "" {
-		return "", fmt.Errorf("environment variable %s is not set", strings.TrimPrefix(a.Password, "$"))
-	}
-	return v, nil
-}
-
-// ExpandEnvVars resolves "$VAR" references in every auth field in place, using
+// ExpandEnvVars resolves "$VAR" references in the auth fields in place, using
 // the single expandEnvVar rule. An unset variable leaves the field holding the
-// empty string consistently across Token, Password, ClientID, ClientSecret and
-// ServiceAccountJSON — callers detect a missing credential via Validate, not by
-// catching an error from one specific field.
+// empty string consistently across Token, ClientID and ClientSecret — callers
+// detect a missing credential via Validate, not by catching an error from one
+// specific field.
 func (c *Config) ExpandEnvVars() {
 	if strings.HasPrefix(c.Auth.Token, "$") {
 		c.Auth.Token = expandEnvVar(c.Auth.Token)
-	}
-	if strings.HasPrefix(c.Auth.Password, "$") {
-		c.Auth.Password = expandEnvVar(c.Auth.Password)
 	}
 	if strings.HasPrefix(c.Auth.ClientID, "$") {
 		c.Auth.ClientID = expandEnvVar(c.Auth.ClientID)
 	}
 	if strings.HasPrefix(c.Auth.ClientSecret, "$") {
 		c.Auth.ClientSecret = expandEnvVar(c.Auth.ClientSecret)
-	}
-	if strings.HasPrefix(c.Auth.ServiceAccountJSON, "$") {
-		c.Auth.ServiceAccountJSON = expandEnvVar(c.Auth.ServiceAccountJSON)
 	}
 }
 
@@ -224,39 +191,4 @@ func (c *Config) Clone() *Config {
 	}
 
 	return &clone
-}
-
-// Configs represents multiple bot configurations
-type Configs struct {
-	Bots    []*Config      `json:"bots" yaml:"bots"`
-	Logging *LoggingConfig `json:"logging,omitempty" yaml:"logging,omitempty"`
-	Manager *ManagerConfig `json:"manager,omitempty" yaml:"manager,omitempty"`
-}
-
-// Validate validates all configurations
-func (cs *Configs) Validate() error {
-	for i, cfg := range cs.Bots {
-		if err := cfg.Validate(); err != nil {
-			return fmt.Errorf("bot %d: %w", i, err)
-		}
-	}
-	return nil
-}
-
-// ExpandEnvVars expands environment variables in all configurations
-func (cs *Configs) ExpandEnvVars() {
-	for _, cfg := range cs.Bots {
-		cfg.ExpandEnvVars()
-	}
-}
-
-// GetEnabledConfigs returns only enabled configurations
-func (cs *Configs) GetEnabledConfigs() []*Config {
-	var enabled []*Config
-	for _, cfg := range cs.Bots {
-		if cfg.Enabled {
-			enabled = append(enabled, cfg)
-		}
-	}
-	return enabled
 }
