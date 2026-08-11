@@ -13,7 +13,7 @@ Every entry in `migrationSteps` (`migration.go`) is tagged with a
 | Kind | Runs | Purpose | Example |
 |---|---|---|---|
 | `kindBaseline` | every boot, forever | repairs a structural invariant of the *current* config model | `normalizeLegacyConfigBaseline`, `normalizeBuiltinRuleIdentity` |
-| `kindDated` | every boot, unconditionally, idempotent via its own internal guard | a one-off data repair tied to a specific change | `migrate20260416`, `migrate20260712` |
+| `kindDated` | every boot, unconditionally, idempotent via its own internal guard | a one-off data repair tied to a specific change | `migrate20260712` |
 | `kindOnce` | exactly once, gated by a `MigrationsCompleted` marker | seeds/changes a value the user might deliberately override afterward | `defaultXcodeSkipUsageOnce` |
 
 Use `kindOnce` whenever a migration sets a default a user could reasonably
@@ -54,6 +54,17 @@ call made at fold time, not a hard timer enforced by code.
 
 `normalizeLegacyConfigBaseline` itself is the precedent: it already folds
 every pre-2026-04 repair migration into one baseline pass.
+
+**Folded so far:**
+- pre-2026-04 config repair migrations (original baseline)
+- 2026-04/05 batch, folded 2026-08-11: `migrate20260416` (multi-tenant
+  defaults) → `normalizeMultiTenantDefaults`; `migrate20260421` (profile
+  unified model `*`→`cc`) → `normalizeClaudeCodeProfileUnifiedModel`;
+  `migrate20260502` (drop smart_guide wildcard rules) →
+  `dropSmartGuideWildcardRules`; `migrate20260518` (Codex endpoint mode
+  backfill) → `normalizeCodexEndpointMode`. `migrate20260712` was left as
+  `kindDated` — too recent (shipped ~1 month prior) to assume no active
+  config predates it.
 
 ## Legacy UUID lookup tables
 

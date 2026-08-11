@@ -57,10 +57,6 @@ var migrationSteps = []migrationStep{
 	{"normalize-builtin-rule-identity", kindBaseline, "", normalizeBuiltinRuleIdentity},
 	{"agent-scenario-to-custom", kindBaseline, "", migrateAgentScenarioToCustom},
 	{"ensure-current-builtin-rules", kindBaseline, "", ensureCurrentBuiltinRules},
-	{"20260416-multi-tenant-default", kindDated, "2026-04-16", migrate20260416},
-	{"20260421-profile-unified-model", kindDated, "2026-04-21", migrate20260421},
-	{"20260502-drop-smart-guide-wildcard", kindDated, "2026-05-02", migrate20260502},
-	{"20260518-codex-endpoint-mode", kindDated, "2026-05-18", migrate20260518},
 	{"20260712-drop-unsupported-smart-routing", kindDated, "2026-07-12", migrate20260712},
 	{"20260606-xcode-skip-usage", kindOnce, "2026-06-06", defaultXcodeSkipUsageOnce},
 	{"20260610-builtin-rule-flags", kindOnce, "2026-06-10", defaultBuiltinRuleFlagsOnce},
@@ -265,9 +261,13 @@ func migrate20260712(c *Config) bool {
 	return needsSave
 }
 
-// normalizeLegacyConfigBaseline folds the pre-2026-04 config repair migrations
-// into one baseline normalizer. It keeps very old configs usable without keeping
-// every historical date migration as a permanent startup phase.
+// normalizeLegacyConfigBaseline folds config repair migrations that are old
+// enough no active config can predate them into one baseline normalizer. It
+// keeps old configs usable without keeping every historical date migration as
+// a permanent startup phase — see .design/config-migration.md for the fold
+// policy. Originally covered everything pre-2026-04; the 2026-04/05 batch
+// (multi-tenant defaults, profile unified model naming, smart_guide wildcard
+// cleanup, Codex endpoint mode) was folded in on top of that.
 func normalizeLegacyConfigBaseline(c *Config) bool {
 	needsSave := false
 
@@ -275,6 +275,18 @@ func normalizeLegacyConfigBaseline(c *Config) bool {
 		needsSave = true
 	}
 	if normalizeRuleBasics(c) {
+		needsSave = true
+	}
+	if normalizeMultiTenantDefaults(c) {
+		needsSave = true
+	}
+	if normalizeClaudeCodeProfileUnifiedModel(c) {
+		needsSave = true
+	}
+	if dropSmartGuideWildcardRules(c) {
+		needsSave = true
+	}
+	if normalizeCodexEndpointMode(c) {
 		needsSave = true
 	}
 
@@ -508,10 +520,14 @@ func ensureCurrentBuiltinRules(c *Config) bool {
 	return needsSave
 }
 
-// migrate20260416 enables multi-tenant by default for existing configurations.
-func migrate20260416(c *Config) bool {
-	// Skip migration if multi-tenant config has any values set.
-	// This means the user has explicitly configured multi-tenant settings.
+// normalizeMultiTenantDefaults enables multi-tenant by default for configs
+// written before multi-tenant existed. New installs already seed
+// MultiTenantConfig in CreateDefaultConfig; this only backfills older ones.
+// Folded from the dated migrate20260416 migration (2026-04-16).
+func normalizeMultiTenantDefaults(c *Config) bool {
+	// Skip if multi-tenant config has any values set — that means either a
+	// prior run of this normalizer already seeded it, or the user has
+	// explicitly configured multi-tenant settings.
 	if c.MultiTenantConfig.APITokenSecret != "" ||
 		c.MultiTenantConfig.APITokenAlgorithm != "" ||
 		c.MultiTenantConfig.APITokenIssuer != "" {
@@ -519,7 +535,7 @@ func migrate20260416(c *Config) bool {
 	}
 
 	// All three token fields are empty (guaranteed by the guard above), so seed
-	// the defaults and enable multi-tenant — the main purpose of the migration.
+	// the defaults and enable multi-tenant.
 	c.MultiTenantConfig.APITokenSecret = generateSecret()
 	c.MultiTenantConfig.APITokenAlgorithm = "HS256"
 	c.MultiTenantConfig.APITokenIssuer = "tingly-box"
@@ -528,11 +544,12 @@ func migrate20260416(c *Config) bool {
 	return true
 }
 
-// migrate20260421 migrates profile unified model name from "*" to "cc".
-// This ensures consistency with the new naming convention where profile
-// rules use simplified names: "cc" (unified), "default", "haiku", etc. (separate).
-// Only applies to claude-code scenario profiles.
-func migrate20260421(c *Config) bool {
+// normalizeClaudeCodeProfileUnifiedModel migrates profile unified model name
+// from "*" to "cc". This ensures consistency with the naming convention where
+// profile rules use simplified names: "cc" (unified), "default", "haiku",
+// etc. (separate). Only applies to claude-code scenario profiles.
+// Folded from the dated migrate20260421 migration (2026-04-21).
+func normalizeClaudeCodeProfileUnifiedModel(c *Config) bool {
 	needsSave := false
 
 	for i := range c.Rules {
@@ -559,10 +576,12 @@ func migrate20260421(c *Config) bool {
 	return needsSave
 }
 
-// migrate20260502 removes wildcard (*) rules for smart_guide scenario.
-// This cleans up legacy wildcard rules that are no longer needed
-// as SmartGuide now uses bot-specific rules with UUID pattern: _internal_smart_guide_{botUUID}.
-func migrate20260502(c *Config) bool {
+// dropSmartGuideWildcardRules removes wildcard (*) rules for the smart_guide
+// scenario. This cleans up legacy wildcard rules that are no longer needed
+// as SmartGuide now uses bot-specific rules with UUID pattern:
+// _internal_smart_guide_{botUUID}.
+// Folded from the dated migrate20260502 migration (2026-05-02).
+func dropSmartGuideWildcardRules(c *Config) bool {
 	needsSave := false
 
 	// Filter out smart_guide rules with wildcard RequestModel.
@@ -583,23 +602,24 @@ func migrate20260502(c *Config) bool {
 
 	if needsSave {
 		c.Rules = filteredRules
-		logrus.Info("Migration 2026-05-02 completed: removed smart_guide wildcard rules")
+		logrus.Info("Removed smart_guide wildcard rules")
 	}
 	return needsSave
 }
 
-// migrate20260518 sets OpenAIEndpointMode=responses on existing Codex OAuth
-// providers. Codex's API only exposes /responses (no /chat/completions); the
-// mode is now declared on Codex providers at OAuth instantiation, but
-// existing user configs from before this change don't carry it. Without the
-// backfill, the new resolver's default-Chat semantics would silently send
+// normalizeCodexEndpointMode sets OpenAIEndpointMode=responses on existing
+// Codex OAuth providers. Codex's API only exposes /responses (no
+// /chat/completions); the mode is declared on Codex providers at OAuth
+// instantiation, but providers created before that don't carry it. Without
+// the backfill, the resolver's default-Chat semantics would silently send
 // /chat/completions requests to Codex and fail.
 //
 // Idempotent: only flips the mode when issuer is Codex and the mode is unset.
-// Unlike the other dated migrations, this never reports dirty: providers live
-// in SQLite (db.ProviderStore) and are backfilled directly there, so there is
-// no Config JSON state for Migrate's end-of-pipeline save to persist.
-func migrate20260518(c *Config) bool {
+// Unlike the other baseline sub-steps, this never reports dirty: providers
+// live in SQLite (db.ProviderStore) and are backfilled directly there, so
+// there is no Config JSON state for the caller to persist.
+// Folded from the dated migrate20260518 migration (2026-05-18).
+func normalizeCodexEndpointMode(c *Config) bool {
 	// Providers live in SQLite (the JSON c.Providers slice is legacy backup).
 	// Backfill the DB-stored ones directly so the resolver sees the right mode.
 	if c.providerStore != nil {
