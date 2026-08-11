@@ -36,10 +36,11 @@ const UseCodexPage = lazy(() => import('./pages/scenario/UseCodexPage'));
 const UseClaudeCodePage = lazy(() => import('./pages/scenario/UseClaudeCodePage'));
 const ClaudeCodeProfilePage = lazy(() => import('./pages/scenario/ClaudeCodeProfilePage'));
 const UseClaudeDesktopPage = lazy(() => import('./pages/scenario/UseClaudeDesktopPage'));
-const UseAgentPage = lazy(() => import('./pages/scenario/UseAgentPage'));
+const UseCustomPage = lazy(() => import('./pages/scenario/UseCustomPage'));
 const UseTeamPage = lazy(() => import('./pages/scenario/UseTeamPage'));
 const AgentOverviewPage = lazy(() => import('./pages/scenario/AgentOverviewPage'));
 const UseOpenCodePage = lazy(() => import('./pages/scenario/UseOpenCodePage'));
+const UsePiPage = lazy(() => import('./pages/scenario/UsePiPage'));
 const UseXcodePage = lazy(() => import('./pages/scenario/UseXcodePage'));
 const UseVSCodePage = lazy(() => import('./pages/scenario/UseVSCodePage'));
 const UseEmbedPage = lazy(() => import('./pages/scenario/UseEmbedPage'));
@@ -225,9 +226,13 @@ function AppContent() {
                     <Route path="/agent/claude_code" element={<UseClaudeCodePage />} />
                     <Route path="/agent/claude_code/profile/:profileId" element={<ClaudeCodeProfilePage />} />
                     <Route path="/agent/claude_desktop" element={<UseClaudeDesktopPage />} />
-                    <Route path="/agent/agent" element={<UseAgentPage />} />
+                    <Route path="/agent/custom" element={<UseCustomPage />} />
+                    {/* "agent" was renamed to "custom" (formerly OpenClaw); keep the old
+                        bookmarked path working. */}
+                    <Route path="/agent/agent" element={<Navigate to="/agent/custom" replace />} />
                     <Route path="/agent/team" element={<UseTeamPage />} />
                     <Route path="/agent/opencode" element={<UseOpenCodePage />} />
+                    <Route path="/agent/pi" element={<UsePiPage />} />
                     <Route path="/agent/xcode" element={<UseXcodePage />} />
                     <Route path="/agent/vscode" element={<UseVSCodePage />} />
                     <Route path="/agent/embed" element={<UseEmbedPage />} />

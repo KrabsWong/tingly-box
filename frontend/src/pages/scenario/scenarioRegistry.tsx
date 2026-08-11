@@ -5,6 +5,7 @@
 // to read this list. AgentOverviewPage.tsx itself imports from here too.
 import { useCallback, useEffect, useState } from 'react';
 import {
+    Extension as IconExtension,
     Photo as IconPhoto,
     Users as IconUsers,
     Vector as IconVector,
@@ -15,8 +16,8 @@ import {
     ClaudeDesktop,
     Codex,
     OpenAI,
-    OpenClaw,
     OpenCode,
+    Pi,
     VSCode,
     Xcode,
 } from '@/components/BrandIcons';
@@ -62,6 +63,14 @@ export const SCENARIOS: ScenarioDescriptor[] = [
         descKey: 'scenarioOverview.descriptions.opencode',
         path: '/agent/opencode',
         icon: (size) => <OpenCode size={size} />,
+        hideable: true,
+    },
+    {
+        id: 'pi',
+        labelKey: 'layout.nav.usePi',
+        descKey: 'scenarioOverview.descriptions.pi',
+        path: '/agent/pi',
+        icon: (size) => <Pi size={size} />,
         hideable: true,
     },
     {
@@ -113,11 +122,11 @@ export const SCENARIOS: ScenarioDescriptor[] = [
         hideable: true,
     },
     {
-        id: 'agent',
-        labelKey: 'common.openClaw',
-        descKey: 'scenarioOverview.descriptions.agent',
-        path: '/agent/agent',
-        icon: (size) => <OpenClaw size={size} />,
+        id: 'custom',
+        labelKey: 'layout.nav.useCustom',
+        descKey: 'scenarioOverview.descriptions.custom',
+        path: '/agent/custom',
+        icon: (size) => <IconExtension sx={{ fontSize: size }} />,
         hideable: true,
     },
     {
@@ -133,10 +142,26 @@ export const SCENARIOS: ScenarioDescriptor[] = [
 const STORAGE_KEY = 'scenario.hiddenScenarios';
 const DEFAULTS_VERSION_KEY = 'scenario.hiddenDefaultsVersion';
 const VISIBILITY_EVENT = 'scenario-visibility-change';
-const DEFAULT_HIDDEN = ['agent', 'team'];
-// Bump this whenever DEFAULT_HIDDEN gains new entries, so existing users pick
-// up the new defaults without losing their own customisations.
-const DEFAULTS_VERSION = 2;
+// "pi" is hidden by default until its integration details are verified —
+// remove once it's ready to launch.
+const DEFAULT_HIDDEN = ['custom', 'team', 'pi'];
+// Bump this whenever DEFAULT_HIDDEN gains a genuinely new entry, so existing
+// users pick up the new default without losing their own customisations.
+const DEFAULTS_VERSION = 3;
+
+// Scenario ids renamed in place (old -> new). A user's existing hidden/shown
+// choice for the old id carries over to the new one below, instead of being
+// reset by the DEFAULT_HIDDEN merge — a rename isn't a new scenario, so it
+// must not force-hide a scenario a user had explicitly chosen to show under
+// its old id.
+//
+// Composition with DEFAULT_HIDDEN/DEFAULTS_VERSION below: this rename runs
+// first and unconditionally (every read, not just on a version bump), then
+// the version-gated merge treats the *renamed* id as already-decided and
+// only folds in defaults for ids that were never a rename target.
+const RENAMED_SCENARIO_IDS: Record<string, string> = {
+    agent: 'custom', // OpenClaw
+};
 
 const readHidden = (): string[] => {
     try {
@@ -147,15 +172,26 @@ const readHidden = (): string[] => {
             return DEFAULT_HIDDEN;
         }
         const parsed = JSON.parse(raw);
-        const stored: string[] = Array.isArray(parsed)
+        let stored: string[] = Array.isArray(parsed)
             ? parsed.filter((x): x is string => typeof x === 'string')
             : [];
 
+        // Skip the rename pass entirely once nothing in storage is on an old
+        // id — true for every read after the first post-rename one, i.e.
+        // almost always.
+        if (stored.some((id) => id in RENAMED_SCENARIO_IDS)) {
+            stored = Array.from(new Set(stored.map((id) => RENAMED_SCENARIO_IDS[id] ?? id)));
+        }
+
         // Merge any new default-hidden entries that existing users haven't
-        // seen yet (i.e. the stored defaults-version is behind the current one).
+        // seen yet (i.e. the stored defaults-version is behind the current
+        // one) — excluding renamed ids, whose real preference was just
+        // carried over above rather than freshly defaulted.
         const storedVersion = Number(localStorage.getItem(DEFAULTS_VERSION_KEY) ?? 0);
         if (storedVersion < DEFAULTS_VERSION) {
-            const merged = Array.from(new Set([...stored, ...DEFAULT_HIDDEN]));
+            const renamedTargets = new Set(Object.values(RENAMED_SCENARIO_IDS));
+            const genuinelyNewDefaults = DEFAULT_HIDDEN.filter((id) => !renamedTargets.has(id));
+            const merged = Array.from(new Set([...stored, ...genuinelyNewDefaults]));
             localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
             localStorage.setItem(DEFAULTS_VERSION_KEY, String(DEFAULTS_VERSION));
             return merged;

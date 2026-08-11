@@ -9,9 +9,9 @@ import CodexSvg from '@lobehub/icons-static-svg/icons/codex.svg?url';
 import GeminiSvg from '@lobehub/icons-static-svg/icons/gemini.svg?url';
 import GoogleSvg from '@lobehub/icons-static-svg/icons/google.svg?url';
 import KimiSvg from '@lobehub/icons-static-svg/icons/kimi.svg?url';
-import OpenClawSvg from '@lobehub/icons-static-svg/icons/openclaw.svg?url';
 import OpenAISvg from '@lobehub/icons-static-svg/icons/openai.svg?url';
 import OpenCodeSvg from '@lobehub/icons-static-svg/icons/opencode.svg?url';
+import PiSvg from '@lobehub/icons-static-svg/icons/pi.svg?url';
 import QwenSvg from '@lobehub/icons-static-svg/icons/qwen.svg?url';
 import DeepSeekSvg from '@lobehub/icons-static-svg/icons/deepseek.svg?url';
 import MinimaxSvg from '@lobehub/icons-static-svg/icons/minimax.svg?url';
@@ -120,7 +120,6 @@ export const Codex = createBrandIcon(CodexSvg, 'Codex', false, true);
 export const Gemini = createBrandIcon(GeminiSvg, 'Gemini', false, true);
 export const Google = createBrandIcon(GoogleSvg, 'Google', false, true);
 export const Kimi = createBrandIcon(KimiSvg, 'Kimi', false, true);
-export const OpenClaw = createBrandIcon(OpenClawSvg, 'OpenClaw', false, true);
 export const Qwen = createBrandIcon(QwenSvg, 'Qwen', false, true);
 export const OpenCode = createBrandIcon(OpenCodeSvg, 'OpenCode', false, true);
 export const DeepSeek = createBrandIcon(DeepSeekSvg, 'DeepSeek', false, true);
@@ -131,6 +130,7 @@ export const Mistral = createBrandIcon(MistralSvg, 'Mistral', false, true);
 export const OpenRouter = createBrandIcon(OpenRouterSvg, 'OpenRouter', false, true);
 export const Xcode = createBrandIcon(XcodeSvg, 'Xcode', true);
 export const VSCode = createBrandIcon(VSCodeSvg, 'VS Code', true);
+export const Pi = createBrandIcon(PiSvg, 'Pi', false, true);
 
 // Reuse Claude icon for Claude Desktop
 export const ClaudeDesktop = Claude;
