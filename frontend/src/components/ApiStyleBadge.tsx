@@ -1,4 +1,4 @@
-import {Box, useTheme} from '@mui/material';
+import {Box, Tooltip, useTheme} from '@mui/material';
 import {alpha, decomposeColor} from '@mui/material/styles';
 import type {SxProps, Theme} from '@mui/material';
 import { EMPTY_SX } from '@/constants/defaults';
@@ -36,7 +36,12 @@ const blend = (tint: string, tintAlpha: number, paperRgb: Rgb): string => {
 };
 
 // Helper function to render API style badge with icon and colored background
-export const ApiStyleBadge = ({apiStyle, sx = EMPTY_SX, compact = false, minimal = false}: ApiStyleBadgeProps) => {
+export const ApiStyleBadge = ({
+    apiStyle,
+    sx = EMPTY_SX,
+    compact = false,
+    minimal = false,
+}: ApiStyleBadgeProps) => {
     const theme = useTheme();
     const isOpenAI = apiStyle === 'openai';
     const isAnthropic = apiStyle === 'anthropic';
@@ -69,26 +74,28 @@ export const ApiStyleBadge = ({apiStyle, sx = EMPTY_SX, compact = false, minimal
 
     if (minimal) {
         return (
-            <Box
-                sx={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: '50%',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    fontSize: '9px',
-                    fontWeight: 700,
-                    lineHeight: 1,
-                    border: `1px solid ${p.border}`,
-                    backgroundColor,
-                    color: p.tint,
-                    ...sx,
-                }}
-            >
-                {p.letter}
-            </Box>
+            <Tooltip title={`${p.label} Style`} arrow placement="top">
+                <Box
+                    sx={{
+                        width: 16,
+                        height: 16,
+                        borderRadius: '50%',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        fontSize: '9px',
+                        fontWeight: 700,
+                        lineHeight: 1,
+                        border: `1px solid ${p.border}`,
+                        backgroundColor,
+                        color: p.tint,
+                        ...sx,
+                    }}
+                >
+                    {p.letter}
+                </Box>
+            </Tooltip>
         );
     }
 
@@ -119,7 +126,7 @@ export const ApiStyleBadge = ({apiStyle, sx = EMPTY_SX, compact = false, minimal
                 ...sx,
             }}
         >
-            {compact ? (<span>{p.label}</span>) : (<span>{p.label} Style</span>)}
+            <span>{p.label}{compact ? '' : ' Style'}</span>
         </Box>
     );
 };
