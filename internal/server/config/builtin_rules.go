@@ -70,9 +70,12 @@ const (
 )
 
 // legacyCCRuleUUIDs maps the legacy Claude Code built-in UUIDs to their modern
-// counterparts. Used by migrate20260611 to rename live configs and by
+// counterparts. Used by normalizeBuiltinRuleIdentity to rename live configs and by
 // defaultRuleByUUID to keep older migrations (written against the legacy
 // names) able to pull templates from the modern DefaultRules.
+//
+// Retirement of individual entries (or the table as a whole) follows the
+// policy in .design/config-migration.md — do not delete entries ad hoc.
 var legacyCCRuleUUIDs = map[string]string{
 	RuleUUIDBuiltinCC:         RuleUUIDCC,
 	RuleUUIDBuiltinCCDefault:  RuleUUIDCCDefault,
@@ -84,7 +87,10 @@ var legacyCCRuleUUIDs = map[string]string{
 
 // legacySimpleRuleUUIDs maps the remaining legacy built-in UUIDs (all
 // non-CC single-rule scenarios) to their modern "builtin:<scenario>:<model>"
-// counterparts. Used by migrate20260612 and defaultRuleByUUID.
+// counterparts. Used by normalizeBuiltinRuleIdentity and defaultRuleByUUID.
+//
+// Retirement of individual entries (or the table as a whole) follows the
+// policy in .design/config-migration.md — do not delete entries ad hoc.
 //
 // RuleUUIDBuiltinAgent* and RuleUUIDAgent* both map straight to the "custom"
 // UUIDs (not to each other) so a config on either pre-rename form converges
