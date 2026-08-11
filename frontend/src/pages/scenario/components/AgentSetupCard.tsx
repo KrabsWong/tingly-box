@@ -252,6 +252,7 @@ const AgentSetupCard: React.FC<AgentSetupCardProps> = ({
     return (
         <UnifiedCard
             size="header"
+            titleMarginBottom={collapsed ? 0 : 2}
             title={
                 <Stack
                     direction="row"

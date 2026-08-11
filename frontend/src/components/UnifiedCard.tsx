@@ -21,6 +21,8 @@ export interface UnifiedCardGridSpan {
 interface UnifiedCardProps {
   title?: string | ReactNode;
   titleHeadingLevel?: 1 | 2 | 3 | 4 | 5 | 6;
+  /** Space between the header and body; defaults to the standard 2-unit gap. */
+  titleMarginBottom?: number | string;
   subtitle?: string;
   children: ReactNode;
   size?: 'small' | 'medium' | 'large' | 'full' | 'header' | 'footer';
@@ -133,6 +135,7 @@ const cardVariants = {
 export const UnifiedCard = forwardRef<HTMLDivElement, UnifiedCardProps>(({
   title,
   titleHeadingLevel = 2,
+  titleMarginBottom = 2,
   subtitle,
   children,
   size = 'medium',
@@ -181,7 +184,7 @@ export const UnifiedCard = forwardRef<HTMLDivElement, UnifiedCardProps>(({
         }}
       >
         {title && (
-          <Box sx={{ mb: 2, flexShrink: 0 }}>
+          <Box sx={{ mb: titleMarginBottom, flexShrink: 0 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: subtitle ? 1 : 0 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
                 {typeof title === 'string' || typeof title === 'number' ? (

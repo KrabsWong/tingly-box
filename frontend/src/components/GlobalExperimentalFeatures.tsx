@@ -1,12 +1,20 @@
 import {useFeatureFlags} from '@/contexts/FeatureFlagsContext';
+import type {ExperimentalFeature} from '@/components/ExperimentalFeatureGate';
 import { Psychology as IconBrain, Shield as IconShield, SettingsApplications } from '@/components/icons';
 import {Alert, Box, Chip, Typography,} from '@mui/material';
+import {alpha} from '@mui/material/styles';
 import React, {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
+import {useNavigate} from 'react-router-dom';
 import {api} from '../services/api';
 import {isFullEdition} from "@/utils/edition.ts";
 
 const SKILL_FEATURES = [
+    {
+        key: 'skill_user',
+        labelKey: 'system.experimentalFeatures.userPrompts',
+        descriptionKey: 'system.experimentalFeatures.enableUserPrompts',
+    },
     {
         key: 'skill_ide',
         labelKey: 'system.experimentalFeatures.skills',
@@ -14,12 +22,20 @@ const SKILL_FEATURES = [
     },
 ] as const;
 
-const GlobalExperimentalFeatures: React.FC = () => {
+interface GlobalExperimentalFeaturesProps {
+    requestedFeature?: ExperimentalFeature;
+    returnTo?: string;
+}
+
+const GlobalExperimentalFeatures: React.FC<GlobalExperimentalFeaturesProps> = ({ requestedFeature, returnTo }) => {
     const {t} = useTranslation();
+    const navigate = useNavigate();
     const [features, setFeatures] = useState<Record<string, boolean>>({});
     const [guardrailsEnabled, setGuardrailsEnabled] = useState(false);
     const [mcpEnabled, setMCPEnabled] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [updatingFeature, setUpdatingFeature] = useState<ExperimentalFeature>();
+    const [actionError, setActionError] = useState(false);
     const {refresh} = useFeatureFlags();
 
     const loadFeatures = async () => {
@@ -50,58 +66,48 @@ const GlobalExperimentalFeatures: React.FC = () => {
         }
     };
 
-    const toggleFeature = (featureKey: string) => {
+    const finishUpdate = async (
+        featureKey: ExperimentalFeature,
+        newValue: boolean,
+        updateLocalState: () => void,
+    ) => {
+        setActionError(false);
+        setUpdatingFeature(featureKey);
+        try {
+            const result = await api.setScenarioFlag('_global', featureKey, newValue);
+            if (!result.success) throw new Error('Feature update was rejected');
+
+            updateLocalState();
+            await refresh();
+            if (newValue && requestedFeature === featureKey && returnTo) {
+                navigate(returnTo, {replace: true});
+            }
+        } catch (error) {
+            console.error(`Failed to set ${featureKey}:`, error);
+            setActionError(true);
+            loadFeatures();
+        } finally {
+            setUpdatingFeature(undefined);
+        }
+    };
+
+    const toggleFeature = (featureKey: 'skill_user' | 'skill_ide') => {
         const newValue = !features[featureKey];
-        api.setScenarioFlag('_global', featureKey, newValue)
-            .then((result) => {
-                if (result.success) {
-                    setFeatures(prev => ({...prev, [featureKey]: newValue}));
-                    refresh()
-                } else {
-                    console.error('Failed to set global feature:', result);
-                    loadFeatures();
-                }
-            })
-            .catch((err) => {
-                console.error('Failed to set global feature:', err);
-                loadFeatures();
-            });
+        return finishUpdate(
+            featureKey,
+            newValue,
+            () => setFeatures(prev => ({...prev, [featureKey]: newValue})),
+        );
     };
 
     const toggleGuardrails = () => {
         const newValue = !guardrailsEnabled;
-        api.setScenarioFlag('_global', 'guardrails', newValue)
-            .then((result) => {
-                if (result.success) {
-                    setGuardrailsEnabled(newValue);
-                    refresh();
-                } else {
-                    console.error('Failed to set Guardrails:', result);
-                    loadFeatures();
-                }
-            })
-            .catch((err) => {
-                console.error('Failed to set Guardrails:', err);
-                loadFeatures();
-            });
+        return finishUpdate('guardrails', newValue, () => setGuardrailsEnabled(newValue));
     };
 
     const toggleMCP = () => {
         const newValue = !mcpEnabled;
-        api.setScenarioFlag('_global', 'mcp', newValue)
-            .then((result) => {
-                if (result.success) {
-                    setMCPEnabled(newValue);
-                    refresh();
-                } else {
-                    console.error('Failed to set MCP:', result);
-                    loadFeatures();
-                }
-            })
-            .catch((err) => {
-                console.error('Failed to set MCP:', err);
-                loadFeatures();
-            });
+        return finishUpdate('mcp', newValue, () => setMCPEnabled(newValue));
     };
 
     useEffect(() => {
@@ -127,13 +133,30 @@ const GlobalExperimentalFeatures: React.FC = () => {
     // On/Off chip on the right. The description used to live only in a hover
     // tooltip (and the chip repeated the feature name).
     const featureRow = (
+        featureKey: ExperimentalFeature,
         icon: React.ReactNode,
         name: string,
         description: string,
         enabled: boolean,
         onToggle: () => void,
     ) => (
-        <Box sx={{ display: 'flex', alignItems: 'center', py: 2, gap: 3 }}>
+        <Box
+            id={`experimental-feature-${featureKey}`}
+            sx={{
+                display: 'flex',
+                alignItems: 'center',
+                py: 2,
+                px: 1.5,
+                mx: -1.5,
+                gap: 3,
+                borderRadius: 1,
+                borderLeft: '3px solid',
+                borderLeftColor: requestedFeature === featureKey ? 'primary.main' : 'transparent',
+                bgcolor: requestedFeature === featureKey
+                    ? theme => alpha(theme.palette.primary.main, 0.06)
+                    : 'transparent',
+            }}
+        >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 180 }}>
                 {icon}
                 <Typography variant="subtitle2">{name}</Typography>
@@ -144,18 +167,49 @@ const GlobalExperimentalFeatures: React.FC = () => {
             <Chip
                 label={enabled ? t('common.on') : t('common.off')}
                 onClick={onToggle}
+                disabled={updatingFeature !== undefined}
                 size="small"
                 sx={{ ...chipStyle(enabled), minWidth: 52 }}
             />
         </Box>
     );
 
+    const requestedFeatureName = requestedFeature
+        ? {
+            skill_user: t('system.experimentalFeatures.userPrompts'),
+            skill_ide: t('system.experimentalFeatures.skills'),
+            guardrails: t('system.experimentalFeatures.guardrails'),
+            mcp: `${t('system.experimentalFeatures.mcp')} Tools`,
+        }[requestedFeature]
+        : undefined;
+
     return (
         <Box sx={{display: 'flex', flexDirection: 'column', gap: 0}}>
+            {requestedFeature && (
+                <Alert
+                    severity="info"
+                    sx={{
+                        mb: 1.5,
+                        bgcolor: theme => alpha(theme.palette.primary.main, 0.06),
+                        color: 'text.primary',
+                        '& .MuiAlert-icon': {color: 'primary.main'},
+                    }}
+                >
+                    {t('system.experimentalFeatures.requiredMessage', {feature: requestedFeatureName})}
+                </Alert>
+            )}
+
+            {actionError && (
+                <Alert severity="error" sx={{mb: 1.5}}>
+                    {t('system.experimentalFeatures.enableFailed')}
+                </Alert>
+            )}
+
             {/* Skill Features - Only in full edition */}
             {isFullEdition && SKILL_FEATURES.map((feature) =>
                 <React.Fragment key={feature.key}>
                     {featureRow(
+                        feature.key,
                         <IconBrain sx={{ fontSize: 16, color: 'text.secondary' }} />,
                         t(feature.labelKey),
                         t(feature.descriptionKey),
@@ -167,6 +221,7 @@ const GlobalExperimentalFeatures: React.FC = () => {
 
             {/* Guardrails Section */}
             {featureRow(
+                'guardrails',
                 <IconShield sx={{ fontSize: 16, color: 'text.secondary' }} />,
                 t('system.experimentalFeatures.guardrails'),
                 t('system.experimentalFeatures.enableGuardrails'),
@@ -184,6 +239,7 @@ const GlobalExperimentalFeatures: React.FC = () => {
 
             {/* MCP Section */}
             {featureRow(
+                'mcp',
                 <SettingsApplications sx={{ fontSize: '1rem', color: 'text.secondary' }} />,
                 `${t('system.experimentalFeatures.mcp')} Tools`,
                 t('system.experimentalFeatures.enableMCP'),

@@ -20,7 +20,6 @@ import {
 import {
     Box,
     Button,
-    Chip,
     CircularProgress,
     Divider,
     IconButton,
@@ -232,20 +231,20 @@ const ApiKeyTable = ({
                 overflowX: "auto",
             }}
         >
-            <Table sx={{tableLayout: "fixed", minWidth: 1120}}>
+            <Table sx={{tableLayout: "fixed", width: '100%', minWidth: {xs: 720, md: 840, xl: 1120}}}>
                 <TableHead>
                     <TableRow sx={{bgcolor: "action.hover"}}>
-                        <TableCell sx={{fontWeight: 600, width: 90, py: 1.25}}>Status</TableCell>
-                        <TableCell sx={{fontWeight: 600, width: 140, py: 1.25}}>Name</TableCell>
-                        <TableCell sx={{fontWeight: 600, width: 140, py: 1.25}}>
+                        <TableCell sx={{fontWeight: 600, width: {xs: 72, xl: 90}, py: 1.25}}>Status</TableCell>
+                        <TableCell sx={{fontWeight: 600, width: {xs: 130, xl: 140}, py: 1.25}}>Name</TableCell>
+                        <TableCell align="center" sx={{fontWeight: 600, width: 88, px: 1, py: 1.25, whiteSpace: 'nowrap'}}>
                             API Style
                         </TableCell>
-                        <TableCell sx={{fontWeight: 600, width: 200, py: 1.25}}>
+                        <TableCell sx={{fontWeight: 600, width: {xs: 180, xl: 200}, py: 1.25}}>
                             API Base URL
                         </TableCell>
-                        <TableCell sx={{fontWeight: 600, width: 140, py: 1.25}}>API Key</TableCell>
-                        <TableCell sx={{fontWeight: 600, width: 60, py: 1.25}}>Proxy</TableCell>
-                        <TableCell sx={{fontWeight: 600, width: 250, py: 1.25}}>Actions</TableCell>
+                        <TableCell sx={{fontWeight: 600, width: {xs: 125, xl: 140}, py: 1.25}}>API Key</TableCell>
+                        <TableCell sx={{fontWeight: 600, width: 60, py: 1.25, display: {xs: 'none', xl: 'table-cell'}}}>Proxy</TableCell>
+                        <TableCell sx={{fontWeight: 600, width: {xs: 205, xl: 250}, py: 1.25}}>Actions</TableCell>
                     </TableRow>
                 </TableHead>
                 <TableBody>
@@ -271,18 +270,24 @@ const ApiKeyTable = ({
                                             size="small"
                                             color="success"
                                         />
-                                        <Chip
-                                            label={provider.enabled ? "On" : "Off"}
-                                            size="small"
-                                            color={provider.enabled ? "success" : "default"}
-                                            variant={provider.enabled ? "filled" : "outlined"}
-                                            sx={{height: 22, minWidth: 40}}
-                                        />
                                     </Stack>
                                 </TableCell>
                                 {/* Name */}
                                 <TableCell>
-                                    <Tooltip title={provider.name} arrow placement="top">
+                                    <Tooltip
+                                        arrow
+                                        placement="top"
+                                        title={(
+                                            <Box>
+                                                <Typography variant="caption" sx={{display: 'block', color: 'inherit', fontWeight: 600}}>
+                                                    {provider.name}
+                                                </Typography>
+                                                <Typography variant="caption" sx={{display: 'block', color: 'inherit', fontFamily: 'monospace', opacity: 0.8}}>
+                                                    UUID: {provider.uuid}
+                                                </Typography>
+                                            </Box>
+                                        )}
+                                    >
                                         <Typography
                                             variant="body2"
                                             sx={{
@@ -298,30 +303,29 @@ const ApiKeyTable = ({
                                     </Tooltip>
                                 </TableCell>
                                 {/* API Style */}
-                                <TableCell>
-                                    {provider.api_base_openai && provider.api_base_anthropic ? (
-                                        <Stack
-                                            direction="column"
-                                            spacing={0.5}
-                                            sx={{
-                                                alignItems: "flex-start"
-                                            }}
-                                        >
+                                <TableCell align="center" sx={{px: 1}}>
+                                    <Box sx={{display: 'flex', justifyContent: 'center'}}>
+                                        {provider.api_base_openai && provider.api_base_anthropic ? (
+                                            <Stack direction="row" spacing={0.5} sx={{alignItems: "center"}}>
+                                                <ApiStyleBadge
+                                                    apiStyle="openai"
+                                                    minimal
+                                                    minimalSize="medium"
+                                                />
+                                                <ApiStyleBadge
+                                                    apiStyle="anthropic"
+                                                    minimal
+                                                    minimalSize="medium"
+                                                />
+                                            </Stack>
+                                        ) : (
                                             <ApiStyleBadge
-                                                apiStyle="openai"
-                                                sx={{minWidth: "110px", justifyContent: "center"}}
+                                                minimal
+                                                minimalSize="medium"
+                                                apiStyle={provider.api_style}
                                             />
-                                            <ApiStyleBadge
-                                                apiStyle="anthropic"
-                                                sx={{minWidth: "110px", justifyContent: "center"}}
-                                            />
-                                        </Stack>
-                                    ) : (
-                                        <ApiStyleBadge
-                                            sx={{minWidth: "110px"}}
-                                            apiStyle={provider.api_style}
-                                        />
-                                    )}
+                                        )}
+                                    </Box>
                                 </TableCell>
                                 {/* API Base URL */}
                                 <TableCell>
@@ -367,7 +371,7 @@ const ApiKeyTable = ({
                                     </Stack>
                                 </TableCell>
                                 {/* Proxy */}
-                                <TableCell align="center">
+                                <TableCell align="center" sx={{display: {xs: 'none', xl: 'table-cell'}}}>
                                     {provider.proxy_url ? (
                                         <Tooltip title={provider.proxy_url} arrow>
                                             <Route
@@ -425,12 +429,12 @@ const ApiKeyTable = ({
                                                 }
                                                 onClick={() => onQuotaRefresh(provider.uuid)}
                                                 disabled={refreshingQuotas?.has(provider.uuid)}
-                                                color={
-                                                    providerQuotas?.[provider.uuid]
-                                                        ? "primary"
-                                                        : "inherit"
-                                                }
-                                                sx={{minWidth: "auto", px: 1}}
+                                                color="primary"
+                                                sx={{
+                                                    minWidth: "auto",
+                                                    px: {xs: 0.75, xl: 1},
+                                                    '& .MuiButton-startIcon': {display: {xs: 'none', xl: 'inherit'}},
+                                                }}
                                             >
                                                 Quota
                                             </Button>
@@ -441,8 +445,12 @@ const ApiKeyTable = ({
                                             size="small"
                                             startIcon={<ListAlt/>}
                                             onClick={() => handleModelListClick(provider.uuid)}
-                                            disabled={!provider.enabled}
-                                            sx={{fontSize: "0.75rem", minWidth: "auto", px: 1}}
+                                            sx={{
+                                                fontSize: "0.75rem",
+                                                minWidth: "auto",
+                                                px: {xs: 0.75, xl: 1},
+                                                '& .MuiButton-startIcon': {display: {xs: 'none', xl: 'inherit'}},
+                                            }}
                                         >
                                             Models
                                         </Button>

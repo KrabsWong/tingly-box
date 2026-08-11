@@ -37,7 +37,7 @@ const VirtualModelsTable = ({ providers, onToggle }: VirtualModelsTableProps) =>
                 <TableHead>
                     <TableRow>
                         <TableCell sx={{ width: '18%' }}>Name</TableCell>
-                        <TableCell sx={{ width: '10%' }}>API Style</TableCell>
+                        <TableCell align="center" sx={{ width: 88, px: 1, whiteSpace: 'nowrap' }}>API Style</TableCell>
                         <TableCell>Models</TableCell>
                         <TableCell sx={{ width: '12%' }} align="center">Enabled</TableCell>
                     </TableRow>
@@ -64,8 +64,10 @@ const VirtualModelsTable = ({ providers, onToggle }: VirtualModelsTableProps) =>
                                         />
                                     </Stack>
                                 </TableCell>
-                                <TableCell>
-                                    <ApiStyleBadge apiStyle={p.api_style as any} compact />
+                                <TableCell align="center" sx={{ px: 1 }}>
+                                    <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+                                        <ApiStyleBadge apiStyle={p.api_style as any} minimal minimalSize="medium" />
+                                    </Box>
                                 </TableCell>
                                 <TableCell>
                                     {models.length === 0 ? (

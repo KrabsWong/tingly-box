@@ -7,6 +7,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
+import ExperimentalFeatureGate from './components/ExperimentalFeatureGate';
 import { AuthProvider } from './contexts/AuthContext';
 import { FeatureFlagsProvider } from './contexts/FeatureFlagsContext';
 import { HealthProvider, useHealth } from './contexts/HealthContext';
@@ -60,9 +61,6 @@ const UserUsagePage = lazy(() => import('./pages/UserUsagePage'));
 const ModelTestPage = lazy(() => import('./pages/ModelTestPage'));
 const UserPage = lazy(() => import('./pages/prompt/UserPage'));
 const SkillPage = lazy(() => import('./pages/prompt/SkillPage'));
-const CommandPage = lazy(() => import('./pages/prompt/CommandPage'));
-const RemoteCoderPage = lazy(() => import('./pages/remote-coder/RemoteCoderPage'));
-const RemoteCoderSessionsPage = lazy(() => import('./pages/remote-coder/RemoteCoderSessionsPage'));
 const TelegramPage = lazy(() => import('./pages/bots/TelegramPage'));
 const FeishuPage = lazy(() => import('./pages/bots/FeishuPage'));
 const LarkPage = lazy(() => import('./pages/bots/LarkPage'));
@@ -185,6 +183,13 @@ const LegacyBotSectionRedirect = () => {
     return <Navigate to={to} replace />;
 };
 
+// The original Remote Coder surface has been replaced by Remote Control.
+// Keep bookmarks useful without exposing the retired pages and their dead API calls.
+const LegacyRemoteCoderRedirect = () => {
+    const location = useLocation();
+    return <Navigate to={`/remote-agent${location.search}`} replace />;
+};
+
 function AppContent() {
     const navigate = useNavigate();
 
@@ -258,13 +263,12 @@ function AppContent() {
                     <Route path="/overview/:timeRange" element={<Navigate to="/dashboard/7d" replace />} />
                     <Route path="/model-test/:providerUuid" element={<ModelTestPage />} />
                     {/* Prompt routes */}
-                    <Route path="/prompt/user" element={<UserPage />} />
-                    <Route path="/prompt/skill" element={<SkillPage />} />
-                    <Route path="/prompt/command" element={<CommandPage />} />
-                    {/* Remote Control routes */}
-                    <Route path="/remote-coder" element={<Navigate to="/remote-coder/chat" replace />} />
-                    <Route path="/remote-coder/chat" element={<RemoteCoderPage />} />
-                    <Route path="/remote-coder/sessions" element={<RemoteCoderSessionsPage />} />
+                    <Route path="/prompt/user" element={<ExperimentalFeatureGate feature="skill_user"><UserPage /></ExperimentalFeatureGate>} />
+                    <Route path="/prompt/skill" element={<ExperimentalFeatureGate feature="skill_ide"><SkillPage /></ExperimentalFeatureGate>} />
+                    <Route path="/prompt/command" element={<Navigate to="/prompt/skill" replace />} />
+                    {/* Retired Remote Coder bookmarks now enter Remote Control. */}
+                    <Route path="/remote-coder" element={<LegacyRemoteCoderRedirect />} />
+                    <Route path="/remote-coder/*" element={<LegacyRemoteCoderRedirect />} />
                     {/* Bots — Overview is the front door: every connected bot, across every
                         platform, one list. The old per-platform pages stay live (not
                         removed) as deep-link targets — /bots/:platform?add=1 links and any
@@ -292,17 +296,17 @@ function AppContent() {
                     <Route path="/remote-control" element={<Navigate to="/remote-agent" replace />} />
                     <Route path="/remote-control/*" element={<LegacyBotSectionRedirect />} />
                     {/* Guardrails */}
-                    <Route path="/guardrails" element={<GuardrailsPage />} />
-                    <Route path="/guardrails/groups" element={<GuardrailsGroupsPage />} />
-                    <Route path="/guardrails/rules" element={<GuardrailsRulesPage />} />
-                    <Route path="/guardrails/credentials" element={<GuardrailsCredentialsPage />} />
-                    <Route path="/guardrails/history" element={<GuardrailsHistoryPage />} />
+                    <Route path="/guardrails" element={<ExperimentalFeatureGate feature="guardrails"><GuardrailsPage /></ExperimentalFeatureGate>} />
+                    <Route path="/guardrails/groups" element={<ExperimentalFeatureGate feature="guardrails"><GuardrailsGroupsPage /></ExperimentalFeatureGate>} />
+                    <Route path="/guardrails/rules" element={<ExperimentalFeatureGate feature="guardrails"><GuardrailsRulesPage /></ExperimentalFeatureGate>} />
+                    <Route path="/guardrails/credentials" element={<ExperimentalFeatureGate feature="guardrails"><GuardrailsCredentialsPage /></ExperimentalFeatureGate>} />
+                    <Route path="/guardrails/history" element={<ExperimentalFeatureGate feature="guardrails"><GuardrailsHistoryPage /></ExperimentalFeatureGate>} />
                     {/* MCP Settings */}
-                    <Route path="/mcp/sources" element={<MCPRegisteredServers />} />
-                    <Route path="/mcp/local-mode" element={<MCPLocalMode />} />
-                    <Route path="/mcp" element={<Navigate to="/mcp/sources" replace />} />
+                    <Route path="/mcp/sources" element={<ExperimentalFeatureGate feature="mcp"><MCPRegisteredServers /></ExperimentalFeatureGate>} />
+                    <Route path="/mcp/local-mode" element={<ExperimentalFeatureGate feature="mcp"><MCPLocalMode /></ExperimentalFeatureGate>} />
+                    <Route path="/mcp" element={<ExperimentalFeatureGate feature="mcp"><Navigate to="/mcp/sources" replace /></ExperimentalFeatureGate>} />
                     {/* Tools */}
-                    <Route path="/tools/servertool" element={<ServerToolPage />} />
+                    <Route path="/tools/servertool" element={<ExperimentalFeatureGate feature="mcp"><ServerToolPage /></ExperimentalFeatureGate>} />
                     {/* Catch-all redirect for unknown routes (also covers legacy /zen/* links) */}
                     <Route path="*" element={<Navigate to="/agent" replace />} />
                 </Route>

@@ -2,6 +2,7 @@ import {
     Alert,
     Box,
     Button,
+    ButtonBase,
     CircularProgress,
     Collapse,
     Dialog,
@@ -12,7 +13,6 @@ import {
     FormControl,
     IconButton,
     InputAdornment,
-    Menu,
     MenuItem,
     Select,
     Stack,
@@ -24,7 +24,7 @@ import {
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import UnifiedCard from '@/components/UnifiedCard';
-import { Add, Close, InfoOutlined, RestartAlt } from '@/components/icons';
+import { Add, Close, InfoOutlined, RestartAlt, Search } from '@/components/icons';
 import { api } from '@/services/api';
 import {
     CLAUDE_CODE_DEFAULT_MODE_OPTIONS,
@@ -32,7 +32,6 @@ import {
     CLAUDE_CODE_FIELDS_TEXT,
     CLAUDE_CODE_FIELD_STRUCT,
     CLAUDE_CONFIG_KEY_SX,
-    CLAUDE_CONFIG_ROW_COLUMNS,
     type ClaudeCodeDefaultMode,
     type ClaudeCodePrefs,
     type FieldStruct,
@@ -59,14 +58,19 @@ const TEXT = {
         inherited: '当前完全继承主配置和模型路由',
         pendingInheritance: '覆盖已移除；保存 Profile 后恢复继承',
         hint: '未列出的参数继续继承；启动时自动生成运行配置。',
-        add: '添加覆盖',
-        allAdded: '所有支持的参数都已添加',
+        add: '添加',
+        closeAdd: '关闭',
+        search: '搜索可覆盖的运行参数',
+        noSettings: '没有可添加的参数',
         common: '常用',
-        more: '更多参数',
+        runtime: '运行参数',
+        limits: '限制与工具',
+        behavior: '行为与隐私',
+        network: '网络',
         permissionMode: '默认权限模式',
         permissionPurpose: '这个 Profile 启动 Claude Code 时使用的权限模式',
         remove: '移除覆盖并恢复继承',
-        save: '保存 Profile',
+        save: '保存',
         saved: 'Profile 覆盖已保存',
         restoreAll: '全部恢复继承',
         restoreTitle: '清除全部 Profile 覆盖？',
@@ -82,14 +86,19 @@ const TEXT = {
         inherited: 'Fully inherits the main configuration and model routing',
         pendingInheritance: 'Overrides removed; save the profile to restore inheritance',
         hint: 'Unlisted settings keep inheriting; runtime settings are generated automatically at launch.',
-        add: 'Add override',
-        allAdded: 'All supported settings are already added',
+        add: 'Add',
+        closeAdd: 'Close',
+        search: 'Search runtime settings',
+        noSettings: 'No settings available',
         common: 'Common',
-        more: 'More settings',
+        runtime: 'Runtime',
+        limits: 'Limits & tools',
+        behavior: 'Behavior & privacy',
+        network: 'Network',
         permissionMode: 'Default permission mode',
         permissionPurpose: 'Permission mode used when this profile starts Claude Code',
         remove: 'Remove override and restore inheritance',
-        save: 'Save Profile',
+        save: 'Save',
         saved: 'Profile overrides saved',
         restoreAll: 'Restore all inheritance',
         restoreTitle: 'Clear all profile overrides?',
@@ -103,9 +112,10 @@ const TEXT = {
 } as const;
 
 const COMMON_KEYS: OverrideKey[] = ['CLAUDE_CODE_MAX_OUTPUT_TOKENS', 'defaultMode'];
+const PROFILE_OVERRIDE_FIELDS = CLAUDE_CODE_FIELD_STRUCT.filter(field => field.kind !== 'model');
 const FIELD_ORDER: OverrideKey[] = [
     ...COMMON_KEYS,
-    ...CLAUDE_CODE_FIELD_STRUCT
+    ...PROFILE_OVERRIDE_FIELDS
         .map(field => field.envName)
         .filter(key => !COMMON_KEYS.includes(key)),
 ];
@@ -125,7 +135,7 @@ const deriveOverrideKeys = (
     effectiveMode: ClaudeCodeDefaultMode,
 ): Set<OverrideKey> => {
     const keys = new Set<OverrideKey>();
-    for (const field of CLAUDE_CODE_FIELD_STRUCT) {
+    for (const field of PROFILE_OVERRIDE_FIELDS) {
         if ((basePrefs[field.envName] ?? '') !== (effectivePrefs[field.envName] ?? '')) {
             keys.add(field.envName);
         }
@@ -157,7 +167,8 @@ const ClaudeCodeProfileOverrides: React.FC<ClaudeCodeProfileOverridesProps> = ({
     const [savingAction, setSavingAction] = React.useState<'save' | 'restore' | null>(null);
     const [loadError, setLoadError] = React.useState(false);
     const [message, setMessage] = React.useState<{ severity: 'success' | 'error'; text: string } | null>(null);
-    const [addAnchor, setAddAnchor] = React.useState<HTMLElement | null>(null);
+    const [addOpen, setAddOpen] = React.useState(false);
+    const [addQuery, setAddQuery] = React.useState('');
     const [restoreOpen, setRestoreOpen] = React.useState(false);
 
     const applyResponse = React.useCallback((result: any): boolean => {
@@ -213,7 +224,8 @@ const ClaudeCodeProfileOverrides: React.FC<ClaudeCodeProfileOverridesProps> = ({
 
     const addOverride = (key: OverrideKey) => {
         setSelectedKeys(current => new Set(current).add(key));
-        setAddAnchor(null);
+        setAddOpen(false);
+        setAddQuery('');
         setMessage(null);
     };
 
@@ -339,12 +351,28 @@ const ClaudeCodeProfileOverrides: React.FC<ClaudeCodeProfileOverridesProps> = ({
 
     const fieldLabel = (key: OverrideKey) => key === 'defaultMode' ? text.permissionMode : fieldText[key].label;
     const fieldPurpose = (key: OverrideKey) => key === 'defaultMode' ? text.permissionPurpose : fieldText[key].purpose;
+    const fieldGroup = (key: OverrideKey) => {
+        if (COMMON_KEYS.includes(key)) return text.common;
+        const group = key === 'defaultMode' ? 'behavior' : FIELD_BY_KEY.get(key)?.group;
+        if (group === 'limits') return text.limits;
+        if (group === 'switches') return text.behavior;
+        if (group === 'network') return text.network;
+        return text.runtime;
+    };
+    const availableKeys = [...availableCommon, ...availableMore];
+    const normalizedAddQuery = addQuery.trim().toLocaleLowerCase();
+    const filteredAvailableKeys = normalizedAddQuery
+        ? availableKeys.filter(key => `${fieldLabel(key)} ${fieldPurpose(key)} ${key}`.toLocaleLowerCase().includes(normalizedAddQuery))
+        : availableKeys;
+    const availableGroups = [...new Set(filteredAvailableKeys.map(fieldGroup))]
+        .map(group => ({ group, keys: filteredAvailableKeys.filter(key => fieldGroup(key) === group) }));
 
     return (
         <UnifiedCard
             size="full"
             title={text.title}
             subtitle={text.hint}
+            titleMarginBottom={loading || orderedSelectedKeys.length > 0 ? 2 : 0.5}
             sx={{
                 '& > .MuiCardContent-root': {
                     p: 2.5,
@@ -372,11 +400,14 @@ const ClaudeCodeProfileOverrides: React.FC<ClaudeCodeProfileOverridesProps> = ({
                     <Button
                         size="small"
                         variant="outlined"
-                        startIcon={<Add fontSize="small" />}
-                        onClick={event => setAddAnchor(event.currentTarget)}
-                        disabled={loading || saving || loadError || (availableCommon.length === 0 && availableMore.length === 0)}
+                        startIcon={addOpen ? <Close fontSize="small" /> : <Add fontSize="small" />}
+                        onClick={() => {
+                            setAddOpen(current => !current);
+                            setAddQuery('');
+                        }}
+                        disabled={loading || saving || loadError || availableKeys.length === 0}
                     >
-                        {text.add}
+                        {addOpen ? text.closeAdd : text.add}
                     </Button>
                     {isDirty && (
                         <Button size="small" variant="contained" onClick={handleSave} disabled={saving}>
@@ -386,43 +417,10 @@ const ClaudeCodeProfileOverrides: React.FC<ClaudeCodeProfileOverridesProps> = ({
                 </Box>
             )}
         >
-
-            <Menu
-                anchorEl={addAnchor}
-                open={Boolean(addAnchor)}
-                onClose={() => setAddAnchor(null)}
-                slotProps={{ paper: { sx: { width: 390, maxHeight: 440 } } }}
-            >
-                {availableCommon.length > 0 && (
-                    <Typography variant="overline" color="text.secondary" sx={{ display: 'block', px: 2, pt: 0.5 }}>{text.common}</Typography>
-                )}
-                {availableCommon.map(key => (
-                    <MenuItem key={key} onClick={() => addOverride(key)}>
-                        <Box sx={{ minWidth: 0 }}>
-                            <Typography variant="body2" sx={{ fontWeight: 500 }}>{fieldLabel(key)}</Typography>
-                            <Typography variant="caption" color="text.secondary" noWrap>{fieldPurpose(key)}</Typography>
-                        </Box>
-                    </MenuItem>
-                ))}
-                {availableCommon.length > 0 && availableMore.length > 0 && <Divider />}
-                {availableMore.length > 0 && (
-                    <Typography variant="overline" color="text.secondary" sx={{ display: 'block', px: 2, pt: 0.5 }}>{text.more}</Typography>
-                )}
-                {availableMore.map(key => (
-                    <MenuItem key={key} onClick={() => addOverride(key)}>
-                        <Box sx={{ minWidth: 0 }}>
-                            <Typography variant="body2" sx={{ fontWeight: 500 }}>{fieldLabel(key)}</Typography>
-                            <Typography variant="caption" color="text.secondary" noWrap>{fieldPurpose(key)}</Typography>
-                        </Box>
-                    </MenuItem>
-                ))}
-                {availableCommon.length === 0 && availableMore.length === 0 && <MenuItem disabled>{text.allAdded}</MenuItem>}
-            </Menu>
-
             {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}><CircularProgress size={20} /></Box>
             ) : orderedSelectedKeys.length === 0 ? (
-                <Box sx={{ py: 0.5 }}>
+                <Box>
                     <Typography variant="body2" color="text.secondary">{isDirty ? text.pendingInheritance : text.inherited}</Typography>
                 </Box>
             ) : null}
@@ -434,16 +432,17 @@ const ClaudeCodeProfileOverrides: React.FC<ClaudeCodeProfileOverridesProps> = ({
                             <Box
                                 key={key}
                                 sx={{
-                                    position: 'relative',
                                     display: 'grid',
                                     alignItems: 'center',
-                                    gridTemplateColumns: CLAUDE_CONFIG_ROW_COLUMNS,
-                                    columnGap: 2,
+                                    gridTemplateColumns: {
+                                        xs: 'minmax(0, 1fr) auto',
+                                        sm: 'minmax(220px, 1fr) minmax(180px, 320px) auto',
+                                    },
+                                    columnGap: 1.5,
                                     rowGap: 1,
-                                    minHeight: 56,
+                                    minHeight: 64,
                                     px: 1.5,
-                                    py: 1.1,
-                                    pr: 6,
+                                    py: 1.25,
                                 }}
                             >
                                 <Box sx={{ minWidth: 0 }}>
@@ -453,11 +452,18 @@ const ClaudeCodeProfileOverrides: React.FC<ClaudeCodeProfileOverridesProps> = ({
                                             <InfoOutlined sx={{ fontSize: 14, color: 'text.disabled', cursor: 'help' }} />
                                         </Tooltip>
                                     </Box>
+                                    <Box component="span" sx={{ ...CLAUDE_CONFIG_KEY_SX, display: 'inline-block', mt: 0.5 }}>{key}</Box>
                                 </Box>
-                                <Box sx={{ minWidth: 0 }}>
-                                    <Box component="span" sx={CLAUDE_CONFIG_KEY_SX}>{key}</Box>
-                                </Box>
-                                <Box sx={{ minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                                <Box
+                                    sx={{
+                                        minWidth: 0,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: { xs: 'flex-start', sm: 'flex-end' },
+                                        gridColumn: { xs: '1 / -1', sm: '2' },
+                                        gridRow: { xs: '2', sm: '1' },
+                                    }}
+                                >
                                     {renderControl(key)}
                                 </Box>
                                 <Tooltip title={text.remove} arrow>
@@ -466,7 +472,10 @@ const ClaudeCodeProfileOverrides: React.FC<ClaudeCodeProfileOverridesProps> = ({
                                         aria-label={text.remove}
                                         onClick={() => removeOverride(key)}
                                         disabled={saving}
-                                        sx={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)' }}
+                                        sx={{
+                                            gridColumn: { xs: '2', sm: '3' },
+                                            gridRow: '1',
+                                        }}
                                     >
                                         <Close fontSize="small" />
                                     </IconButton>
@@ -474,6 +483,71 @@ const ClaudeCodeProfileOverrides: React.FC<ClaudeCodeProfileOverridesProps> = ({
                             </Box>
                         ))}
                     </Stack>
+                </Box>
+            </Collapse>
+
+            <Collapse in={addOpen && availableKeys.length > 0} unmountOnExit>
+                <Box
+                    sx={{
+                        mt: 1.25,
+                        maxWidth: 620,
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        borderRadius: 1.5,
+                        overflow: 'hidden',
+                    }}
+                >
+                    <TextField
+                        autoFocus
+                        fullWidth
+                        size="small"
+                        value={addQuery}
+                        onChange={event => setAddQuery(event.target.value)}
+                        placeholder={text.search}
+                        slotProps={{
+                            input: {
+                                startAdornment: <InputAdornment position="start"><Search sx={{ fontSize: 17, color: 'text.secondary' }} /></InputAdornment>,
+                            },
+                        }}
+                        sx={{
+                            '& .MuiOutlinedInput-notchedOutline': { border: 0 },
+                            '& .MuiOutlinedInput-root': { borderRadius: 0 },
+                        }}
+                    />
+                    <Divider />
+                    <Box sx={{ maxHeight: 260, overflowY: 'auto', py: 0.5 }}>
+                        {availableGroups.map(({ group, keys }) => (
+                            <Box key={group}>
+                                <Typography variant="overline" color="text.secondary" sx={{ display: 'block', px: 1.5, pt: 0.5, lineHeight: 1.8 }}>
+                                    {group}
+                                </Typography>
+                                {keys.map(key => (
+                                    <ButtonBase
+                                        key={key}
+                                        onClick={() => addOverride(key)}
+                                        sx={{
+                                            width: '100%',
+                                            minHeight: 36,
+                                            px: 1.5,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: 1.5,
+                                            textAlign: 'left',
+                                            '&:hover': { bgcolor: 'action.hover' },
+                                        }}
+                                    >
+                                        <Typography variant="body2" sx={{ flex: 1, minWidth: 0, fontWeight: 500 }}>{fieldLabel(key)}</Typography>
+                                        <Box component="span" sx={{ ...CLAUDE_CONFIG_KEY_SX, flexShrink: 1 }}>{key}</Box>
+                                    </ButtonBase>
+                                ))}
+                            </Box>
+                        ))}
+                        {availableGroups.length === 0 && (
+                            <Typography variant="body2" color="text.secondary" sx={{ px: 1.5, py: 1 }}>
+                                {text.noSettings}
+                            </Typography>
+                        )}
+                    </Box>
                 </Box>
             </Collapse>
 

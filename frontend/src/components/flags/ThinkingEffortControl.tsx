@@ -40,6 +40,7 @@ const ThinkingEffortControl: React.FC<ThinkingEffortControlProps> = ({ value, di
                         whiteSpace: 'nowrap',
                         bgcolor: isActive ? 'primary.main' : 'transparent',
                         color: isActive ? 'primary.contrastText' : 'text.primary',
+                        fontWeight: isActive ? 600 : 400,
                         border: isActive ? 'none' : '1px solid',
                         borderColor: 'divider',
                         opacity: disabled ? 0.6 : 1,

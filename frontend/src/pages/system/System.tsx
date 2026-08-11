@@ -210,9 +210,9 @@ const System = () => {
                                         <IconButton
                                             onClick={handleForceLogout}
                                             size="small"
-                                            aria-label="Force logout"
+                                            aria-label={t('system.serverStatus.forceLogout')}
                                         >
-                                            <Logout fontSize="small" />
+                                            <Logout sx={{ fontSize: 16 }} />
                                         </IconButton>
                                     </Tooltip>
                                     <Tooltip title={t('system.serverStatus.refreshStatus')} arrow>
@@ -221,7 +221,7 @@ const System = () => {
                                             size="small"
                                             aria-label={t('system.serverStatus.refreshStatus')}
                                         >
-                                            {checking ? <CircularProgress size={16} /> : <RefreshIcon />}
+                                            {checking ? <CircularProgress size={16} /> : <RefreshIcon sx={{ fontSize: 16 }} />}
                                         </IconButton>
                                     </Tooltip>
                                 </Stack>

@@ -1,12 +1,14 @@
-import {Box, useTheme} from '@mui/material';
+import {Box, Tooltip, useTheme} from '@mui/material';
 import {alpha, decomposeColor} from '@mui/material/styles';
 import type {SxProps, Theme} from '@mui/material';
 import { EMPTY_SX } from '@/constants/defaults';
+import { AnthropicStyleMark, GoogleStyleMark, OpenAIStyleMark } from '@/components/icons';
 
 interface ApiStyleBadgeProps {
     apiStyle: string;
     compact?: boolean;
     minimal?: boolean;
+    minimalSize?: 'small' | 'medium';
     sx?: SxProps<Theme>;
 }
 
@@ -36,7 +38,13 @@ const blend = (tint: string, tintAlpha: number, paperRgb: Rgb): string => {
 };
 
 // Helper function to render API style badge with icon and colored background
-export const ApiStyleBadge = ({apiStyle, sx = EMPTY_SX, compact = false, minimal = false}: ApiStyleBadgeProps) => {
+export const ApiStyleBadge = ({
+    apiStyle,
+    sx = EMPTY_SX,
+    compact = false,
+    minimal = false,
+    minimalSize = 'small',
+}: ApiStyleBadgeProps) => {
     const theme = useTheme();
     const isOpenAI = apiStyle === 'openai';
     const isAnthropic = apiStyle === 'anthropic';
@@ -58,9 +66,9 @@ export const ApiStyleBadge = ({apiStyle, sx = EMPTY_SX, compact = false, minimal
     // fill is the resting tint opacity over paper; hoverFill is the stronger
     // hover opacity. Dark mode gets a higher fill so tints stay visible on dark paper.
     const providers = {
-        openai:    { label: 'OpenAI',    letter: 'O', tint: theme.palette.info.main, fill: isDark ? 0.22 : 0.14, hoverFill: isDark ? 0.32 : 0.22, border: alpha(theme.palette.info.main, 0.4) },
-        anthropic: { label: 'Anthropic', letter: 'A', tint: '#E07A5F',               fill: isDark ? 0.26 : 0.16, hoverFill: isDark ? 0.36 : 0.26, border: alpha('#E07A5F', 0.5) },
-        google:    { label: 'Google',    letter: 'G', tint: '#4285F4',               fill: isDark ? 0.22 : 0.14, hoverFill: isDark ? 0.32 : 0.22, border: alpha('#4285F4', 0.4) },
+        openai:    { label: 'OpenAI',    Mark: OpenAIStyleMark, tint: theme.palette.info.main, fill: isDark ? 0.22 : 0.14, hoverFill: isDark ? 0.32 : 0.22, border: alpha(theme.palette.info.main, 0.4) },
+        anthropic: { label: 'Anthropic', Mark: AnthropicStyleMark, tint: '#E07A5F',               fill: isDark ? 0.26 : 0.16, hoverFill: isDark ? 0.36 : 0.26, border: alpha('#E07A5F', 0.5) },
+        google:    { label: 'Google',    Mark: GoogleStyleMark, tint: '#4285F4',               fill: isDark ? 0.22 : 0.14, hoverFill: isDark ? 0.32 : 0.22, border: alpha('#4285F4', 0.4) },
     } as const;
     const p = isOpenAI ? providers.openai : isAnthropic ? providers.anthropic : providers.google;
 
@@ -68,27 +76,34 @@ export const ApiStyleBadge = ({apiStyle, sx = EMPTY_SX, compact = false, minimal
     const hoverBackgroundColor = blend(p.tint, p.hoverFill, paperRgb);
 
     if (minimal) {
+        const diameter = minimalSize === 'medium' ? 20 : 16;
+        const ProtocolMark = p.Mark;
+
         return (
-            <Box
-                sx={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: '50%',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    fontSize: '9px',
-                    fontWeight: 700,
-                    lineHeight: 1,
-                    border: `1px solid ${p.border}`,
-                    backgroundColor,
-                    color: p.tint,
-                    ...sx,
-                }}
-            >
-                {p.letter}
-            </Box>
+            <Tooltip title={`${p.label} Style`} arrow placement="top">
+                <Box
+                    sx={{
+                        width: diameter,
+                        height: diameter,
+                        borderRadius: '50%',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        color: p.tint,
+                        '& .api-style-mark-frame': {
+                            fill: backgroundColor,
+                            stroke: p.border,
+                        },
+                        '& .api-style-mark-glyph': {
+                            stroke: p.tint,
+                        },
+                        ...sx,
+                    }}
+                >
+                    <ProtocolMark aria-hidden sx={{ width: '100%', height: '100%', display: 'block' }} />
+                </Box>
+            </Tooltip>
         );
     }
 
@@ -119,7 +134,7 @@ export const ApiStyleBadge = ({apiStyle, sx = EMPTY_SX, compact = false, minimal
                 ...sx,
             }}
         >
-            {compact ? (<span>{p.label}</span>) : (<span>{p.label} Style</span>)}
+            <span>{p.label}{compact ? '' : ' Style'}</span>
         </Box>
     );
 };

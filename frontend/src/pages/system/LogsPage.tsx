@@ -46,20 +46,18 @@ const LogsPage = () => {
             title="Logs"
             size="full"
             height="calc(100vh - 48px)"
+            titleMarginBottom={0.75}
             rightAction={
-                <Stack direction="row" spacing={1} sx={{
-                    alignItems: "center"
-                }}>
-                    <Typography variant="body2" sx={{
-                        color: "text.secondary"
-                    }}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                    <Typography variant="body2" color="text.secondary">
                         Debug Mode
                     </Typography>
                     <Switch
+                        size="small"
                         checked={debugMode}
                         onChange={handleDebugModeChange}
                         disabled={loadingDebug}
-                        size="small"
+                        inputProps={{ 'aria-label': 'Debug Mode' }}
                     />
                 </Stack>
             }

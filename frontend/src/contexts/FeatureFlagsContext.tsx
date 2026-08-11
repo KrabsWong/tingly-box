@@ -9,7 +9,7 @@ interface FeatureFlagsContextType {
     enableGuardrails: boolean;
     enableMCP: boolean;
     loading: boolean;
-    refresh: () => void;
+    refresh: () => Promise<void>;
 }
 
 const FeatureFlagsContext = createContext<FeatureFlagsContextType | undefined>(undefined);
@@ -62,9 +62,7 @@ export const FeatureFlagsProvider: React.FC<FeatureFlagsProviderProps> = ({ chil
         }
     }, [isAuthLoading]);
 
-    const refresh = () => {
-        loadFlags();
-    };
+    const refresh = loadFlags;
 
     return (
         <FeatureFlagsContext.Provider value={{ skillUser, skillIde, enableGuardrails, enableMCP, loading, refresh }}>

@@ -1,8 +1,9 @@
 import {
     Box,
-    Button,
     Chip,
+    FormControlLabel,
     Stack,
+    Switch,
     Table,
     TableBody,
     TableCell,
@@ -13,6 +14,7 @@ import {
     IconButton,
     Collapse,
     TableSortLabel,
+    Tooltip,
 } from '@mui/material';
 import { useState, useEffect, useRef } from 'react';
 import { KeyboardArrowDown as KeyboardArrowDownIcon } from '@/components/icons';
@@ -190,7 +192,6 @@ const SystemLogViewer = ({ getLogs }: SystemLogViewerProps) => {
                     py: 0.75,
                     alignContent: 'center'
                 }}>
-                {/* Actions */}
                 <Stack
                     direction="row"
                     spacing={1}
@@ -198,48 +199,68 @@ const SystemLogViewer = ({ getLogs }: SystemLogViewerProps) => {
                         alignItems: "center",
                         minHeight: 30
                     }}>
-                    <Button
-                        variant={autoRefresh ? 'contained' : 'outlined'}
-                        size="small"
-                        onClick={() => setAutoRefresh(!autoRefresh)}
-                        sx={{ fontSize: '0.75rem' }}
-                    >
-                        Auto
-                    </Button>
-                    <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={loadLogs}
-                        disabled={loading}
-                        startIcon={<RefreshIcon />}
-                        sx={{ fontSize: '0.75rem' }}
-                    >
-                        Refresh
-                    </Button>
+                    <FormControlLabel
+                        control={(
+                            <Switch
+                                size="small"
+                                checked={autoRefresh}
+                                onChange={(_, checked) => setAutoRefresh(checked)}
+                            />
+                        )}
+                        label={<Typography variant="body2">Auto-refresh</Typography>}
+                        sx={{ m: 0, mr: 0.25 }}
+                    />
+                    <Tooltip title="Refresh now" arrow>
+                        <span>
+                            <IconButton
+                                size="small"
+                                aria-label="Refresh logs"
+                                onClick={loadLogs}
+                                disabled={loading}
+                            >
+                                <RefreshIcon fontSize="small" />
+                            </IconButton>
+                        </span>
+                    </Tooltip>
                     <Typography
-                        variant="body2"
-                        sx={{
-                            color: "text.secondary",
-                            whiteSpace: 'nowrap',
-                            lineHeight: 1.4
-                        }}>
-                        {logs.length}{allLogs.length !== logs.length ? ` / ${allLogs.length}` : ''}
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ whiteSpace: 'nowrap' }}
+                    >
+                        {loading
+                            ? 'Refreshing…'
+                            : selectedLevels.size > 0
+                                ? `${logs.length} of ${allLogs.length} entries`
+                                : `${allLogs.length} entries`}
                     </Typography>
                 </Stack>
 
                 <Box sx={{ flex: 1 }} />
 
-                {/* Level filter tags */}
                 <Stack
                     direction="row"
                     spacing={0.5}
                     useFlexGap
                     sx={{
-                        alignItems: "center",
-                        flexWrap: "wrap",
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
                         minHeight: 30,
-                        alignContent: 'center'
-                    }}>
+                        alignContent: 'center',
+                    }}
+                >
+                    <Chip
+                        label="All"
+                        size="small"
+                        clickable
+                        color={selectedLevels.size === 0 ? 'primary' : 'default'}
+                        variant={selectedLevels.size === 0 ? 'filled' : 'outlined'}
+                        onClick={() => setSelectedLevels(new Set())}
+                        sx={{
+                            fontWeight: 600,
+                            fontSize: '0.7rem',
+                            height: 24,
+                        }}
+                    />
                     {LOG_LEVELS.map((level) => {
                         const active = selectedLevels.has(level);
                         return (
@@ -268,15 +289,6 @@ const SystemLogViewer = ({ getLogs }: SystemLogViewerProps) => {
                             />
                         );
                     })}
-                    {selectedLevels.size > 0 && (
-                        <Chip
-                            label="Clear"
-                            size="small"
-                            clickable
-                            onClick={() => setSelectedLevels(new Set())}
-                            sx={{ fontSize: '0.7rem', height: 24 }}
-                        />
-                    )}
                 </Stack>
             </Stack>
             {/* Logs Table — fills remaining space */}
