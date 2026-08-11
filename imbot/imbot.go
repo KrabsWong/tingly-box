@@ -66,6 +66,10 @@ type (
 	LoggingConfig = core.LoggingConfig
 	ManagerConfig = core.ManagerConfig
 
+	// Platform descriptor types
+	PlatformDescriptor = core.PlatformDescriptor
+	AuthMapping        = core.AuthMapping
+
 	// Error types
 	BotError  = core.BotError
 	ErrorCode = core.ErrorCode
@@ -255,9 +259,20 @@ func GetPlatformCapabilities(platform string) *core.PlatformCapabilities {
 	return core.GetPlatformCapabilities(Platform(platform))
 }
 
-// GetPlatformName returns the human-readable name for a platform
-func GetPlatformName(platform string) string {
-	return core.GetPlatformName(Platform(platform))
+// BuildAuthConfig converts a bot's stored auth map into an AuthConfig.
+func BuildAuthConfig(platform string, auth map[string]string) AuthConfig {
+	return core.BuildAuthConfig(platform, auth)
+}
+
+// MissingAuthKeys lists the required auth keys a bot has not been given.
+func MissingAuthKeys(platform string, auth map[string]string) []string {
+	return core.MissingAuthKeys(platform, auth)
+}
+
+// AuthOptions returns the auth-map entries a platform expects in Config.Options
+// rather than in AuthConfig.
+func AuthOptions(platform string, auth map[string]string) map[string]interface{} {
+	return core.AuthOptions(platform, auth)
 }
 
 // Keyboard builder helpers
@@ -299,31 +314,8 @@ func FormatDirButton(name string, maxLen int) string {
 	return core.FormatDirButton(name, maxLen)
 }
 
-// Interaction types re-exported from the interaction package
-
-// Interaction types
-type (
-	// ActionType represents the type of user action
-	ActionType = core.ActionType
-
-	// Interaction represents a platform-agnostic interactive element
-	Interaction = core.Interaction
-
-	// Option represents a selectable option
-	Option = core.Option
-)
-
-// Interaction constants
+// Card action styles
 const (
-	// Action types
-	ActionSelect   = core.ActionSelect
-	ActionConfirm  = core.ActionConfirm
-	ActionCancel   = core.ActionCancel
-	ActionNavigate = core.ActionNavigate
-	ActionInput    = core.ActionInput
-	ActionCustom   = core.ActionCustom
-
-	// Card action styles
 	CardActionStyleDefault = core.CardActionStyleDefault
 	CardActionStylePrimary = core.CardActionStylePrimary
 	CardActionStyleDanger  = core.CardActionStyleDanger
