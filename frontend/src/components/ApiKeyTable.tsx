@@ -282,7 +282,20 @@ const ApiKeyTable = ({
                                 </TableCell>
                                 {/* Name */}
                                 <TableCell>
-                                    <Tooltip title={provider.name} arrow placement="top">
+                                    <Tooltip
+                                        arrow
+                                        placement="top"
+                                        title={(
+                                            <Box>
+                                                <Typography variant="caption" sx={{display: 'block', color: 'inherit', fontWeight: 600}}>
+                                                    {provider.name}
+                                                </Typography>
+                                                <Typography variant="caption" sx={{display: 'block', color: 'inherit', fontFamily: 'monospace', opacity: 0.8}}>
+                                                    UUID: {provider.uuid}
+                                                </Typography>
+                                            </Box>
+                                        )}
+                                    >
                                         <Typography
                                             variant="body2"
                                             sx={{

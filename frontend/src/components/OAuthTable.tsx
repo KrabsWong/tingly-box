@@ -306,12 +306,27 @@ const OAuthTable = ({
                                         <Stack direction="row" spacing={1} sx={{
                                             alignItems: "center"
                                         }}>
-                                            <Typography
-                                                variant="body2"
-                                                sx={{fontWeight: 500, minWidth: 120}}
+                                            <Tooltip
+                                                arrow
+                                                placement="top"
+                                                title={(
+                                                    <Box>
+                                                        <Typography variant="caption" sx={{display: 'block', color: 'inherit', fontWeight: 600}}>
+                                                            {provider.name}
+                                                        </Typography>
+                                                        <Typography variant="caption" sx={{display: 'block', color: 'inherit', fontFamily: 'monospace', opacity: 0.8}}>
+                                                            UUID: {provider.uuid}
+                                                        </Typography>
+                                                    </Box>
+                                                )}
                                             >
-                                                {provider.name}
-                                            </Typography>
+                                                <Typography
+                                                    variant="body2"
+                                                    sx={{fontWeight: 500, minWidth: 120}}
+                                                >
+                                                    {provider.name}
+                                                </Typography>
+                                            </Tooltip>
                                         </Stack>
                                     </TableCell>
                                     {/* API Style */}
