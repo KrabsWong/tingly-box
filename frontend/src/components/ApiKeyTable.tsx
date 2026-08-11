@@ -445,7 +445,6 @@ const ApiKeyTable = ({
                                             size="small"
                                             startIcon={<ListAlt/>}
                                             onClick={() => handleModelListClick(provider.uuid)}
-                                            disabled={!provider.enabled}
                                             sx={{
                                                 fontSize: "0.75rem",
                                                 minWidth: "auto",
