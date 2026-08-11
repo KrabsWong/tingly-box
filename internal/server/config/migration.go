@@ -12,11 +12,71 @@ import (
 	typ "github.com/tingly-dev/tingly-box/internal/typ"
 )
 
-// --- Shared migration helpers -------------------------------------------------
+// --- Migration pipeline --------------------------------------------------
 //
 // Migrations are organized by the invariants they protect rather than by every
 // historical patch date. The current supported baseline is the scenario/provider
 // config model; very old config shapes are repaired through normalizeLegacyConfigBaseline.
+//
+// Every step is classified by migrationKind so a reader can tell its lifecycle
+// without reading the body, and Migrate saves once at the end instead of each
+// step saving individually. See .design/config-migration.md for the full
+// policy on when a dated step is expected to be folded into a baseline
+// normalizer, and how legacy UUID lookup tables are retired alongside it.
+
+// migrationKind classifies a migration step by its lifecycle.
+type migrationKind int
+
+const (
+	// kindBaseline repairs structural invariants and runs on every boot,
+	// forever. It is the target state itself, so it never gets folded away.
+	kindBaseline migrationKind = iota
+	// kindDated is a one-off data repair tied to a specific change. It runs
+	// unconditionally on every boot (idempotent via its own internal guard)
+	// until it is folded into a baseline normalizer once no active config
+	// can predate it — see .design/config-migration.md.
+	kindDated
+	// kindOnce is gated by a MigrationsCompleted marker: it runs exactly once
+	// per config, so it can change a value a user might since have overridden
+	// without re-clobbering that override on every boot.
+	kindOnce
+)
+
+// migrationStep is one entry in the migration pipeline. fn reports whether it
+// changed Config state that needs persisting; Migrate saves once at the end
+// if any step reported dirty.
+type migrationStep struct {
+	name    string
+	kind    migrationKind
+	addedAt string // when the step was introduced; empty for baseline steps
+	fn      func(*Config) bool
+}
+
+var migrationSteps = []migrationStep{
+	{"normalize-legacy-config-baseline", kindBaseline, "", normalizeLegacyConfigBaseline},
+	{"normalize-builtin-rule-identity", kindBaseline, "", normalizeBuiltinRuleIdentity},
+	{"agent-scenario-to-custom", kindBaseline, "", migrateAgentScenarioToCustom},
+	{"ensure-current-builtin-rules", kindBaseline, "", ensureCurrentBuiltinRules},
+	{"20260712-drop-unsupported-smart-routing", kindDated, "2026-07-12", migrate20260712},
+	{"20260606-xcode-skip-usage", kindOnce, "2026-06-06", defaultXcodeSkipUsageOnce},
+	{"20260610-builtin-rule-flags", kindOnce, "2026-06-10", defaultBuiltinRuleFlagsOnce},
+}
+
+// Migrate runs every registered migration step in order and persists the
+// config once at the end if any step reported a change, instead of each step
+// saving independently.
+func Migrate(c *Config) error {
+	dirty := false
+	for _, step := range migrationSteps {
+		if step.fn(c) {
+			dirty = true
+		}
+	}
+	if dirty {
+		c.saveMigration()
+	}
+	return nil
+}
 
 // findRuleByUUID returns a pointer to the rule with the given UUID, or nil.
 // Legacy simple-rule UUIDs (openai, anthropic, codex, …) are resolved to
@@ -115,20 +175,6 @@ func (c *Config) rekeyRuleUUIDState(migrationID string, renames map[string]strin
 	}
 }
 
-func Migrate(c *Config) error {
-	normalizeLegacyConfigBaseline(c)
-	normalizeBuiltinRuleIdentity(c)
-	migrateAgentScenarioToCustom(c) // Rename the "agent" (OpenClaw) scenario to "custom"
-	ensureCurrentBuiltinRules(c)
-	migrate20260416(c) // Enable multi-tenant by default
-	migrate20260421(c) // Migrate profile unified model from "*" to "cc"
-	migrate20260502(c) // Remove wildcard (*) rules for smart_guide scenario
-	migrate20260518(c) // Set OpenAIEndpointMode=responses on existing Codex OAuth providers
-	migrate20260712(c) // Drop smart-routing partitions using removed positions (tool_use)
-	normalizeRuleDefaultsOnce(c)
-	return nil
-}
-
 // migrateAgentScenarioToCustom renames every stored Rule and ScenarioConfig
 // still on the deprecated "agent" scenario (OpenClaw) to "custom". Runs every
 // boot, un-gated: it is cheap, and — unlike a "once" marker — self-heals a
@@ -140,7 +186,7 @@ func Migrate(c *Config) error {
 // legacyScenarioAliasMiddleware, which resolves "agent" -> "custom" at the
 // routing layer (typ.ResolveScenarioAlias) — independent of whether any rule
 // migrated here.
-func migrateAgentScenarioToCustom(c *Config) {
+func migrateAgentScenarioToCustom(c *Config) bool {
 	needsSave := false
 
 	for i := range c.Rules {
@@ -160,9 +206,9 @@ func migrateAgentScenarioToCustom(c *Config) {
 	}
 
 	if needsSave {
-		c.saveMigration()
 		logrus.Info("Migration agent-to-custom completed: renamed \"agent\" scenario rules/config to \"custom\"")
 	}
+	return needsSave
 }
 
 // migrate20260712 drops smart-routing partitions whose ops reference a
@@ -174,7 +220,7 @@ func migrateAgentScenarioToCustom(c *Config) {
 // Dropping the partition preserves observed behavior: a tool_use partition
 // never matched real traffic. Runs every boot (idempotent) so configs
 // restored from backups heal too.
-func migrate20260712(c *Config) {
+func migrate20260712(c *Config) bool {
 	needsSave := false
 
 	for i := range c.Rules {
@@ -210,15 +256,19 @@ func migrate20260712(c *Config) {
 	}
 
 	if needsSave {
-		c.saveMigration()
 		logrus.Info("Migration 2026-07-12 completed: removed smart-routing partitions with unsupported positions")
 	}
+	return needsSave
 }
 
-// normalizeLegacyConfigBaseline folds the pre-2026-04 config repair migrations
-// into one baseline normalizer. It keeps very old configs usable without keeping
-// every historical date migration as a permanent startup phase.
-func normalizeLegacyConfigBaseline(c *Config) {
+// normalizeLegacyConfigBaseline folds config repair migrations that are old
+// enough no active config can predate them into one baseline normalizer. It
+// keeps old configs usable without keeping every historical date migration as
+// a permanent startup phase — see .design/config-migration.md for the fold
+// policy. Originally covered everything pre-2026-04; the 2026-04/05 batch
+// (multi-tenant defaults, profile unified model naming, smart_guide wildcard
+// cleanup, Codex endpoint mode) was folded in on top of that.
+func normalizeLegacyConfigBaseline(c *Config) bool {
 	needsSave := false
 
 	if normalizeLegacyProviders(c) {
@@ -227,11 +277,23 @@ func normalizeLegacyConfigBaseline(c *Config) {
 	if normalizeRuleBasics(c) {
 		needsSave = true
 	}
+	if normalizeMultiTenantDefaults(c) {
+		needsSave = true
+	}
+	if normalizeClaudeCodeProfileUnifiedModel(c) {
+		needsSave = true
+	}
+	if dropSmartGuideWildcardRules(c) {
+		needsSave = true
+	}
+	if normalizeCodexEndpointMode(c) {
+		needsSave = true
+	}
 
 	if needsSave {
-		c.saveMigration()
 		logrus.Info("Migration baseline normalization completed: repaired legacy provider/rule config")
 	}
+	return needsSave
 }
 
 func normalizeLegacyProviders(c *Config) bool {
@@ -379,7 +441,7 @@ func legacyRuleScenario(uuid string) (typ.RuleScenario, bool) {
 // normalizeBuiltinRuleIdentity keeps built-in rule UUIDs on the canonical
 // "builtin:<scenario>:<tier/model>" form. It is intentionally not marker-gated:
 // the pass is idempotent and self-healing for configs written by older builds.
-func normalizeBuiltinRuleIdentity(c *Config) {
+func normalizeBuiltinRuleIdentity(c *Config) bool {
 	renames := map[string]string{}
 	for i := range c.Rules {
 		rule := &c.Rules[i]
@@ -400,11 +462,11 @@ func normalizeBuiltinRuleIdentity(c *Config) {
 	}
 
 	if len(renames) == 0 {
-		return
+		return false
 	}
 	c.rekeyRuleUUIDState("builtin-rule-identity", renames)
-	c.saveMigration()
 	logrus.Infof("Migration builtin-rule-identity completed: normalized %d built-in rule UUID(s)", len(renames))
+	return true
 }
 
 func canonicalRuleUUID(rule *typ.Rule) (string, bool) {
@@ -426,7 +488,7 @@ func canonicalRuleUUID(rule *typ.Rule) (string, bool) {
 	return BuiltinRuleUUID(rule.Scenario, tier), true
 }
 
-func ensureCurrentBuiltinRules(c *Config) {
+func ensureCurrentBuiltinRules(c *Config) bool {
 	needsSave := false
 
 	desktopRefServices := c.referenceServicesFor(typ.ScenarioClaudeCode, typ.ScenarioCodex)
@@ -453,36 +515,41 @@ func ensureCurrentBuiltinRules(c *Config) {
 	}
 
 	if needsSave {
-		c.saveMigration()
 		logrus.Info("Migration current-builtin-rules completed: ensured current built-in rules")
 	}
+	return needsSave
 }
 
-// migrate20260416 enables multi-tenant by default for existing configurations.
-func migrate20260416(c *Config) {
-	// Skip migration if multi-tenant config has any values set.
-	// This means the user has explicitly configured multi-tenant settings.
+// normalizeMultiTenantDefaults enables multi-tenant by default for configs
+// written before multi-tenant existed. New installs already seed
+// MultiTenantConfig in CreateDefaultConfig; this only backfills older ones.
+// Folded from the dated migrate20260416 migration (2026-04-16).
+func normalizeMultiTenantDefaults(c *Config) bool {
+	// Skip if multi-tenant config has any values set — that means either a
+	// prior run of this normalizer already seeded it, or the user has
+	// explicitly configured multi-tenant settings.
 	if c.MultiTenantConfig.APITokenSecret != "" ||
 		c.MultiTenantConfig.APITokenAlgorithm != "" ||
 		c.MultiTenantConfig.APITokenIssuer != "" {
-		return
+		return false
 	}
 
 	// All three token fields are empty (guaranteed by the guard above), so seed
-	// the defaults and enable multi-tenant — the main purpose of the migration.
+	// the defaults and enable multi-tenant.
 	c.MultiTenantConfig.APITokenSecret = generateSecret()
 	c.MultiTenantConfig.APITokenAlgorithm = "HS256"
 	c.MultiTenantConfig.APITokenIssuer = "tingly-box"
 	c.MultiTenantConfig.Enabled = true
 
-	c.saveMigration()
+	return true
 }
 
-// migrate20260421 migrates profile unified model name from "*" to "cc".
-// This ensures consistency with the new naming convention where profile
-// rules use simplified names: "cc" (unified), "default", "haiku", etc. (separate).
-// Only applies to claude-code scenario profiles.
-func migrate20260421(c *Config) {
+// normalizeClaudeCodeProfileUnifiedModel migrates profile unified model name
+// from "*" to "cc". This ensures consistency with the naming convention where
+// profile rules use simplified names: "cc" (unified), "default", "haiku",
+// etc. (separate). Only applies to claude-code scenario profiles.
+// Folded from the dated migrate20260421 migration (2026-04-21).
+func normalizeClaudeCodeProfileUnifiedModel(c *Config) bool {
 	needsSave := false
 
 	for i := range c.Rules {
@@ -506,15 +573,15 @@ func migrate20260421(c *Config) {
 		}
 	}
 
-	if needsSave {
-		c.saveMigration()
-	}
+	return needsSave
 }
 
-// migrate20260502 removes wildcard (*) rules for smart_guide scenario.
-// This cleans up legacy wildcard rules that are no longer needed
-// as SmartGuide now uses bot-specific rules with UUID pattern: _internal_smart_guide_{botUUID}.
-func migrate20260502(c *Config) {
+// dropSmartGuideWildcardRules removes wildcard (*) rules for the smart_guide
+// scenario. This cleans up legacy wildcard rules that are no longer needed
+// as SmartGuide now uses bot-specific rules with UUID pattern:
+// _internal_smart_guide_{botUUID}.
+// Folded from the dated migrate20260502 migration (2026-05-02).
+func dropSmartGuideWildcardRules(c *Config) bool {
 	needsSave := false
 
 	// Filter out smart_guide rules with wildcard RequestModel.
@@ -535,20 +602,24 @@ func migrate20260502(c *Config) {
 
 	if needsSave {
 		c.Rules = filteredRules
-		c.saveMigration()
-		logrus.Info("Migration 2026-05-02 completed: removed smart_guide wildcard rules")
+		logrus.Info("Removed smart_guide wildcard rules")
 	}
+	return needsSave
 }
 
-// migrate20260518 sets OpenAIEndpointMode=responses on existing Codex OAuth
-// providers. Codex's API only exposes /responses (no /chat/completions); the
-// mode is now declared on Codex providers at OAuth instantiation, but
-// existing user configs from before this change don't carry it. Without the
-// backfill, the new resolver's default-Chat semantics would silently send
+// normalizeCodexEndpointMode sets OpenAIEndpointMode=responses on existing
+// Codex OAuth providers. Codex's API only exposes /responses (no
+// /chat/completions); the mode is declared on Codex providers at OAuth
+// instantiation, but providers created before that don't carry it. Without
+// the backfill, the resolver's default-Chat semantics would silently send
 // /chat/completions requests to Codex and fail.
 //
 // Idempotent: only flips the mode when issuer is Codex and the mode is unset.
-func migrate20260518(c *Config) {
+// Unlike the other baseline sub-steps, this never reports dirty: providers
+// live in SQLite (db.ProviderStore) and are backfilled directly there, so
+// there is no Config JSON state for the caller to persist.
+// Folded from the dated migrate20260518 migration (2026-05-18).
+func normalizeCodexEndpointMode(c *Config) bool {
 	// Providers live in SQLite (the JSON c.Providers slice is legacy backup).
 	// Backfill the DB-stored ones directly so the resolver sees the right mode.
 	if c.providerStore != nil {
@@ -571,19 +642,15 @@ func migrate20260518(c *Config) {
 			logrus.WithError(err).Warn("Failed to list OAuth providers for openai_endpoint_mode backfill")
 		}
 	}
-}
-
-func normalizeRuleDefaultsOnce(c *Config) {
-	defaultXcodeSkipUsageOnce(c)
-	defaultBuiltinRuleFlagsOnce(c)
+	return false
 }
 
 // defaultXcodeSkipUsageOnce ensures the Xcode scenario defaults SkipUsage on
 // (the Xcode client cannot handle usage in streaming chunks). The marker is
 // retained so a user who later turns it off keeps that choice across restarts.
-func defaultXcodeSkipUsageOnce(c *Config) {
+func defaultXcodeSkipUsageOnce(c *Config) bool {
 	if c.hasMigrationCompleted("20260606") {
-		return
+		return false
 	}
 
 	needsSave := false
@@ -608,16 +675,20 @@ func defaultXcodeSkipUsageOnce(c *Config) {
 
 	c.markMigrationCompleted("20260606")
 	if needsSave {
-		c.saveMigration()
 		logrus.Info("Migration 2026-06-06 completed: defaulted SkipUsage on for the Xcode scenario")
 	}
+	// The marker itself just changed c.MigrationsCompleted, so this run needs
+	// persisting even when needsSave (the substantive Scenarios change) is
+	// false — e.g. a config that already had SkipUsage=true before this
+	// migration shipped.
+	return true
 }
 
 // defaultBuiltinRuleFlagsOnce seeds rule-level defaults for built-in agent
 // scenarios. The marker is retained so user-disabled defaults stay disabled.
-func defaultBuiltinRuleFlagsOnce(c *Config) {
+func defaultBuiltinRuleFlagsOnce(c *Config) bool {
 	if c.hasMigrationCompleted("20260610") {
-		return
+		return false
 	}
 
 	needsSave := false
@@ -647,7 +718,9 @@ func defaultBuiltinRuleFlagsOnce(c *Config) {
 
 	c.markMigrationCompleted("20260610")
 	if needsSave {
-		c.saveMigration()
 		logrus.Info("Migration 20260610 completed: seeded default rule flags (claude_code_compat / clean_header / session_affinity) for Claude Code, Claude Desktop, and Codex rules")
 	}
+	// Same reasoning as defaultXcodeSkipUsageOnce: the marker append alone
+	// needs persisting even when no rule flag actually changed.
+	return true
 }

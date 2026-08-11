@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/tingly-dev/tingly-box/ai"
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
@@ -70,6 +71,118 @@ func TestNormalizeLegacyConfigBaseline_MultiTierRulesBecomeTierWithRandomWithinT
 	}
 	if params.WithinTierTactic != loadbalance.TacticRandom {
 		t.Fatalf("within tier tactic = %q, want random", params.WithinTierTactic)
+	}
+}
+
+// TestNormalizeLegacyConfigBaseline_SeedsMultiTenantDefaults exercises the
+// 2026-04-16 multi-tenant default backfill folded into the baseline
+// normalizer: a config with no MultiTenantConfig fields set gets one seeded.
+func TestNormalizeLegacyConfigBaseline_SeedsMultiTenantDefaults(t *testing.T) {
+	c := &Config{}
+
+	normalizeLegacyConfigBaseline(c)
+
+	if !c.MultiTenantConfig.Enabled {
+		t.Error("multi-tenant should be enabled by default")
+	}
+	if c.MultiTenantConfig.APITokenSecret == "" {
+		t.Error("APITokenSecret should be seeded")
+	}
+	if c.MultiTenantConfig.APITokenAlgorithm != "HS256" {
+		t.Errorf("APITokenAlgorithm = %q, want HS256", c.MultiTenantConfig.APITokenAlgorithm)
+	}
+	if c.MultiTenantConfig.APITokenIssuer != "tingly-box" {
+		t.Errorf("APITokenIssuer = %q, want tingly-box", c.MultiTenantConfig.APITokenIssuer)
+	}
+}
+
+// TestNormalizeLegacyConfigBaseline_PreservesExplicitMultiTenantConfig covers
+// the guard: any pre-existing MultiTenantConfig field means the user (or a
+// prior run) already configured it, so the normalizer must not overwrite it.
+func TestNormalizeLegacyConfigBaseline_PreservesExplicitMultiTenantConfig(t *testing.T) {
+	c := &Config{
+		MultiTenantConfig: MultiTenantConfig{
+			APITokenIssuer: "custom-issuer",
+		},
+	}
+
+	normalizeLegacyConfigBaseline(c)
+
+	if c.MultiTenantConfig.APITokenIssuer != "custom-issuer" {
+		t.Errorf("APITokenIssuer = %q, want unchanged custom-issuer", c.MultiTenantConfig.APITokenIssuer)
+	}
+	if c.MultiTenantConfig.APITokenSecret != "" {
+		t.Errorf("APITokenSecret should stay empty, got %q", c.MultiTenantConfig.APITokenSecret)
+	}
+}
+
+// TestNormalizeLegacyConfigBaseline_RenamesProfileUnifiedModel exercises the
+// 2026-04-21 migration folded into the baseline normalizer: a claude-code
+// profile rule with the old "*" unified-model name is renamed to "cc".
+func TestNormalizeLegacyConfigBaseline_RenamesProfileUnifiedModel(t *testing.T) {
+	c := &Config{
+		Rules: []typ.Rule{
+			{UUID: "profile-rule", Scenario: typ.ProfiledScenarioName(typ.ScenarioClaudeCode, "p1"), RequestModel: "*"},
+			{UUID: "non-profile-rule", Scenario: typ.ScenarioClaudeCode, RequestModel: "*"},
+		},
+	}
+
+	normalizeLegacyConfigBaseline(c)
+
+	if c.Rules[0].RequestModel != "cc" {
+		t.Errorf("profile rule RequestModel = %q, want cc", c.Rules[0].RequestModel)
+	}
+	if c.Rules[1].RequestModel != "*" {
+		t.Errorf("non-profile rule RequestModel should be untouched, got %q", c.Rules[1].RequestModel)
+	}
+}
+
+// TestNormalizeLegacyConfigBaseline_DropsSmartGuideWildcardRules exercises
+// the 2026-05-02 migration folded into the baseline normalizer: a smart_guide
+// rule with a wildcard RequestModel is dropped, other rules survive.
+func TestNormalizeLegacyConfigBaseline_DropsSmartGuideWildcardRules(t *testing.T) {
+	c := &Config{
+		Rules: []typ.Rule{
+			{UUID: "wildcard", Scenario: typ.ScenarioSmartGuide, RequestModel: "*"},
+			{UUID: "keep-me", Scenario: typ.ScenarioSmartGuide, RequestModel: "gpt-5"},
+		},
+	}
+
+	normalizeLegacyConfigBaseline(c)
+
+	if len(c.Rules) != 1 {
+		t.Fatalf("rule count = %d, want 1: %+v", len(c.Rules), c.Rules)
+	}
+	if c.Rules[0].UUID != "keep-me" {
+		t.Errorf("surviving rule = %q, want keep-me", c.Rules[0].UUID)
+	}
+}
+
+// TestNormalizeCodexEndpointMode_BackfillsResponsesMode exercises the
+// 2026-05-18 migration folded into the baseline normalizer: a Codex OAuth
+// provider persisted before OpenAIEndpointMode was declared at OAuth
+// instantiation time gets backfilled to "responses" in the DB store.
+func TestNormalizeCodexEndpointMode_BackfillsResponsesMode(t *testing.T) {
+	cfg, err := NewConfig(WithConfigDir(t.TempDir()))
+	if err != nil {
+		t.Fatalf("NewConfig error: %v", err)
+	}
+
+	p := codexResolveProvider()
+	if err := cfg.AddProvider(p); err != nil {
+		t.Fatalf("AddProvider error: %v", err)
+	}
+
+	if normalizeCodexEndpointMode(cfg) {
+		t.Error("normalizeCodexEndpointMode should never report dirty (DB-only backfill, no Config JSON state)")
+	}
+
+	got, err := cfg.GetProviderByUUID(p.UUID)
+	if err != nil {
+		t.Fatalf("GetProviderByUUID error: %v", err)
+	}
+	if got.OpenAIEndpointMode != ai.EndpointModeResponses {
+		t.Errorf("OpenAIEndpointMode = %q, want %q", got.OpenAIEndpointMode, ai.EndpointModeResponses)
 	}
 }
 

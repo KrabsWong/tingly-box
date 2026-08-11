@@ -176,7 +176,7 @@ Codex 是 OAuth-only 接入路径（Web `oauth/handler.go` 和 CLI `command/oaut
 
 无需用户配置。OAuth 完成即正确。
 
-存量 Codex provider（PR #976 之前已 OAuth 完成的）由 `migrate20260518` backfill。Idempotent。
+存量 Codex provider（PR #976 之前已 OAuth 完成的）由 `normalizeCodexEndpointMode`（`internal/server/config/migration.go`，已折入 baseline normalizer，原 `migrate20260518`）backfill。Idempotent。
 
 `ai.Provider.IsCodexProvider()` 方法**保留**——它仍被 client、UA pin、system message 注入等非路由代码消费。本文档讨论的 endpoint mode 只与路由相关。
 
@@ -234,7 +234,7 @@ Template 是用户实例化 provider 的预设入口。Template 里的 `openai_e
 PR #976 引入此设计。涉及行为变更的两个点：
 
 1. **默认从 mirror 变 Chat**：手搓的 OpenAI-proper provider（没用 `openai-com` template）若依赖 `/v1/responses` 直通上游，需手动加 `"openai_endpoint_mode": "both"` 到 config.json。Migration 不能自动处理这种情况（provider 没有 template_id 痕迹），文档化警告即可。
-2. **Codex 存量**：`migrate20260518` 自动 backfill，无感知。
+2. **Codex 存量**：`normalizeCodexEndpointMode` 自动 backfill，无感知。
 
 后续若新增 provider 类型，原则不变：默认 Chat，需要 Responses 就显式声明。
 
