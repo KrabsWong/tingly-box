@@ -145,13 +145,16 @@ func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, candidates []*loadba
 	// exit below that does NOT narrow to a matched partition instead
 	// narrows to basePool, so a service that only exists inside an
 	// unmatched (or bypassed) partition never reaches the terminal pick.
-	basePool := IntersectServices(candidates, rule.Services)
+	// basePool is computed lazily (only the branches that actually take the
+	// non-matched exit pay for the intersection + its map allocation) since
+	// the common case — a partition matches — never needs it.
+	basePool := func() []*loadbalance.Service { return IntersectServices(candidates, rule.Services) }
 
 	// Skip if smart routing not enabled
 	if !rule.SmartEnabled || len(rule.SmartRouting) == 0 || ctx.Request == nil {
 		logrus.Debugf("[smart_routing] skipped - SmartEnabled=%v, SmartRoutingCount=%d, Request=%v",
 			rule.SmartEnabled, len(rule.SmartRouting), ctx.Request != nil)
-		return basePool, nil, nil
+		return basePool(), nil, nil
 	}
 
 	logrus.Debugf("[smart_routing] evaluating %d rules for model %s", len(rule.SmartRouting), rule.RequestModel)
@@ -160,7 +163,7 @@ func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, candidates []*loadba
 	reqCtx := smartrouting.ExtractContext(ctx.Request)
 	if reqCtx == nil {
 		s.emitTrace(ctx, nil, nil, -1, 0, 0, nil, "no_context", "request type not supported for smart routing")
-		return basePool, nil, nil
+		return basePool(), nil, nil
 	}
 
 	// Annotate the request context with the agent.claude_code request kind when
@@ -179,14 +182,14 @@ func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, candidates []*loadba
 	if err != nil {
 		logrus.Debugf("[smart_routing] failed to create router: %v", err)
 		s.emitTrace(ctx, reqCtx, nil, -1, 0, 0, nil, "router_invalid", err.Error())
-		return basePool, nil, nil
+		return basePool(), nil, nil
 	}
 
 	matchedServices, matchedRuleIndex, matched, trace := router.Evaluate(reqCtx)
 	if !matched || len(matchedServices) == 0 {
 		logrus.Debugf("[smart_routing] no rule matched - matched=%v, services=%d", matched, len(matchedServices))
 		s.emitTrace(ctx, reqCtx, trace, -1, 0, 0, nil, "no_match", "no rule matched the request")
-		return basePool, nil, nil
+		return basePool(), nil, nil
 	}
 
 	matchedRule := rule.SmartRouting[matchedRuleIndex]
@@ -196,7 +199,7 @@ func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, candidates []*loadba
 	if _, already := ctx.BypassedSmartRules[matchedRuleIndex]; already {
 		s.emitTrace(ctx, reqCtx, trace, matchedRuleIndex, len(matchedServices), 0, nil,
 			"bypass_already_done", "rule already bypassed by op-level processor; falling through to LoadBalancer")
-		return basePool, nil, nil
+		return basePool(), nil, nil
 	}
 
 	// Implicit bypass: if the matched rule's ops carry registered processors,
@@ -207,7 +210,7 @@ func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, candidates []*loadba
 	if s.runOpProcessors(ctx, reqCtx, matchedRule, matchedRuleIndex, matchedServices) {
 		s.emitTrace(ctx, reqCtx, trace, matchedRuleIndex, len(matchedServices), 0, nil,
 			"bypass_processor_run", "op-level processor ran; falling through to LoadBalancer")
-		return basePool, nil, nil
+		return basePool(), nil, nil
 	}
 
 	if len(candidates) > 0 {
@@ -219,7 +222,7 @@ func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, candidates []*loadba
 		logrus.Debugf("[smart_routing] matched rule has no services in current candidate set")
 		s.emitTrace(ctx, reqCtx, trace, matchedRuleIndex, 0, 0, nil, "no_candidates",
 			"matched rule has no services in current candidate set")
-		return basePool, nil, nil
+		return basePool(), nil, nil
 	}
 
 	// Filter active services
@@ -228,7 +231,7 @@ func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, candidates []*loadba
 		logrus.Debugf("[smart_routing] no active services in matched set")
 		s.emitTrace(ctx, reqCtx, trace, matchedRuleIndex, len(matchedServices), 0, nil, "no_active_services",
 			"matched rule has no active services")
-		return basePool, nil, nil
+		return basePool(), nil, nil
 	}
 
 	// Narrow the candidate set to the matched partition — this stage decides
