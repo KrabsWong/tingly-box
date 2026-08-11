@@ -41,7 +41,7 @@ type concurrencyTestFetcher struct {
 }
 
 func (*concurrencyTestFetcher) Name() string                 { return "concurrency-test" }
-func (*concurrencyTestFetcher) ProviderType() ProviderType   { return ProviderTypeOpenAI }
+func (*concurrencyTestFetcher) ProviderType() ProviderType   { return ProviderTypeAnthropic }
 func (*concurrencyTestFetcher) Validate(*typ.Provider) error { return nil }
 func (*concurrencyTestFetcher) RequiresAuth() typ.AuthType   { return "" }
 func (f *concurrencyTestFetcher) Fetch(_ context.Context, provider *typ.Provider) (*ProviderUsage, error) {
@@ -82,7 +82,7 @@ func TestRefreshBoundsConcurrency(t *testing.T) {
 		providers[i] = &typ.Provider{
 			UUID:    fmt.Sprintf("provider-%d", i),
 			Name:    fmt.Sprintf("Provider %d", i),
-			APIBase: "https://api.openai.com/v1",
+			APIBase: "https://api.anthropic.com/v1",
 			Enabled: true,
 		}
 	}
@@ -113,7 +113,10 @@ func TestInferProviderTypeAPIBaseCaseInsensitive(t *testing.T) {
 		want    ProviderType
 	}{
 		{"HTTPS://API.ANTHROPIC.COM/V1", ProviderTypeAnthropic},
-		{"https://OPENAI.Azure.com/openai", ProviderTypeOpenAI},
+		// OpenAI is intentionally unclassified (see the OpenAI-disabling
+		// commit): its legacy usage API's current requirements are unverified,
+		// so the manager skips it rather than reading it wrong.
+		{"https://OPENAI.Azure.com/openai", ""},
 		{"https://generativelanguage.GOOGLEAPIS.COM", ProviderTypeGemini},
 		{"https://openrouter.ai/api/v1", ProviderTypeOpenRouter},
 		{"https://api.minimaxi.com/v1", ProviderTypeMiniMaxCN},
@@ -174,5 +177,101 @@ func TestUnreadableProvidersReportWhyAndNothingElse(t *testing.T) {
 	}
 	if !usage.ExpiresAt.Equal(now.Add(time.Hour)) {
 		t.Errorf("ExpiresAt = %v; want the ttl applied to now", usage.ExpiresAt)
+	}
+}
+
+// recordingStore reports what a fetch attempt left behind.
+type recordingStore struct {
+	managerTestStore
+	saved   []*ProviderUsage
+	deleted []string
+}
+
+func (s *recordingStore) Save(_ context.Context, usage *ProviderUsage) error {
+	s.saved = append(s.saved, usage)
+	return nil
+}
+
+func (s *recordingStore) Delete(_ context.Context, uuid string) error {
+	s.deleted = append(s.deleted, uuid)
+	return nil
+}
+
+// Most providers have no quota fetcher, which is ordinary rather than broken.
+// Recording it as a usage record put "unsupported provider type" in LastError
+// and the UI showed that as a provider failure.
+func TestRefreshProviderUnsupportedIsASkipNotAnError(t *testing.T) {
+	provider := &typ.Provider{UUID: "u1", Name: "Some Gateway", AuthType: typ.AuthTypeAPIKey}
+	store := &recordingStore{}
+	m := NewManager(nil, store, managerTestProviderManager{providers: []*typ.Provider{provider}}, logrus.New())
+
+	usage, err := m.RefreshProvider(context.Background(), "u1")
+	if !errors.Is(err, ErrProviderUnsupported) {
+		t.Fatalf("RefreshProvider() error = %v, want ErrProviderUnsupported", err)
+	}
+	if usage != nil {
+		t.Errorf("usage = %+v, want nil", usage)
+	}
+	if len(store.saved) != 0 {
+		t.Errorf("saved %d records, want none", len(store.saved))
+	}
+	// Any record an earlier version wrote is cleared out on the way past.
+	if len(store.deleted) != 1 || store.deleted[0] != "u1" {
+		t.Errorf("deleted = %v, want [u1]", store.deleted)
+	}
+}
+
+// Refresh walks every enabled provider, most of which have no fetcher; those
+// must drop out quietly rather than land in the results as failures.
+func TestRefreshSkipsUnsupportedProviders(t *testing.T) {
+	store := &recordingStore{}
+	m := NewManager(nil, store, managerTestProviderManager{providers: []*typ.Provider{
+		{UUID: "u1", Name: "Some Gateway", AuthType: typ.AuthTypeAPIKey},
+	}}, logrus.New())
+
+	usages, err := m.Refresh(context.Background())
+	if err != nil {
+		t.Fatalf("Refresh() error: %v", err)
+	}
+	if len(usages) != 0 {
+		t.Errorf("Refresh() returned %d usages, want none", len(usages))
+	}
+	if len(store.saved) != 0 {
+		t.Errorf("saved %d records, want none", len(store.saved))
+	}
+}
+
+// A path segment is a user-chosen name and must never speak for a vendor.
+// Matching the whole URL read a local gateway route named "codex1" as Codex,
+// which sent that provider's token to chatgpt.com on the next refresh.
+func TestInferProviderTypeIgnoresPathAndLocalHosts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		apiBase string
+		want    ProviderType
+	}{
+		{"local gateway route named codex", "http://localhost:12581/tingly/codex1", ""},
+		{"loopback ip", "http://127.0.0.1:12581/tingly/gemini", ""},
+		{"private lan", "http://192.168.1.10:8080/v1/cursor", ""},
+		{"container hostname", "http://tingly-box:12581/tingly/codex1", ""},
+		{"mdns", "http://mac.local:12581/copilot/v1", ""},
+		{"vendor name only in the path", "https://gateway.example.com/proxy/openrouter.ai/api/v1", ""},
+		{"lookalike domain", "https://api.openai.com.evil.test/v1", ""},
+		{"scheme-less base", "api.anthropic.com/v1", ProviderTypeAnthropic},
+		{"subdomain of a vendor", "https://eu.api.anthropic.com/v1", ProviderTypeAnthropic},
+		{"kimi coding needs its path", "https://api.kimi.com/coding/v1", ProviderTypeKimiCode},
+		{"kimi without the coding path", "https://api.kimi.com/v1", ""},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := inferProviderType(&typ.Provider{APIBase: tt.apiBase}); got != tt.want {
+				t.Fatalf("inferProviderType(%q) = %q, want %q", tt.apiBase, got, tt.want)
+			}
+		})
 	}
 }

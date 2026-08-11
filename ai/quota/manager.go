@@ -2,7 +2,10 @@ package quota
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -88,6 +91,9 @@ func (m *Manager) Refresh(ctx context.Context) ([]*ProviderUsage, error) {
 			defer wg.Done()
 			for provider := range jobs {
 				usage, err := m.fetchProviderQuota(ctx, provider)
+				if errors.Is(err, ErrProviderUnsupported) {
+					continue
+				}
 				if err != nil {
 					m.loggerWithError(provider, err).Warn("failed to fetch quota")
 					continue
@@ -130,6 +136,10 @@ func (m *Manager) RefreshProvider(ctx context.Context, providerUUID string) (*Pr
 }
 
 // GetQuota returns cached quota data and refreshes it when expired.
+//
+// Both ErrUsageNotFound and ErrProviderUnsupported mean "there is nothing to
+// show for this provider" and reach the caller unwrapped, so handlers can skip
+// them instead of reporting a failure.
 //
 // A not-found store lookup returns ErrUsageNotFound UNWRAPPED — callers
 // (e.g. the provider-quota HTTP handlers) compare against that sentinel
@@ -254,17 +264,31 @@ func (m *Manager) fetchProviderQuota(ctx context.Context, provider *typ.Provider
 	providerType := inferProviderType(provider)
 	now := time.Now()
 
-	// Verify that a fetcher is registered.
+	// Log here rather than in the callers: a quota read is reached from the
+	// background ticker, the manual refresh endpoint, and cache expiry, and
+	// every one of those used to fail silently into a stored LastError.
+	log := m.logger.WithFields(logrus.Fields{
+		"provider_uuid": provider.UUID,
+		"provider_name": provider.Name,
+		"provider_type": providerType,
+	})
+
+	// Verify that a fetcher is registered. No fetcher is the ordinary case for
+	// most providers, so it is reported as a skip, not stored as a failure:
+	// persisting it put "unsupported provider type" in the record's LastError,
+	// which the UI then showed as if the provider had broken. Any such record
+	// left by an earlier version is dropped here.
 	f, ok := m.registry.Get(providerType)
 	if !ok {
-		usage := m.unreadable(provider, providerType, now,
-			fmt.Sprintf("unsupported provider type: %q", providerType))
-		_ = m.store.Save(ctx, usage)
-		return usage, nil
+		log.Debug("skipping quota fetch: no fetcher for this provider type")
+		_ = m.store.Delete(ctx, provider.UUID)
+		return nil, ErrProviderUnsupported
 	}
+	log = log.WithField("fetcher", f.Name())
 
 	// Validate the provider configuration.
 	if err := f.Validate(provider); err != nil {
+		log.WithError(err).Warn("quota fetch skipped: provider failed validation")
 		usage := m.unreadable(provider, providerType, now,
 			fmt.Sprintf("validation failed: %v", err))
 		_ = m.store.Save(ctx, usage)
@@ -272,14 +296,29 @@ func (m *Manager) fetchProviderQuota(ctx context.Context, provider *typ.Provider
 	}
 
 	// Fetch quota data.
+	start := time.Now()
 	usage, err := f.Fetch(ctx, provider)
+	elapsed := time.Since(start)
 	if err != nil {
+		log.WithFields(logrus.Fields{
+			"duration_ms": elapsed.Milliseconds(),
+			"error":       err.Error(),
+		}).Warn("quota fetch failed")
 		usage = m.unreadable(provider, providerType, now, err.Error())
+	} else {
+		fields := logrus.Fields{
+			"duration_ms": elapsed.Milliseconds(),
+			"windows":     len(usage.Windows),
+		}
+		if pct, ok := usage.Pct(); ok {
+			fields["used_percent"] = pct
+		}
+		log.WithFields(fields).Debug("quota fetched")
 	}
 
 	// Persist the result.
 	if saveErr := m.store.Save(ctx, usage); saveErr != nil {
-		m.logger.WithError(saveErr).Error("failed to save quota")
+		log.WithError(saveErr).Error("failed to save quota")
 	}
 
 	return usage, nil
@@ -298,8 +337,8 @@ func inferProviderType(provider *typ.Provider) ProviderType {
 		return ProviderTypeAnthropic
 	case typ.IssuerGoogle:
 		return ProviderTypeGemini
-	case typ.IssuerOpenAI:
-		return ProviderTypeOpenAI
+	//case typ.IssuerOpenAI:
+	//	return ProviderTypeOpenAI
 	case typ.IssuerCopilot:
 		return ProviderTypeCopilot
 	case typ.IssuerCursor:
@@ -310,39 +349,92 @@ func inferProviderType(provider *typ.Provider) ProviderType {
 		return ProviderTypeKimiCode
 	}
 
-	// Fallback: infer from APIBase domain
-	apiBase := strings.ToLower(provider.APIBase)
+	// Fallback: infer from the APIBase host.
+	//
+	// The host, never the whole URL. Matching the URL made any path segment
+	// speak for the vendor: a local gateway at
+	// http://localhost:12581/tingly/codex1 was read as Codex — and the Codex
+	// fetcher would then take that provider's token to chatgpt.com. Paths are
+	// user-chosen names; only the host says who answers.
+	host, path := apiBaseHostPath(provider.APIBase)
+	if host == "" || isLocalAPIHost(host) {
+		return ""
+	}
 	switch {
-	case strings.Contains(apiBase, "anthropic.com"):
+	case hostIs(host, "anthropic.com"):
 		return ProviderTypeAnthropic
-	case strings.Contains(apiBase, "openai.com"), strings.Contains(apiBase, "openai.azure.com"):
-		return ProviderTypeOpenAI
-	case strings.Contains(apiBase, "googleapis.com"), strings.Contains(apiBase, "gemini"):
+	//case hostIs(host, "openai.com", "openai.azure.com"):
+	//	return ProviderTypeOpenAI
+	case hostIs(host, "googleapis.com"), strings.Contains(host, "gemini"):
 		return ProviderTypeGemini
-	case strings.Contains(apiBase, "cursor"):
+	case strings.Contains(host, "cursor"):
 		return ProviderTypeCursor
-	case strings.Contains(apiBase, "copilot"):
+	case strings.Contains(host, "copilot"):
 		return ProviderTypeCopilot
-	case strings.Contains(apiBase, "vertex"):
+	case strings.Contains(host, "vertex"):
 		return ProviderTypeVertexAI
-	case strings.Contains(apiBase, "zai.app"):
+	case hostIs(host, "zai.app"):
 		return ProviderTypeZai
-	case strings.Contains(apiBase, "bigmodel.cn"):
+	case hostIs(host, "bigmodel.cn"):
 		return ProviderTypeGLM
-	case strings.Contains(apiBase, "moonshot.cn"):
+	case hostIs(host, "moonshot.cn"):
 		return ProviderTypeKimiK2
-	case strings.Contains(apiBase, "api.kimi.com/coding"):
+	// Kimi's coding product shares a host with the rest of kimi.com, so this
+	// one pair genuinely needs the path to tell them apart.
+	case hostIs(host, "kimi.com") && strings.HasPrefix(path, "/coding"):
 		return ProviderTypeKimiCode
-	case strings.Contains(apiBase, "openrouter.ai"):
+	case hostIs(host, "openrouter.ai"):
 		return ProviderTypeOpenRouter
-	case strings.Contains(apiBase, "minimaxi.com"):
+	case hostIs(host, "minimaxi.com"):
 		return ProviderTypeMiniMaxCN
-	case strings.Contains(apiBase, "minimax"):
+	case strings.Contains(host, "minimax"):
 		return ProviderTypeMiniMax
-	case strings.Contains(apiBase, "chatgpt.com"), strings.Contains(apiBase, "codex"):
+	case hostIs(host, "chatgpt.com"), strings.Contains(host, "codex"):
 		return ProviderTypeCodex
 	}
 	return ""
+}
+
+// apiBaseHostPath splits a configured API base into its lowercased host and
+// path. A base without a scheme ("api.openai.com/v1") is still understood.
+func apiBaseHostPath(apiBase string) (host, path string) {
+	trimmed := strings.TrimSpace(apiBase)
+	if trimmed == "" {
+		return "", ""
+	}
+	if !strings.Contains(trimmed, "://") {
+		trimmed = "http://" + trimmed
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", ""
+	}
+	return strings.ToLower(parsed.Hostname()), strings.ToLower(parsed.Path)
+}
+
+// hostIs reports whether host is one of the domains, or a subdomain of one.
+// Suffix matching, not substring: "notopenai.com.evil.test" is not OpenAI.
+func hostIs(host string, domains ...string) bool {
+	for _, domain := range domains {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// isLocalAPIHost reports whether the host is this machine or a private
+// network. A provider pointing there is a local gateway — frequently
+// tingly-box itself — and no vendor heuristic may claim it.
+func isLocalAPIHost(host string) bool {
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast()
+	}
+	// A bare name with no dot is a LAN or container hostname, not a vendor.
+	return !strings.Contains(host, ".")
 }
 
 // Summary contains aggregate quota statistics.
