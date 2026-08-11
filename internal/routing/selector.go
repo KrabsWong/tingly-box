@@ -57,13 +57,18 @@ type healthFilterProvider interface {
 	HealthFilter() *HealthFilter
 }
 
-type selectionState struct {
-	candidateServices []*loadbalance.Service
-}
-
-func newSelectionState(rule *typ.Rule) *selectionState {
+// initialCandidateServices builds the pipeline's starting candidate set:
+// base ∪ every smart-routing partition's services, deduplicated by service
+// ID (partition entries override a same-ID base entry in place). The union
+// exists so HealthStage — which runs first — can pre-filter partition-only
+// services too (see pipeline-health-before-smart-routing); SmartRoutingStage
+// is responsible for narrowing back down to a single scope (the matched
+// partition, or the base pool when none matches) before handing candidates
+// to Affinity/LoadBalancer, so a service that only exists inside an
+// unmatched partition never reaches the terminal pick.
+func initialCandidateServices(rule *typ.Rule) []*loadbalance.Service {
 	if rule == nil {
-		return &selectionState{candidateServices: nil}
+		return nil
 	}
 
 	// Deduplicate services by service ID while preserving first-seen order.
@@ -99,7 +104,7 @@ func newSelectionState(rule *typ.Rule) *selectionState {
 		}
 	}
 
-	return &selectionState{candidateServices: services}
+	return services
 }
 
 // NewServiceSelector creates a new service selector
@@ -171,7 +176,7 @@ func NewServiceSelectorWithLogger(
 // Select is the main entry point for service selection.
 // It picks a pre-built pipeline based on rule configuration and executes it.
 func (s *ServiceSelector) Select(ctx *SelectionContext) (*SelectionResult, error) {
-	state := newSelectionState(ctx.Rule)
+	candidates := initialCandidateServices(ctx.Rule)
 	evaluatedStages := make([]string, 0, len(s.pipeline))
 
 	logrus.Debugf("[selector] executing pipeline with %d stages for rule %s",
@@ -183,25 +188,20 @@ func (s *ServiceSelector) Select(ctx *SelectionContext) (*SelectionResult, error
 		evaluatedStages = append(evaluatedStages, stageName)
 		logrus.Debugf("[selector] evaluating stage: %s", stageName)
 
-		result, handled := stage.Evaluate(ctx, state)
+		narrowed, result, err := stage.Evaluate(ctx, candidates)
+		if err != nil {
+			return nil, fmt.Errorf("stage %s: %w", stageName, err)
+		}
+		candidates = narrowed
 
 		if result != nil {
-			if result.FilteredServices != nil {
-				state.candidateServices = result.FilteredServices
-			}
-		}
+			// Attach the cumulative path at the terminal boundary so
+			// observability reports every stage that actually ran, including
+			// pass-through stages that only narrowed the candidate set.
+			result.EvaluatedStages = append([]string(nil), evaluatedStages...)
 
-		if handled {
-			if result != nil {
-				// A filter stage's result is intentionally replaced as the
-				// pipeline advances. Attach the cumulative path at the terminal
-				// boundary so observability reports every stage that actually ran,
-				// including pass-through stages that returned nil.
-				result.EvaluatedStages = append([]string(nil), evaluatedStages...)
-			}
-			// Stage produced a result, validate and return
-			if result == nil || result.Service == nil {
-				logrus.Warnf("[selector] stage %s returned handled=true but nil result", stageName)
+			if result.Service == nil {
+				logrus.Warnf("[selector] stage %s returned a final result with a nil service", stageName)
 				continue
 			}
 

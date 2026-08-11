@@ -130,7 +130,7 @@ func TestServiceSelectorPipelineScenarios(t *testing.T) {
 	})
 
 	t.Run("pipeline-smart-routing-before-load-balancer/no-match-excludes-partition-only-services", func(t *testing.T) {
-		// Regression: newSelectionState seeds candidates with base ∪ every
+		// Regression: initialCandidateServices seeds candidates with base ∪ every
 		// partition's services (so HealthStage can pre-filter partition-only
 		// services too). When the request matches no partition, that union
 		// must not leak into the terminal LoadBalancer pick — services that

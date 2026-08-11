@@ -6,6 +6,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/tingly-dev/tingly-box/internal/clock"
+	"github.com/tingly-dev/tingly-box/internal/loadbalance"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 
@@ -49,21 +50,21 @@ func (s *AffinityStage) Name() string {
 }
 
 // Evaluate checks for locked service affinity
-func (s *AffinityStage) Evaluate(ctx *SelectionContext, state *selectionState) (*SelectionResult, bool) {
+func (s *AffinityStage) Evaluate(ctx *SelectionContext, candidates []*loadbalance.Service) ([]*loadbalance.Service, *SelectionResult, error) {
 	rule := ctx.Rule
 
 	// Skip if affinity not enabled. Affinity is a load-balancing concern and
 	// is independent of smart routing — it applies whenever a session can be
 	// identified, regardless of rule.SmartEnabled.
 	if !rule.AffinityEnabled() || ctx.SessionID.IsEmpty() {
-		return nil, false
+		return candidates, nil, nil
 	}
 
 	// Look up the pin in the partition smart routing just matched (or the
 	// top-level partition when nothing matched).
 	entry, ok := s.store.Get(rule.UUID, AffinitySessionKey(ctx.SessionID.String(), ctx.MatchedSmartRuleIndex))
 	if !ok {
-		return nil, false
+		return candidates, nil, nil
 	}
 
 	// Strict TTL: honor the pin only while the entry has not expired.
@@ -72,16 +73,16 @@ func (s *AffinityStage) Evaluate(ctx *SelectionContext, state *selectionState) (
 	if clock.Now().After(entry.ExpiresAt) {
 		logrus.Infof("[affinity] affinity entry for session %s expired at %s; dropping pin so strategy re-selects",
 			ctx.SessionID.String(), entry.ExpiresAt)
-		return nil, false
+		return candidates, nil, nil
 	}
 
 	logrus.Infof("[affinity] using locked service for session %s: %s",
 		ctx.SessionID.String(), entry.Service.Model)
 
-	if state != nil && len(state.candidateServices) > 0 && !ContainsService(state.candidateServices, entry.Service) {
+	if len(candidates) > 0 && !ContainsService(candidates, entry.Service) {
 		logrus.Debugf("[affinity] locked service %s not in candidate set, skipping",
 			entry.Service.ServiceID())
-		return nil, false
+		return candidates, nil, nil
 	}
 
 	// Health scoping (breaker-aware): only honor a pin while the locked service
@@ -94,14 +95,13 @@ func (s *AffinityStage) Evaluate(ctx *SelectionContext, state *selectionState) (
 	//   - one service: always honored (nothing else to pick).
 	// On decline the pipeline falls through to the strategy, which re-selects a
 	// currently-valid service, and postProcess re-pins the session there.
-	if state != nil && len(state.candidateServices) > 0 &&
-		!typ.IsAffinityEligible(rule.UUID, state.candidateServices, entry.Service) {
+	if len(candidates) > 0 && !typ.IsAffinityEligible(rule.UUID, candidates, entry.Service) {
 		logrus.Infof("[affinity] locked service %s is not currently selectable for session %s; dropping pin so strategy re-selects",
 			entry.Service.ServiceID(), ctx.SessionID.String())
-		return nil, false
+		return candidates, nil, nil
 	}
 
 	result := NewResult(entry.Service, SourceAffinity)
 	result.MatchedSmartRuleIndex = ctx.MatchedSmartRuleIndex
-	return result, true
+	return candidates, result, nil
 }

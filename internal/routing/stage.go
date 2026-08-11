@@ -1,16 +1,35 @@
 package routing
 
-// SelectionStage represents a single stage in the service selection pipeline.
-// Each stage can evaluate the context and either:
-// - Return a service selection (result, true)
-// - Pass to the next stage (nil, false)
+import "github.com/tingly-dev/tingly-box/internal/loadbalance"
+
+// SelectionStage is one step in the service-selection pipeline. Stages are
+// pure with respect to the pipeline's control flow: each receives the
+// current candidate set as an explicit argument and returns what it asserts
+// the set now is. There is no shared mutable state between stages, and no
+// "nil means unchanged" — a stage with no opinion returns its input slice
+// unchanged.
+//
+// Stages may only READ fields on the *loadbalance.Service values in
+// candidates; they must not write to them (Service.InitializeStats's
+// idempotent lazy-init is the one sanctioned exception — see its doc
+// comment). Narrowing must allocate a fresh slice — never truncate or
+// append onto the input slice's backing array — so a caller's slice is
+// never mutated out from under it.
 type SelectionStage interface {
-	// Name returns the stage identifier for logging and metrics
+	// Name returns the stage identifier for logging, metrics, and the
+	// Source* constants on SelectionResult.
 	Name() string
 
-	// Evaluate attempts to select a service based on the context.
-	// Returns:
-	//   - (result, true) if this stage selected a service (stops pipeline)
-	//   - (nil, false) if this stage cannot select (continue to next stage)
-	Evaluate(ctx *SelectionContext, state *selectionState) (*SelectionResult, bool)
+	// Evaluate narrows candidates (or returns them unchanged) and reports
+	// whether this stage picked the final winner.
+	//
+	//   - err != nil: this stage could not be evaluated; the pipeline
+	//     aborts and the error propagates to the caller of Select.
+	//   - final != nil: this stage selected the winning service; the
+	//     pipeline stops here. The returned narrowed slice is ignored in
+	//     this case.
+	//   - otherwise: narrowed becomes the input candidate set for the next
+	//     stage (or, if this is the last stage, the pipeline reports "no
+	//     service available").
+	Evaluate(ctx *SelectionContext, candidates []*loadbalance.Service) (narrowed []*loadbalance.Service, final *SelectionResult, err error)
 }

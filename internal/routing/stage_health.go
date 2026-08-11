@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/tingly-dev/tingly-box/internal/loadbalance"
 )
 
 // HealthStage filters unhealthy services from the context.
@@ -21,18 +23,18 @@ func (s *HealthStage) Name() string {
 	return SourceHealth
 }
 
-func (s *HealthStage) Evaluate(ctx *SelectionContext, state *selectionState) (*SelectionResult, bool) {
-	if state == nil || state.candidateServices == nil {
-		return nil, false
+func (s *HealthStage) Evaluate(ctx *SelectionContext, candidates []*loadbalance.Service) ([]*loadbalance.Service, *SelectionResult, error) {
+	if len(candidates) == 0 {
+		return candidates, nil, nil
 	}
 
 	// If no health filter configured, pass through unchanged
 	if s.filter == nil {
-		return NewFilterResult(SourceHealth, state.candidateServices), false
+		return candidates, nil, nil
 	}
 
-	before := len(state.candidateServices)
-	healthy := s.filter.Filter(state.candidateServices)
+	before := len(candidates)
+	healthy := s.filter.Filter(candidates)
 
 	// Degrade, don't disappear: if every candidate is unhealthy, keep the full
 	// set rather than emptying it — mirrors LoadBalancer.SelectService, so the
@@ -44,7 +46,7 @@ func (s *HealthStage) Evaluate(ctx *SelectionContext, state *selectionState) (*S
 			"rule_uuid":  selectionRuleUUID(ctx),
 			"candidates": before,
 		}).Warnf("[health] all %d candidates unhealthy; keeping the full set (degrade)", before)
-		return NewFilterResult(SourceHealth, state.candidateServices), false
+		return candidates, nil, nil
 	}
 
 	filteredCount := before - len(healthy)
@@ -59,7 +61,7 @@ func (s *HealthStage) Evaluate(ctx *SelectionContext, state *selectionState) (*S
 		}).Warnf("[health] Filtered %d unhealthy services, %d remaining (of %d total)",
 			filteredCount, len(healthy), before)
 		// Log each filtered service for debugging
-		for _, svc := range state.candidateServices {
+		for _, svc := range candidates {
 			if !s.filter.IsHealthy(svc.ServiceID()) {
 				logrus.WithContext(selectionLogContext(ctx)).WithFields(logrus.Fields{
 					"stage":         "routing_health_filtered_service",
@@ -75,7 +77,7 @@ func (s *HealthStage) Evaluate(ctx *SelectionContext, state *selectionState) (*S
 	}
 
 	// Continue pipeline (don't select, just filter)
-	return NewFilterResult(SourceHealth, healthy), false
+	return healthy, nil, nil
 }
 
 func selectionLogContext(ctx *SelectionContext) context.Context {

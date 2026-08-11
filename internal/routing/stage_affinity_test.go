@@ -37,9 +37,9 @@ func TestAffinity_LockedSession(t *testing.T) {
 	stage := NewAffinityStage(store)
 	ctx := testContext(rule, "session-1")
 
-	result, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.True(t, handled, "should return handled=true for locked session")
-	require.NotNil(t, result)
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.NotNil(t, result, "should return a final result for a locked session")
 	require.Equal(t, "gpt-4", result.Service.Model)
 	require.Equal(t, "affinity", result.Source)
 }
@@ -54,9 +54,9 @@ func TestAffinity_NoLock(t *testing.T) {
 	stage := NewAffinityStage(store)
 	ctx := testContext(rule, "session-1")
 
-	result, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.False(t, handled, "should pass to next stage when no lock")
-	require.Nil(t, result)
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result, "should pass to next stage when no lock")
 }
 
 func TestAffinity_AffinityDisabled(t *testing.T) {
@@ -71,8 +71,9 @@ func TestAffinity_AffinityDisabled(t *testing.T) {
 	stage := NewAffinityStage(store)
 	ctx := testContext(rule, "session-1")
 
-	_, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.False(t, handled, "should pass when affinity disabled")
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result, "should pass when affinity disabled")
 }
 
 func TestAffinity_SmartDisabled(t *testing.T) {
@@ -89,8 +90,9 @@ func TestAffinity_SmartDisabled(t *testing.T) {
 	stage := NewAffinityStage(store)
 	ctx := testContext(rule, "session-1")
 
-	result, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.True(t, handled, "affinity should apply even when smart routing is disabled")
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.NotNil(t, result, "affinity should apply even when smart routing is disabled")
 	require.Equal(t, "provider-a", result.Service.Provider)
 }
 
@@ -106,8 +108,9 @@ func TestAffinity_EmptySession(t *testing.T) {
 	stage := NewAffinityStage(store)
 	ctx := testContext(rule, "") // empty session
 
-	_, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.False(t, handled, "should pass when session is empty")
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result, "should pass when session is empty")
 }
 
 // Pins are partition-scoped: a pin created in the top-level partition must
@@ -132,21 +135,24 @@ func TestAffinity_PartitionScoping(t *testing.T) {
 	// A request routed by smart partition 1 must see the subset pin.
 	ctx := testContext(rule, "session-1")
 	ctx.MatchedSmartRuleIndex = 1
-	result, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.True(t, handled)
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.NotNil(t, result)
 	require.Equal(t, "provider-sub", result.Service.Provider)
 
 	// A request with no smart match must see the top-level pin.
 	ctx = testContext(rule, "session-1")
-	result, handled = stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.True(t, handled)
+	_, result, err = stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.NotNil(t, result)
 	require.Equal(t, "provider-top", result.Service.Provider)
 
 	// A request routed by a DIFFERENT partition must find no pin at all.
 	ctx = testContext(rule, "session-1")
 	ctx.MatchedSmartRuleIndex = 2
-	_, handled = stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.False(t, handled, "a pin must never leak across partitions")
+	_, result, err = stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result, "a pin must never leak across partitions")
 }
 
 // --- Tier-scoped affinity (breaker-aware) ---
@@ -164,8 +170,9 @@ func TestAffinity_TierScope_DeclinesStalePinWhenPrimaryHealthy(t *testing.T) {
 	stage := NewAffinityStage(store)
 	ctx := testContext(rule, "s1")
 
-	_, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.False(t, handled,
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result,
 		"stale pin to a lower tier must be declined while the primary tier is healthy")
 }
 
@@ -188,8 +195,9 @@ func TestAffinity_TierScope_HonorsPinWhilePrimaryDown(t *testing.T) {
 	stage := NewAffinityStage(store)
 	ctx := testContext(rule, "s1")
 
-	result, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.True(t, handled, "pin must be honored while the primary tier breaker is open")
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.NotNil(t, result, "pin must be honored while the primary tier breaker is open")
 	require.Equal(t, t1.ServiceID(), result.Service.ServiceID())
 }
 
@@ -212,8 +220,9 @@ func TestAffinity_TierScope_DeclinesWhenPinnedBreakerOpen(t *testing.T) {
 	stage := NewAffinityStage(store)
 	ctx := testContext(rule, "s1")
 
-	_, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.False(t, handled,
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result,
 		"pin to an open lower-tier service must be declined when a higher tier is available")
 }
 
@@ -229,8 +238,9 @@ func TestAffinity_TierScope_WithinTierStickinessPreserved(t *testing.T) {
 	stage := NewAffinityStage(store)
 	ctx := testContext(rule, "s1")
 
-	result, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.True(t, handled, "within-tier pin must be honored")
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.NotNil(t, result, "within-tier pin must be honored")
 	require.Equal(t, b.ServiceID(), result.Service.ServiceID())
 }
 
@@ -257,8 +267,9 @@ func TestAffinity_HorizontalRule_DropsPinToDeadPeer(t *testing.T) {
 	stage := NewAffinityStage(store)
 	ctx := testContext(rule, "s1")
 
-	_, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.False(t, handled,
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result,
 		"pin to a dead same-tier peer must be dropped even without a tier tactic label")
 }
 
@@ -282,8 +293,9 @@ func TestAffinity_MatchedSmartRuleIndex_Propagated(t *testing.T) {
 	ctx := testContext(rule, "session-1")
 	ctx.MatchedSmartRuleIndex = 2
 
-	result, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.True(t, handled)
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.NotNil(t, result)
 	require.Equal(t, 2, result.MatchedSmartRuleIndex)
 }
 
@@ -320,14 +332,16 @@ func TestAffinity_MultipleSessions(t *testing.T) {
 
 	// Session A should get provider A
 	ctxA := testContext(rule, "session-a")
-	resultA, handledA := stage.Evaluate(ctxA, newSelectionState(ctxA.Rule))
-	require.True(t, handledA)
+	_, resultA, errA := stage.Evaluate(ctxA, initialCandidateServices(ctxA.Rule))
+	require.NoError(t, errA)
+	require.NotNil(t, resultA)
 	require.Equal(t, "provider-a", resultA.Service.Provider)
 
 	// Session B should get provider B
 	ctxB := testContext(rule, "session-b")
-	resultB, handledB := stage.Evaluate(ctxB, newSelectionState(ctxB.Rule))
-	require.True(t, handledB)
+	_, resultB, errB := stage.Evaluate(ctxB, initialCandidateServices(ctxB.Rule))
+	require.NoError(t, errB)
+	require.NotNil(t, resultB)
 	require.Equal(t, "provider-b", resultB.Service.Provider)
 }
 
@@ -353,8 +367,9 @@ func TestAffinity_StrictTTL_Expired(t *testing.T) {
 	stage := NewAffinityStage(store)
 	ctx := testContext(rule, "s1")
 
-	_, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.False(t, handled, "expired affinity entry must be dropped")
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result, "expired affinity entry must be dropped")
 }
 
 // TestAffinity_StrictTTL_NotExpired verifies that a valid (unexpired) affinity
@@ -377,7 +392,8 @@ func TestAffinity_StrictTTL_NotExpired(t *testing.T) {
 	stage := NewAffinityStage(store)
 	ctx := testContext(rule, "s1")
 
-	result, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.True(t, handled, "valid affinity entry must be honored")
+	_, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.NotNil(t, result, "valid affinity entry must be honored")
 	require.Equal(t, "provider-a", result.Service.Provider)
 }

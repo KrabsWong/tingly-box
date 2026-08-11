@@ -127,37 +127,31 @@ func formatTraceMessage(matched bool, idx int, model, outcome string) string {
 	return "smart routing fell through for " + model + " (" + outcome + ")"
 }
 
-// Evaluate evaluates smart routing rules and selects a service. When a
-// matched rule carries op-level processors, the stage runs them (the
-// "implicit bypass") and then returns (nil, false) so the LoadBalancer
-// (global fallback) picks an upstream with the mutated request. The
-// mutated request is NOT re-evaluated against the smart-routing rules —
-// re-entering evaluation with a post-processor request invites surprising
-// matches and is intentionally avoided.
-func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, state *selectionState) (*SelectionResult, bool) {
+// Evaluate evaluates smart routing rules and narrows the candidate set. It
+// never terminates the pipeline (final is always nil) — it only decides
+// WHICH scope the next stages see. When a matched rule carries op-level
+// processors, the stage runs them (the "implicit bypass") so the
+// LoadBalancer (global fallback) picks an upstream with the mutated
+// request. The mutated request is NOT re-evaluated against the
+// smart-routing rules — re-entering evaluation with a post-processor input
+// invites surprising matches and is intentionally avoided.
+func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, candidates []*loadbalance.Service) ([]*loadbalance.Service, *SelectionResult, error) {
 	rule := ctx.Rule
 
-	// newSelectionState seeds candidateServices with base ∪ every partition's
-	// services so HealthStage (which runs first) can pre-filter partition-only
-	// services too (see pipeline-health-before-smart-routing). That union is
-	// only valid while a partition might still match; the moment this stage
-	// decides it won't narrow to one, partition-only services must not leak
-	// into the terminal LoadBalancer pick. matchedPartition flips to true on
-	// the one success path below (matched, not bypassed, has active
-	// services); every other exit — including any added later — defaults to
-	// restoring the rule's base Services as the fallback pool.
-	matchedPartition := false
-	defer func() {
-		if !matchedPartition && state != nil {
-			state.candidateServices = IntersectServices(state.candidateServices, rule.Services)
-		}
-	}()
+	// candidates arrives seeded with base ∪ every partition's services (see
+	// initialCandidateServices) so HealthStage — which runs first — can
+	// pre-filter partition-only services too (pipeline-health-before-smart-routing).
+	// That union is only valid while a partition might still match: every
+	// exit below that does NOT narrow to a matched partition instead
+	// narrows to basePool, so a service that only exists inside an
+	// unmatched (or bypassed) partition never reaches the terminal pick.
+	basePool := IntersectServices(candidates, rule.Services)
 
 	// Skip if smart routing not enabled
 	if !rule.SmartEnabled || len(rule.SmartRouting) == 0 || ctx.Request == nil {
 		logrus.Debugf("[smart_routing] skipped - SmartEnabled=%v, SmartRoutingCount=%d, Request=%v",
 			rule.SmartEnabled, len(rule.SmartRouting), ctx.Request != nil)
-		return nil, false
+		return basePool, nil, nil
 	}
 
 	logrus.Debugf("[smart_routing] evaluating %d rules for model %s", len(rule.SmartRouting), rule.RequestModel)
@@ -166,7 +160,7 @@ func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, state *selectionStat
 	reqCtx := smartrouting.ExtractContext(ctx.Request)
 	if reqCtx == nil {
 		s.emitTrace(ctx, nil, nil, -1, 0, 0, nil, "no_context", "request type not supported for smart routing")
-		return nil, false
+		return basePool, nil, nil
 	}
 
 	// Annotate the request context with the agent.claude_code request kind when
@@ -185,14 +179,14 @@ func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, state *selectionStat
 	if err != nil {
 		logrus.Debugf("[smart_routing] failed to create router: %v", err)
 		s.emitTrace(ctx, reqCtx, nil, -1, 0, 0, nil, "router_invalid", err.Error())
-		return nil, false
+		return basePool, nil, nil
 	}
 
 	matchedServices, matchedRuleIndex, matched, trace := router.Evaluate(reqCtx)
 	if !matched || len(matchedServices) == 0 {
 		logrus.Debugf("[smart_routing] no rule matched - matched=%v, services=%d", matched, len(matchedServices))
 		s.emitTrace(ctx, reqCtx, trace, -1, 0, 0, nil, "no_match", "no rule matched the request")
-		return nil, false
+		return basePool, nil, nil
 	}
 
 	matchedRule := rule.SmartRouting[matchedRuleIndex]
@@ -202,32 +196,30 @@ func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, state *selectionStat
 	if _, already := ctx.BypassedSmartRules[matchedRuleIndex]; already {
 		s.emitTrace(ctx, reqCtx, trace, matchedRuleIndex, len(matchedServices), 0, nil,
 			"bypass_already_done", "rule already bypassed by op-level processor; falling through to LoadBalancer")
-		return nil, false
+		return basePool, nil, nil
 	}
 
 	// Implicit bypass: if the matched rule's ops carry registered processors,
-	// run them (they mutate ctx.Request in place) and return (nil, false).
-	// The LoadBalancer stage then picks an upstream from the parent rule's
-	// top-level Services with the mutated request. We do NOT re-evaluate
-	// smart-routing rules against the mutated request — keeping the bypass
-	// strictly one-shot prevents post-processor inputs from triggering
-	// unintended matches downstream.
+	// run them (they mutate ctx.Request in place) and fall through to
+	// basePool. We do NOT re-evaluate smart-routing rules against the
+	// mutated request — keeping the bypass strictly one-shot prevents
+	// post-processor inputs from triggering unintended matches downstream.
 	if s.runOpProcessors(ctx, reqCtx, matchedRule, matchedRuleIndex, matchedServices) {
 		s.emitTrace(ctx, reqCtx, trace, matchedRuleIndex, len(matchedServices), 0, nil,
 			"bypass_processor_run", "op-level processor ran; falling through to LoadBalancer")
-		return nil, false
+		return basePool, nil, nil
 	}
 
-	if state != nil && len(state.candidateServices) > 0 {
+	if len(candidates) > 0 {
 		beforeCount := len(matchedServices)
-		matchedServices = IntersectServices(matchedServices, state.candidateServices)
+		matchedServices = IntersectServices(matchedServices, candidates)
 		logrus.Debugf("[smart_routing] intersection: %d -> %d services", beforeCount, len(matchedServices))
 	}
 	if len(matchedServices) == 0 {
 		logrus.Debugf("[smart_routing] matched rule has no services in current candidate set")
 		s.emitTrace(ctx, reqCtx, trace, matchedRuleIndex, 0, 0, nil, "no_candidates",
 			"matched rule has no services in current candidate set")
-		return nil, false
+		return basePool, nil, nil
 	}
 
 	// Filter active services
@@ -236,7 +228,7 @@ func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, state *selectionStat
 		logrus.Debugf("[smart_routing] no active services in matched set")
 		s.emitTrace(ctx, reqCtx, trace, matchedRuleIndex, len(matchedServices), 0, nil, "no_active_services",
 			"matched rule has no active services")
-		return nil, false
+		return basePool, nil, nil
 	}
 
 	// Narrow the candidate set to the matched partition — this stage decides
@@ -245,13 +237,12 @@ func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, state *selectionStat
 	// routing used to terminal-select here, but that ran after affinity, so a
 	// first-request pin could defeat content routing for the whole session
 	// TTL and skip processor ops entirely for pinned sessions.
-	matchedPartition = true
 	ctx.MatchedSmartRuleIndex = matchedRuleIndex
 	logrus.Debugf("[smart_routing] rule %d matched, narrowing candidates to %d services",
 		matchedRuleIndex, len(activeServices))
 	s.emitTrace(ctx, reqCtx, trace, matchedRuleIndex, len(matchedServices), len(activeServices),
 		nil, "matched", "candidates narrowed to the matched subset")
-	return NewFilterResult(SourceSmartRouting, activeServices), false
+	return activeServices, nil, nil
 }
 
 // runOpProcessors runs the registered op-level processors of the matched rule
