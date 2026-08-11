@@ -138,20 +138,25 @@ func formatTraceMessage(matched bool, idx int, model, outcome string) string {
 func (s *SmartRoutingStage) Evaluate(ctx *SelectionContext, candidates []*loadbalance.Service) ([]*loadbalance.Service, *SelectionResult, error) {
 	rule := ctx.Rule
 
-	// candidates arrives seeded with base ∪ every partition's services (see
-	// initialCandidateServices) so HealthStage — which runs first — can
-	// pre-filter partition-only services too (pipeline-health-before-smart-routing).
-	// That union is only valid while a partition might still match: every
-	// exit below that does NOT narrow to a matched partition instead
-	// narrows to basePool, so a service that only exists inside an
-	// unmatched (or bypassed) partition never reaches the terminal pick.
-	// basePool is computed lazily (only the branches that actually take the
-	// non-matched exit pay for the intersection + its map allocation) since
-	// the common case — a partition matches — never needs it.
+	// candidates arrives seeded with base ∪ every partition's services — see
+	// initialCandidateServices for why. Every exit below that does NOT narrow
+	// to a matched partition instead narrows to basePool, so a service that
+	// only exists inside an unmatched (or bypassed) partition never reaches
+	// the terminal pick. basePool is computed lazily (only the branches that
+	// actually take the non-matched exit pay for the intersection + its map
+	// allocation) since the common case — a partition matches — never needs it.
 	basePool := func() []*loadbalance.Service { return IntersectServices(candidates, rule.Services) }
 
-	// Skip if smart routing not enabled
-	if !rule.SmartEnabled || len(rule.SmartRouting) == 0 || ctx.Request == nil {
+	// Skip if smart routing not enabled. When SmartRouting is empty,
+	// initialCandidateServices never added anything beyond rule.Services, so
+	// candidates already IS the base pool — basePool() would be a provable
+	// no-op there (a wasted map-build + scan on every plain, non-smart rule,
+	// the common case), so skip straight to returning candidates unchanged.
+	if len(rule.SmartRouting) == 0 {
+		logrus.Debugf("[smart_routing] skipped - SmartRoutingCount=0")
+		return candidates, nil, nil
+	}
+	if !rule.SmartEnabled || ctx.Request == nil {
 		logrus.Debugf("[smart_routing] skipped - SmartEnabled=%v, SmartRoutingCount=%d, Request=%v",
 			rule.SmartEnabled, len(rule.SmartRouting), ctx.Request != nil)
 		return basePool(), nil, nil
