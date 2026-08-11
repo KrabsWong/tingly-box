@@ -24,15 +24,13 @@ func TestHealthStage_FiltersUnhealthy(t *testing.T) {
 
 	rule := testRule("rule-1", "gpt-4", []*loadbalance.Service{svcA, svcB, svcC})
 	ctx := testContext(rule, "")
-	state := newSelectionState(ctx.Rule)
 
-	result, handled := stage.Evaluate(ctx, state)
-	require.False(t, handled, "should not select, just filter")
-	require.NotNil(t, result)
-	state.candidateServices = result.FilteredServices
-	require.Len(t, state.candidateServices, 2, "unhealthy service should be filtered out")
-	require.Equal(t, "provider-a", state.candidateServices[0].Provider)
-	require.Equal(t, "provider-c", state.candidateServices[1].Provider)
+	candidates, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result, "should not select, just filter")
+	require.Len(t, candidates, 2, "unhealthy service should be filtered out")
+	require.Equal(t, "provider-a", candidates[0].Provider)
+	require.Equal(t, "provider-c", candidates[1].Provider)
 }
 
 func TestHealthStage_AllHealthy_NoFilter(t *testing.T) {
@@ -45,13 +43,11 @@ func TestHealthStage_AllHealthy_NoFilter(t *testing.T) {
 
 	rule := testRule("rule-1", "gpt-4", []*loadbalance.Service{svcA, svcB})
 	ctx := testContext(rule, "")
-	state := newSelectionState(ctx.Rule)
 
-	result, handled := stage.Evaluate(ctx, state)
-	require.False(t, handled, "should not select, just filter")
-	require.NotNil(t, result)
-	state.candidateServices = result.FilteredServices
-	require.Len(t, state.candidateServices, 2, "all services should remain")
+	candidates, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result, "should not select, just filter")
+	require.Len(t, candidates, 2, "all services should remain")
 }
 
 func TestHealthStage_AllUnhealthy(t *testing.T) {
@@ -67,15 +63,13 @@ func TestHealthStage_AllUnhealthy(t *testing.T) {
 
 	rule := testRule("rule-1", "gpt-4", []*loadbalance.Service{svcA, svcB})
 	ctx := testContext(rule, "")
-	state := newSelectionState(ctx.Rule)
 
 	// Degrade, don't disappear: when every candidate is unhealthy, keep the full
 	// set so a service (and the real upstream 429/auth) still reaches the client.
-	result, handled := stage.Evaluate(ctx, state)
-	require.False(t, handled, "should continue even when all unhealthy")
-	require.NotNil(t, result)
-	state.candidateServices = result.FilteredServices
-	require.Len(t, state.candidateServices, 2, "all-unhealthy degrades to the full set, not empty")
+	candidates, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result, "should continue even when all unhealthy")
+	require.Len(t, candidates, 2, "all-unhealthy degrades to the full set, not empty")
 }
 
 func TestHealthStage_NilServices(t *testing.T) {
@@ -85,13 +79,10 @@ func TestHealthStage_NilServices(t *testing.T) {
 	rule := testRule("rule-1", "gpt-4", nil)
 	ctx := testContext(rule, "")
 
-	result, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.False(t, handled, "should pass when no services")
-	// newSelectionState returns an empty (non-nil) candidate slice for a rule
-	// with no Services. HealthStage filters that empty slice and returns a
-	// filter result so downstream stages observe the narrowed state.
-	require.NotNil(t, result)
-	require.Empty(t, result.FilteredServices)
+	candidates, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result, "should pass when no services")
+	require.Empty(t, candidates)
 }
 
 func TestHealthStage_NilFilter(t *testing.T) {
@@ -102,17 +93,15 @@ func TestHealthStage_NilFilter(t *testing.T) {
 
 	rule := testRule("rule-1", "gpt-4", []*loadbalance.Service{svcA, svcB})
 	ctx := testContext(rule, "")
-	state := newSelectionState(ctx.Rule)
 
-	result, handled := stage.Evaluate(ctx, state)
-	require.False(t, handled, "should not select")
-	require.NotNil(t, result)
-	state.candidateServices = result.FilteredServices
-	require.Len(t, state.candidateServices, 2, "all services should remain when filter is nil")
+	candidates, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result, "should not select")
+	require.Len(t, candidates, 2, "all services should remain when filter is nil")
 }
 
 func TestHealthStage_ContinuesPipeline(t *testing.T) {
-	// Test that health stage returns (nil, false) so pipeline continues
+	// Test that health stage returns a nil final result so the pipeline continues.
 	filter := NewHealthFilter(nil)
 	stage := NewHealthStage(filter)
 
@@ -120,9 +109,10 @@ func TestHealthStage_ContinuesPipeline(t *testing.T) {
 	rule := testRule("rule-1", "gpt-4", []*loadbalance.Service{svc})
 	ctx := testContext(rule, "")
 
-	result, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
-	require.False(t, handled, "should return handled=false to continue pipeline")
-	require.NotNil(t, result, "should return filter result while continuing pipeline")
+	candidates, result, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
+	require.NoError(t, err)
+	require.Nil(t, result, "should return a nil final result to continue the pipeline")
+	require.Len(t, candidates, 1, "should return the (unchanged) candidate set")
 }
 
 func TestHealthStage_Name(t *testing.T) {

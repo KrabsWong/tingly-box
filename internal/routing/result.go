@@ -19,13 +19,12 @@ const (
 
 // SelectionResult represents the output of service selection pipeline.
 // It includes the selected service, provider, and metadata about the selection.
+// A SelectionResult only ever represents a TERMINAL pick (a stage's `final`
+// return value) — non-terminal narrowing is carried by the `narrowed` slice
+// SelectionStage.Evaluate returns alongside it, not by this struct.
 type SelectionResult struct {
 	// Service is the selected load-balanced service
 	Service *loadbalance.Service
-
-	// FilteredServices contains a narrowed candidate set produced by filter stages.
-	// When set, selector updates SelectionContext.CandidateServices with this value.
-	FilteredServices []*loadbalance.Service
 
 	// Provider is the resolved provider for the service
 	Provider *typ.Provider
@@ -52,12 +51,3 @@ func NewResult(service *loadbalance.Service, source string) *SelectionResult {
 	}
 }
 
-// NewFilterResult creates a non-terminal result for filtering stages.
-func NewFilterResult(source string, services []*loadbalance.Service) *SelectionResult {
-	return &SelectionResult{
-		FilteredServices:      services,
-		Source:                source,
-		EvaluatedStages:       []string{},
-		MatchedSmartRuleIndex: -1,
-	}
-}

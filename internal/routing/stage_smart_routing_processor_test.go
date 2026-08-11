@@ -17,28 +17,29 @@ import (
 // runStagePipeline mimics the body of ServiceSelector.Select's stage loop for
 // in-package assertions. Returns the first result a stage produced, the index
 // of the producing stage, and a slice naming every stage that was evaluated.
-func runStagePipeline(t *testing.T, stages []SelectionStage, ctx *SelectionContext, state *selectionState) (*SelectionResult, int, []string) {
+func runStagePipeline(t *testing.T, stages []SelectionStage, ctx *SelectionContext, candidates []*loadbalance.Service) (*SelectionResult, int, []string) {
 	t.Helper()
 	var evaluated []string
 	for i, stage := range stages {
 		evaluated = append(evaluated, stage.Name())
-		result, handled := stage.Evaluate(ctx, state)
-		if handled {
+		narrowed, result, err := stage.Evaluate(ctx, candidates)
+		require.NoError(t, err)
+		if result != nil {
 			return result, i, evaluated
 		}
+		candidates = narrowed
 	}
 	return nil, -1, evaluated
 }
 
 // recordingStage records every Evaluate call (with the request pointer it
-// observed) and returns a canned result. Used as a stand-in for the
+// observed) and returns a canned final result. Used as a stand-in for the
 // LoadBalancerStage so tests can verify the request handed downstream after
 // a bypass is the MUTATED one.
 type recordingStage struct {
-	name    string
-	calls   []recordedCall
-	result  *SelectionResult
-	handled bool
+	name  string
+	calls []recordedCall
+	final *SelectionResult
 }
 
 type recordedCall struct {
@@ -47,9 +48,9 @@ type recordedCall struct {
 
 func (s *recordingStage) Name() string { return s.name }
 
-func (s *recordingStage) Evaluate(ctx *SelectionContext, _ *selectionState) (*SelectionResult, bool) {
+func (s *recordingStage) Evaluate(ctx *SelectionContext, candidates []*loadbalance.Service) ([]*loadbalance.Service, *SelectionResult, error) {
 	s.calls = append(s.calls, recordedCall{Request: ctx.Request})
-	return s.result, s.handled
+	return candidates, s.final, nil
 }
 
 // betaReqWithImage builds a Beta request carrying one image — local copy to
@@ -101,8 +102,8 @@ func bypassOp() smartrouting.SmartOp {
 
 func TestSmartRoutingStage_ProcessorBypass_RunsProcessorAndContinues(t *testing.T) {
 	// A processor registered for a matched op must run, and the smart-routing
-	// stage must return (nil, false) so the pipeline continues to the next
-	// stage (implicit bypass).
+	// stage must not terminate (final == nil) so the pipeline continues to
+	// the next stage (implicit bypass).
 	called := 0
 	smartrouting.RegisterProcessor(bypassOpPosition, bypassOpEnabled,
 		processorFunc(func(_ *smartrouting.ProcessorContext) error {
@@ -119,9 +120,10 @@ func TestSmartRoutingStage_ProcessorBypass_RunsProcessorAndContinues(t *testing.
 	ctx.Request = betaReqWithImage("describe")
 
 	stage := NewSmartRoutingStage(newMockAffinityStore())
-	_, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
+	_, final, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
 
-	require.False(t, handled, "stage must not terminate when a processor is present (implicit bypass)")
+	require.NoError(t, err)
+	require.Nil(t, final, "stage must not terminate when a processor is present (implicit bypass)")
 	require.Equal(t, 1, called, "registered processor must be invoked")
 }
 
@@ -134,12 +136,12 @@ func TestSmartRoutingStage_NoProcessor_NarrowsCandidates(t *testing.T) {
 	ctx.Request = testOpenAIRequest("gpt-4o")
 
 	stage := NewSmartRoutingStage(newMockAffinityStore())
-	result, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
+	narrowed, final, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
 
-	require.False(t, handled, "no processor → narrow, never terminate")
-	require.NotNil(t, result)
-	require.Len(t, result.FilteredServices, 1)
-	require.Equal(t, "gpt-4", result.FilteredServices[0].Model)
+	require.NoError(t, err)
+	require.Nil(t, final, "no processor → narrow, never terminate")
+	require.Len(t, narrowed, 1)
+	require.Equal(t, "gpt-4", narrowed[0].Model)
 	require.Equal(t, 0, ctx.MatchedSmartRuleIndex)
 }
 
@@ -162,9 +164,10 @@ func TestSmartRoutingStage_BypassedRule_NotReentered(t *testing.T) {
 	ctx.BypassedSmartRules = map[int]struct{}{0: {}}
 
 	stage := NewSmartRoutingStage(newMockAffinityStore())
-	_, handled := stage.Evaluate(ctx, newSelectionState(ctx.Rule))
+	_, final, err := stage.Evaluate(ctx, initialCandidateServices(ctx.Rule))
 
-	require.False(t, handled, "stage must not terminate; pipeline continues")
+	require.NoError(t, err)
+	require.Nil(t, final, "stage must not terminate; pipeline continues")
 	require.Equal(t, 0, called, "processor must NOT be re-invoked for an already-bypassed rule")
 }
 
@@ -197,9 +200,9 @@ func TestSmartRoutingStage_ProcessorMutatesRequest_LoadBalancerSeesMutation(t *t
 	ctx.Request = betaReqWithImage("describe")
 
 	smart := NewSmartRoutingStage(newMockAffinityStore())
-	rec := &recordingStage{name: "recording", result: NewResult(services[0], "recording"), handled: true}
+	rec := &recordingStage{name: "recording", final: NewResult(services[0], "recording")}
 
-	_, idx, evaluated := runStagePipeline(t, []SelectionStage{smart, rec}, ctx, newSelectionState(ctx.Rule))
+	_, idx, evaluated := runStagePipeline(t, []SelectionStage{smart, rec}, ctx, initialCandidateServices(ctx.Rule))
 
 	require.Equal(t, 1, idx, "recording stage produced the result (smart bypassed)")
 	require.Equal(t, []string{"smart_routing", "recording"}, evaluated)

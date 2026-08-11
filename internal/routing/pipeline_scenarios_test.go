@@ -128,4 +128,30 @@ func TestServiceSelectorPipelineScenarios(t *testing.T) {
 		require.Equal(t, []string{firstSmart.ServiceID(), secondSmart.ServiceID()}, lb.seen,
 			"load balancing must receive the smart partition, not the global candidate pool")
 	})
+
+	t.Run("pipeline-smart-routing-before-load-balancer/no-match-excludes-partition-only-services", func(t *testing.T) {
+		// Regression: initialCandidateServices seeds candidates with base ∪ every
+		// partition's services (so HealthStage can pre-filter partition-only
+		// services too). When the request matches no partition, that union
+		// must not leak into the terminal LoadBalancer pick — services that
+		// only exist inside an unmatched partition are never a valid
+		// fallback; only the rule's base pool is (see DuoRoutingRule.Services
+		// doc: "the base pool the LB falls back to when no partition
+		// matches").
+		base := testService("base", "base-model", true)
+		firstSmart := testService("smart-a", "smart-a-model", true)
+		secondSmart := testService("smart-b", "smart-b-model", true)
+		rule := pipelineSmartRule([]*loadbalance.Service{base}, []*loadbalance.Service{firstSmart, secondSmart})
+		lb := &pipelineScenarioLB{}
+		sel := NewServiceSelector(pipelineScenarioConfig(base, firstSmart, secondSmart), newMockAffinityStore(), lb)
+		ctx := testContext(rule, "")
+		ctx.Request = testOpenAIRequest("plain-request")
+
+		result, err := sel.Select(ctx)
+		require.NoError(t, err)
+		require.Equal(t, base.ServiceID(), result.Service.ServiceID())
+		require.Equal(t, []string{base.ServiceID()}, lb.seen,
+			"an unmatched request must fall back to the base pool only, not base+partition services")
+		require.Equal(t, -1, ctx.MatchedSmartRuleIndex)
+	})
 }

@@ -1,6 +1,8 @@
 package routing
 
 import (
+	"fmt"
+
 	"github.com/sirupsen/logrus"
 
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
@@ -24,23 +26,21 @@ func (s *LoadBalancerStage) Name() string {
 	return SourceLoadBalancer
 }
 
-// Evaluate selects a service using load balancing
-func (s *LoadBalancerStage) Evaluate(ctx *SelectionContext, state *selectionState) (*SelectionResult, bool) {
+// Evaluate selects a service using load balancing. This is the terminal
+// stage: a failure here is a real error (there is no next stage to fall
+// through to), so it is reported via err rather than a silent pass-through.
+func (s *LoadBalancerStage) Evaluate(ctx *SelectionContext, candidates []*loadbalance.Service) ([]*loadbalance.Service, *SelectionResult, error) {
 	tempRule := *ctx.Rule
-	if state != nil {
-		tempRule.Services = state.candidateServices
-	}
+	tempRule.Services = candidates
 	logOpenBreakerSkips(ctx, &tempRule)
 
 	service, err := s.loadBalancer.SelectService(&tempRule)
 	if err != nil {
-		logrus.Errorf("[load_balancer] selection failed: %v", err)
-		return nil, false
+		return candidates, nil, fmt.Errorf("selection failed: %w", err)
 	}
 
 	if service == nil {
-		logrus.Errorf("[load_balancer] no service returned")
-		return nil, false
+		return candidates, nil, fmt.Errorf("no service returned")
 	}
 
 	// When a smart partition matched, the candidate set IS that partition, so
@@ -52,7 +52,7 @@ func (s *LoadBalancerStage) Evaluate(ctx *SelectionContext, state *selectionStat
 	}
 	result := NewResult(service, source)
 	result.MatchedSmartRuleIndex = ctx.MatchedSmartRuleIndex
-	return result, true
+	return candidates, result, nil
 }
 
 func logOpenBreakerSkips(ctx *SelectionContext, rule interface {

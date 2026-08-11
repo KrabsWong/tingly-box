@@ -4,6 +4,14 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/loadbalance"
 )
 
+// Narrowing convention (SelectionStage.Evaluate implementations rely on
+// this): every function below that returns a filtered []*loadbalance.Service
+// allocates a fresh backing array via append-to-nil. None of them truncate
+// or append onto an input slice's existing backing array, so a caller's
+// slice — including one being threaded through the pipeline as another
+// stage's `candidates` argument — is never mutated out from under it. Keep
+// this property when adding new narrowing helpers here.
+
 // FilterActiveServices returns only active services from the input list
 func FilterActiveServices(services []*loadbalance.Service) []*loadbalance.Service {
 	if len(services) == 0 {
