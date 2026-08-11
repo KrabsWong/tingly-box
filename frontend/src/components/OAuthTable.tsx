@@ -424,11 +424,7 @@ const OAuthTable = ({
                                                     }
                                                     onClick={() => onQuotaRefresh(provider.uuid)}
                                                     disabled={refreshingQuotas?.has(provider.uuid)}
-                                                    color={
-                                                        providerQuotas?.[provider.uuid]
-                                                            ? "primary"
-                                                            : "inherit"
-                                                    }
+                                                    color="primary"
                                                     sx={{
                                                         minWidth: "auto",
                                                         px: {xs: 0.75, xl: 1},
