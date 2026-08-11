@@ -20,7 +20,6 @@ import {
 import {
     Box,
     Button,
-    Chip,
     CircularProgress,
     Divider,
     IconButton,
@@ -270,13 +269,6 @@ const ApiKeyTable = ({
                                             onChange={() => onToggle?.(provider.uuid)}
                                             size="small"
                                             color="success"
-                                        />
-                                        <Chip
-                                            label={provider.enabled ? "On" : "Off"}
-                                            size="small"
-                                            color={provider.enabled ? "success" : "default"}
-                                            variant={provider.enabled ? "filled" : "outlined"}
-                                            sx={{height: 22, minWidth: 40, display: {xs: 'none', xl: 'inline-flex'}}}
                                         />
                                     </Stack>
                                 </TableCell>

@@ -292,13 +292,6 @@ const OAuthTable = ({
                                                 size="small"
                                                 color="success"
                                             />
-                                            <Chip
-                                                label={provider.enabled ? "On" : "Off"}
-                                                size="small"
-                                                color={provider.enabled ? "success" : "default"}
-                                                variant={provider.enabled ? "filled" : "outlined"}
-                                                sx={{height: 22, minWidth: 40, display: {xs: 'none', xl: 'inline-flex'}}}
-                                            />
                                         </Stack>
                                     </TableCell>
                                     {/* Name */}
