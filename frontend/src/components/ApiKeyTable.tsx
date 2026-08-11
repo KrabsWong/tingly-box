@@ -310,15 +310,18 @@ const ApiKeyTable = ({
                                                 <ApiStyleBadge
                                                     apiStyle="openai"
                                                     minimal
+                                                    minimalSize="medium"
                                                 />
                                                 <ApiStyleBadge
                                                     apiStyle="anthropic"
                                                     minimal
+                                                    minimalSize="medium"
                                                 />
                                             </Stack>
                                         ) : (
                                             <ApiStyleBadge
                                                 minimal
+                                                minimalSize="medium"
                                                 apiStyle={provider.api_style}
                                             />
                                         )}

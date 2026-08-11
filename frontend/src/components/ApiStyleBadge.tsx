@@ -7,6 +7,7 @@ interface ApiStyleBadgeProps {
     apiStyle: string;
     compact?: boolean;
     minimal?: boolean;
+    minimalSize?: 'small' | 'medium';
     sx?: SxProps<Theme>;
 }
 
@@ -41,6 +42,7 @@ export const ApiStyleBadge = ({
     sx = EMPTY_SX,
     compact = false,
     minimal = false,
+    minimalSize = 'small',
 }: ApiStyleBadgeProps) => {
     const theme = useTheme();
     const isOpenAI = apiStyle === 'openai';
@@ -73,18 +75,21 @@ export const ApiStyleBadge = ({
     const hoverBackgroundColor = blend(p.tint, p.hoverFill, paperRgb);
 
     if (minimal) {
+        const diameter = minimalSize === 'medium' ? 20 : 16;
+        const fontSize = minimalSize === 'medium' ? '11px' : '9px';
+
         return (
             <Tooltip title={`${p.label} Style`} arrow placement="top">
                 <Box
                     sx={{
-                        width: 16,
-                        height: 16,
+                        width: diameter,
+                        height: diameter,
                         borderRadius: '50%',
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         flexShrink: 0,
-                        fontSize: '9px',
+                        fontSize,
                         fontWeight: 700,
                         lineHeight: 1,
                         border: `1px solid ${p.border}`,

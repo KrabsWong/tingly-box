@@ -327,6 +327,7 @@ const OAuthTable = ({
                                         <Box sx={{display: 'flex', justifyContent: 'center'}}>
                                             <ApiStyleBadge
                                                 minimal
+                                                minimalSize="medium"
                                                 apiStyle={provider.api_style}
                                             />
                                         </Box>

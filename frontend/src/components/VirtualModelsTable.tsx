@@ -66,7 +66,7 @@ const VirtualModelsTable = ({ providers, onToggle }: VirtualModelsTableProps) =>
                                 </TableCell>
                                 <TableCell align="center" sx={{ px: 1 }}>
                                     <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-                                        <ApiStyleBadge apiStyle={p.api_style as any} minimal />
+                                        <ApiStyleBadge apiStyle={p.api_style as any} minimal minimalSize="medium" />
                                     </Box>
                                 </TableCell>
                                 <TableCell>
