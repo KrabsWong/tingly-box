@@ -247,20 +247,20 @@ const OAuthTable = ({
                 overflowX: "auto",
             }}
         >
-            <Table sx={{tableLayout: "fixed", minWidth: 1120}}>
+            <Table sx={{tableLayout: "fixed", width: '100%', minWidth: {xs: 720, md: 840, xl: 1120}}}>
                 <TableHead>
                     <TableRow sx={{bgcolor: "action.hover"}}>
-                        <TableCell sx={{fontWeight: 600, width: 90, py: 1.25}}>Status</TableCell>
+                        <TableCell sx={{fontWeight: 600, width: {xs: 72, xl: 90}, py: 1.25}}>Status</TableCell>
                         <TableCell sx={{fontWeight: 600, width: 140, py: 1.25}}>Name</TableCell>
-                        <TableCell sx={{fontWeight: 600, width: 140, py: 1.25}}>
+                        <TableCell align="center" sx={{fontWeight: 600, width: 88, px: 1, py: 1.25, whiteSpace: 'nowrap'}}>
                             API Style
                         </TableCell>
-                        <TableCell sx={{fontWeight: 600, width: 200, py: 1.25}}>Provider</TableCell>
-                        <TableCell sx={{fontWeight: 600, width: 140, py: 1.25}}>
+                        <TableCell sx={{fontWeight: 600, width: {xs: 150, xl: 200}, py: 1.25}}>Provider</TableCell>
+                        <TableCell sx={{fontWeight: 600, width: {xs: 130, xl: 140}, py: 1.25}}>
                             Expires At
                         </TableCell>
-                        <TableCell sx={{fontWeight: 600, width: 60, py: 1.25}}>Proxy</TableCell>
-                        <TableCell sx={{fontWeight: 600, width: 250, py: 1.25}}>Actions</TableCell>
+                        <TableCell sx={{fontWeight: 600, width: 60, py: 1.25, display: {xs: 'none', xl: 'table-cell'}}}>Proxy</TableCell>
+                        <TableCell sx={{fontWeight: 600, width: {xs: 205, xl: 250}, py: 1.25}}>Actions</TableCell>
                     </TableRow>
                 </TableHead>
                 <TableBody>
@@ -297,7 +297,7 @@ const OAuthTable = ({
                                                 size="small"
                                                 color={provider.enabled ? "success" : "default"}
                                                 variant={provider.enabled ? "filled" : "outlined"}
-                                                sx={{height: 22, minWidth: 40}}
+                                                sx={{height: 22, minWidth: 40, display: {xs: 'none', xl: 'inline-flex'}}}
                                             />
                                         </Stack>
                                     </TableCell>
@@ -315,11 +315,13 @@ const OAuthTable = ({
                                         </Stack>
                                     </TableCell>
                                     {/* API Style */}
-                                    <TableCell>
-                                        <ApiStyleBadge
-                                            sx={{minWidth: "110px"}}
-                                            apiStyle={provider.api_style}
-                                        />
+                                    <TableCell align="center" sx={{px: 1}}>
+                                        <Box sx={{display: 'flex', justifyContent: 'center'}}>
+                                            <ApiStyleBadge
+                                                minimal
+                                                apiStyle={provider.api_style}
+                                            />
+                                        </Box>
                                     </TableCell>
                                     {/* Provider Type */}
                                     <TableCell>
@@ -356,7 +358,7 @@ const OAuthTable = ({
                                         </Stack>
                                     </TableCell>
                                     {/* Proxy */}
-                                    <TableCell align="center">
+                                    <TableCell align="center" sx={{display: {xs: 'none', xl: 'table-cell'}}}>
                                         {provider.proxy_url ? (
                                             <Tooltip title={provider.proxy_url} arrow>
                                                 <Route
@@ -419,7 +421,11 @@ const OAuthTable = ({
                                                             ? "primary"
                                                             : "inherit"
                                                     }
-                                                    sx={{minWidth: "auto", px: 1}}
+                                                    sx={{
+                                                        minWidth: "auto",
+                                                        px: {xs: 0.75, xl: 1},
+                                                        '& .MuiButton-startIcon': {display: {xs: 'none', xl: 'inherit'}},
+                                                    }}
                                                 >
                                                     Quota
                                                 </Button>
@@ -431,7 +437,12 @@ const OAuthTable = ({
                                                 startIcon={<ListAlt/>}
                                                 onClick={() => handleModelListClick(provider.uuid)}
                                                 disabled={!provider.enabled}
-                                                sx={{fontSize: "0.75rem", minWidth: "auto", px: 1}}
+                                                sx={{
+                                                    fontSize: "0.75rem",
+                                                    minWidth: "auto",
+                                                    px: {xs: 0.75, xl: 1},
+                                                    '& .MuiButton-startIcon': {display: {xs: 'none', xl: 'inherit'}},
+                                                }}
                                             >
                                                 Models
                                             </Button>
