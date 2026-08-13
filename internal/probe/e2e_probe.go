@@ -57,7 +57,7 @@ func (e *E2EProber) Probe(ctx context.Context, req *E2ERequest) (*E2EData, error
 		ctx = client.WithProbeHeaders(ctx, probeHeaders)
 	}
 	message := E2EMessage(req.TestMode, req.Message)
-	result, err := e.probeProviderWithSDK(ctx, provider, model, message, req.TestMode, req.Endpoint)
+	result, err := e.probeProviderWithSDK(ctx, provider, model, message, req.TestMode, req.Endpoint, req.Thinking)
 	if cacheable && err == nil && result != nil && result.Success {
 		e.endpointCache.remember(provider.UUID, model, req.Endpoint, string(req.TestMode))
 	}
@@ -296,7 +296,7 @@ func (e *E2EProber) resolveRuleTarget(ctx context.Context, req *E2ERequest) (*ty
 // endpointOverride forces which OpenAI endpoint to hit ("chat"/"responses");
 // pass "" for resolveOpenAIProbeEndpoint's default (Codex OAuth -> responses,
 // everything else -> chat).
-func (e *E2EProber) probeProviderWithSDK(ctx context.Context, provider *typ.Provider, model, message string, testMode E2EMode, endpointOverride string) (*E2EData, error) {
+func (e *E2EProber) probeProviderWithSDK(ctx context.Context, provider *typ.Provider, model, message string, testMode E2EMode, endpointOverride string, thinking ThinkingLevel) (*E2EData, error) {
 	_, wrapProbeHeaders := client.GetProbeHeaders(ctx)
 
 	var result *E2EData
@@ -327,9 +327,9 @@ func (e *E2EProber) probeProviderWithSDK(ctx context.Context, provider *typ.Prov
 		apply := maybeCapture(oc)
 		switch resolveOpenAIProbeEndpoint(endpointOverride, provider) {
 		case "chat":
-			result, err = probeOpenAIChat(ctx, oc, model, message, testMode)
+			result, err = probeOpenAIChat(ctx, oc, model, message, testMode, thinking)
 		case "responses":
-			result, err = probeOpenAIResponses(ctx, oc, model, message, testMode)
+			result, err = probeOpenAIResponses(ctx, oc, model, message, testMode, thinking)
 		}
 		if err == nil {
 			apply(result)
@@ -341,7 +341,7 @@ func (e *E2EProber) probeProviderWithSDK(ctx context.Context, provider *typ.Prov
 			return nil, fmt.Errorf("failed to get Anthropic client for provider: %s", provider.Name)
 		}
 		apply := maybeCapture(ac)
-		result, err = probeAnthropicMessages(ctx, ac, model, message, testMode)
+		result, err = probeAnthropicMessages(ctx, ac, model, message, testMode, thinking)
 		if err == nil {
 			apply(result)
 		}
@@ -352,7 +352,7 @@ func (e *E2EProber) probeProviderWithSDK(ctx context.Context, provider *typ.Prov
 			return nil, fmt.Errorf("failed to get Google client for provider: %s", provider.Name)
 		}
 		// Google probes are always direct (no loopback route) — no routing capture.
-		result, err = probeGoogleGenerate(ctx, gc, model, message, testMode)
+		result, err = probeGoogleGenerate(ctx, gc, model, message, testMode, thinking)
 
 	default:
 		return nil, fmt.Errorf("unsupported API style: %s", provider.APIStyle)
