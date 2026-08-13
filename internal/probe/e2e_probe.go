@@ -57,7 +57,17 @@ func (e *E2EProber) Probe(ctx context.Context, req *E2ERequest) (*E2EData, error
 		ctx = client.WithProbeHeaders(ctx, probeHeaders)
 	}
 	message := E2EMessage(req.TestMode, req.Message)
-	result, err := e.probeProviderWithSDK(ctx, provider, model, message, req.TestMode, req.Endpoint)
+	// Resolve the wire test_mode into flat decisions once, here, so the SDK
+	// helpers read booleans instead of re-branching on the three-valued mode.
+	//   streaming → Stream ; tool → Tool (tool always takes the non-stream path)
+	params := probeParams{
+		Model:    model,
+		Message:  message,
+		Stream:   req.TestMode == E2EModeStreaming,
+		Tool:     req.TestMode == E2EModeTool,
+		Thinking: req.Thinking,
+	}
+	result, err := e.probeProviderWithSDK(ctx, provider, params, req.Endpoint)
 	if cacheable && err == nil && result != nil && result.Success {
 		e.endpointCache.remember(provider.UUID, model, req.Endpoint, string(req.TestMode))
 	}
@@ -296,7 +306,7 @@ func (e *E2EProber) resolveRuleTarget(ctx context.Context, req *E2ERequest) (*ty
 // endpointOverride forces which OpenAI endpoint to hit ("chat"/"responses");
 // pass "" for resolveOpenAIProbeEndpoint's default (Codex OAuth -> responses,
 // everything else -> chat).
-func (e *E2EProber) probeProviderWithSDK(ctx context.Context, provider *typ.Provider, model, message string, testMode E2EMode, endpointOverride string) (*E2EData, error) {
+func (e *E2EProber) probeProviderWithSDK(ctx context.Context, provider *typ.Provider, params probeParams, endpointOverride string) (*E2EData, error) {
 	_, wrapProbeHeaders := client.GetProbeHeaders(ctx)
 
 	var result *E2EData
@@ -320,39 +330,39 @@ func (e *E2EProber) probeProviderWithSDK(ctx context.Context, provider *typ.Prov
 
 	switch provider.APIStyle {
 	case protocol.APIStyleOpenAI:
-		oc := e.clientPool.GetOpenAIClient(ctx, provider, model)
+		oc := e.clientPool.GetOpenAIClient(ctx, provider, params.Model)
 		if oc == nil {
 			return nil, fmt.Errorf("failed to get OpenAI client for provider: %s", provider.Name)
 		}
 		apply := maybeCapture(oc)
 		switch resolveOpenAIProbeEndpoint(endpointOverride, provider) {
 		case "chat":
-			result, err = probeOpenAIChat(ctx, oc, model, message, testMode)
+			result, err = probeOpenAIChat(ctx, oc, params)
 		case "responses":
-			result, err = probeOpenAIResponses(ctx, oc, model, message, testMode)
+			result, err = probeOpenAIResponses(ctx, oc, params)
 		}
 		if err == nil {
 			apply(result)
 		}
 
 	case protocol.APIStyleAnthropic:
-		ac := e.clientPool.GetAnthropicClient(ctx, provider, model)
+		ac := e.clientPool.GetAnthropicClient(ctx, provider, params.Model)
 		if ac == nil {
 			return nil, fmt.Errorf("failed to get Anthropic client for provider: %s", provider.Name)
 		}
 		apply := maybeCapture(ac)
-		result, err = probeAnthropicMessages(ctx, ac, model, message, testMode)
+		result, err = probeAnthropicMessages(ctx, ac, params)
 		if err == nil {
 			apply(result)
 		}
 
 	case protocol.APIStyleGoogle:
-		gc := e.clientPool.GetGoogleClient(ctx, provider, model)
+		gc := e.clientPool.GetGoogleClient(ctx, provider, params.Model)
 		if gc == nil {
 			return nil, fmt.Errorf("failed to get Google client for provider: %s", provider.Name)
 		}
 		// Google probes are always direct (no loopback route) — no routing capture.
-		result, err = probeGoogleGenerate(ctx, gc, model, message, testMode)
+		result, err = probeGoogleGenerate(ctx, gc, params)
 
 	default:
 		return nil, fmt.Errorf("unsupported API style: %s", provider.APIStyle)

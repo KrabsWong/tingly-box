@@ -114,6 +114,36 @@ func TestValidateE2ERequest(t *testing.T) {
 			},
 			wantErr: "test_mode",
 		},
+		{
+			name: "thinking medium ok",
+			req: E2ERequest{
+				TargetType:   E2ETargetProvider,
+				ProviderUUID: "p-1",
+				Model:        "m",
+				TestMode:     E2EModeSimple,
+				Thinking:     ThinkingMedium,
+			},
+		},
+		{
+			name: "thinking empty ok (normalized to none)",
+			req: E2ERequest{
+				TargetType:   E2ETargetProvider,
+				ProviderUUID: "p-1",
+				Model:        "m",
+				TestMode:     E2EModeSimple,
+			},
+		},
+		{
+			name: "thinking unknown level rejected",
+			req: E2ERequest{
+				TargetType:   E2ETargetProvider,
+				ProviderUUID: "p-1",
+				Model:        "m",
+				TestMode:     E2EModeSimple,
+				Thinking:     ThinkingLevel("xhigh"),
+			},
+			wantErr: "thinking",
+		},
 	}
 
 	for _, tt := range tests {

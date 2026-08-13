@@ -24,6 +24,7 @@ import (
 	"fmt"
 
 	"github.com/tingly-dev/tingly-box/internal/protocol"
+	"github.com/tingly-dev/tingly-box/internal/protocol/thinking"
 	"github.com/tingly-dev/tingly-box/internal/typ"
 )
 
@@ -157,6 +158,25 @@ const (
 	E2EModeTool      E2EMode = "tool"
 )
 
+// ThinkingLevel is the probe-facing subset of the canonical thinking-effort
+// ladder (internal/protocol/thinking). Orthogonal to E2EMode — composes with
+// both streaming and non-streaming probes. "none" (and the empty string) send
+// no thinking param; the other levels map to each provider's native thinking
+// knob (Anthropic budget_tokens, OpenAI reasoning_effort, Gemini
+// thinking_budget) via thinking.BudgetMapping / the effort value.
+//
+// Kept narrower than the full ladder (no minimal/xhigh/max) so the UI stays a
+// 4-option control; extensible to the remaining levels later without breaking
+// callers.
+type ThinkingLevel = thinking.Level
+
+const (
+	ThinkingNone   ThinkingLevel = "none"
+	ThinkingLow    ThinkingLevel = thinking.LevelLow
+	ThinkingMedium ThinkingLevel = thinking.LevelMedium
+	ThinkingHigh   ThinkingLevel = thinking.LevelHigh
+)
+
 // E2ERequest represents a Probe V2 request.
 type E2ERequest struct {
 	TargetType E2ETarget `json:"target_type" binding:"required"`
@@ -188,6 +208,14 @@ type E2ERequest struct {
 	// provider genuinely supports Responses before a rule starts routing
 	// there (e.g. the Codex-page "enable native Responses" toggle).
 	Endpoint string `json:"endpoint,omitempty" example:"responses"`
+
+	// Thinking sets the extended-thinking effort for the probe. Orthogonal to
+	// TestMode — composes with both streaming and non-streaming probes. "none"
+	// (and the empty string, the default) sends no thinking param; "low"/
+	// "medium"/"high" map to each provider's native thinking knob via
+	// internal/protocol/thinking. Used to verify a model/provider actually
+	// returns reasoning tokens before trusting it with a rule.
+	Thinking ThinkingLevel `json:"thinking,omitempty" example:"medium"`
 }
 
 // E2EData is an alias to Result — the canonical SDK-level probe result.
@@ -240,6 +268,15 @@ func ValidateE2ERequest(req *E2ERequest) error {
 	case E2EModeSimple, E2EModeStreaming, E2EModeTool:
 	default:
 		return &ValidationError{Field: "test_mode", Message: "test_mode must be 'simple', 'streaming', or 'tool'"}
+	}
+
+	// Thinking is optional; empty normalizes to "none". Only the probe-facing
+	// subset of the ladder is accepted (minimal/xhigh/max are intentionally
+	// rejected here to keep the UI a 4-option control).
+	switch req.Thinking {
+	case "", ThinkingNone, ThinkingLow, ThinkingMedium, ThinkingHigh:
+	default:
+		return &ValidationError{Field: "thinking", Message: "thinking must be 'none', 'low', 'medium', or 'high'"}
 	}
 
 	return nil
