@@ -57,7 +57,16 @@ func (e *E2EProber) Probe(ctx context.Context, req *E2ERequest) (*E2EData, error
 		ctx = client.WithProbeHeaders(ctx, probeHeaders)
 	}
 	message := E2EMessage(req.TestMode, req.Message)
-	params := probeParams{Model: model, Message: message, Mode: req.TestMode, Thinking: req.Thinking}
+	// Resolve the wire test_mode into flat decisions once, here, so the SDK
+	// helpers read booleans instead of re-branching on the three-valued mode.
+	//   streaming → Stream ; tool → Tool (tool always takes the non-stream path)
+	params := probeParams{
+		Model:    model,
+		Message:  message,
+		Stream:   req.TestMode == E2EModeStreaming,
+		Tool:     req.TestMode == E2EModeTool,
+		Thinking: req.Thinking,
+	}
 	result, err := e.probeProviderWithSDK(ctx, provider, params, req.Endpoint)
 	if cacheable && err == nil && result != nil && result.Success {
 		e.endpointCache.remember(provider.UUID, model, req.Endpoint, string(req.TestMode))

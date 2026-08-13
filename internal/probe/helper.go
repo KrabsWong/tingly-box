@@ -26,14 +26,18 @@ import (
 // keep the upstream response minimal.
 const probeEchoInstruction = "work as `echo` if possible"
 
-// probeParams packages the per-request shape params that every SDK helper
-// forwards verbatim from Probe() -> probeProviderWithSDK() -> helper. Keeping
-// them in one struct means a new request-shape knob (effort, max tokens, …) is
-// added once here instead of widening every signature down the chain.
+// probeParams carries the fully-resolved request shape handed down from
+// Probe() -> probeProviderWithSDK() -> the SDK helpers. The caller resolves
+// the wire test_mode ("simple"/"streaming"/"tool") into the Stream/Tool
+// booleans once at the entry point, so the helpers never branch on the
+// three-valued E2EMode — they read flat decisions: use the streaming path?
+// attach tools? enable thinking? Adding a future knob means a field here, not
+// a new branch inside every helper.
 type probeParams struct {
 	Model    string
 	Message  string
-	Mode     E2EMode
+	Stream   bool // true → take the SSE round-trip; false → single response
+	Tool     bool // true → attach probe tools + auto tool_choice (tool mode)
 	Thinking ThinkingLevel
 }
 
@@ -146,7 +150,7 @@ func probeOpenAIChat(ctx context.Context, oc client.OpenAIClientInterface, p pro
 			openai.UserMessage(p.Message),
 		},
 	}
-	if p.Mode == E2EModeTool {
+	if p.Tool {
 		params.Tools = getProbeToolsOpenAI()
 		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: openai.Opt("auto")}
 	}
@@ -157,7 +161,7 @@ func probeOpenAIChat(ctx context.Context, oc client.OpenAIClientInterface, p pro
 	// Tool mode needs the structured tool_calls back out of the response, so
 	// it takes the non-streaming path alongside simple mode; only streaming
 	// mode itself needs the SSE round-trip.
-	if p.Mode != E2EModeStreaming {
+	if !p.Stream {
 		resp, err := oc.ChatCompletionsNew(ctx, params)
 		if err != nil {
 			return nil, err
@@ -218,7 +222,7 @@ func probeOpenAIResponses(ctx context.Context, oc client.OpenAIClientInterface, 
 			},
 		},
 	}
-	if p.Mode == E2EModeTool {
+	if p.Tool {
 		params.Tools = getProbeToolsResponses()
 		params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
 			OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto),
@@ -229,7 +233,7 @@ func probeOpenAIResponses(ctx context.Context, oc client.OpenAIClientInterface, 
 	}
 
 	url := oc.GetProvider().APIBase + "/responses"
-	if p.Mode != E2EModeStreaming {
+	if !p.Stream {
 		resp, err := oc.ResponsesNew(ctx, params)
 		if err != nil {
 			return nil, err
@@ -280,7 +284,7 @@ func probeAnthropicMessages(ctx context.Context, ac client.AnthropicClientInterf
 			anthropic.NewUserMessage(anthropic.NewTextBlock(p.Message)),
 		},
 	}
-	if p.Mode == E2EModeTool {
+	if p.Tool {
 		params.Tools = getProbeToolsAnthropic()
 		params.ToolChoice = getProbeToolChoiceAutoAnthropic()
 	}
@@ -296,7 +300,7 @@ func probeAnthropicMessages(ctx context.Context, ac client.AnthropicClientInterf
 	}
 
 	url := provider.APIBase + "/v1/messages"
-	if p.Mode != E2EModeStreaming {
+	if !p.Stream {
 		resp, err := ac.MessagesNew(ctx, params)
 		if err != nil {
 			return nil, err
@@ -342,7 +346,7 @@ func probeGoogleGenerate(ctx context.Context, gc *client.GoogleClient, p probePa
 		config.ThinkingConfig = &genai.ThinkingConfig{ThinkingBudget: &budget}
 	}
 
-	if p.Mode == E2EModeSimple {
+	if !p.Stream {
 		resp, err := gc.GenerateContent(ctx, p.Model, contents, config)
 		if err != nil {
 			return nil, err

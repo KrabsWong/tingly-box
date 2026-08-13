@@ -94,7 +94,7 @@ func (l *LightProber) runChatEndpoint(ctx context.Context, provider *typ.Provide
 	success *bool, msg *string, rt *int64) {
 	l.runOpenAIEndpoint(ctx, provider, success, msg, rt, "Chat endpoint accessible",
 		func(c client.OpenAIClientInterface, pctx context.Context) (*Result, error) {
-			return probeOpenAIChat(pctx, c, probeParams{Model: "gpt-3.5-turbo", Message: "Hi", Mode: E2EModeSimple, Thinking: ThinkingNone})
+			return probeOpenAIChat(pctx, c, probeParams{Model: "gpt-3.5-turbo", Message: "Hi", Thinking: ThinkingNone})
 		})
 }
 
@@ -102,7 +102,7 @@ func (l *LightProber) runResponsesEndpoint(ctx context.Context, provider *typ.Pr
 	success *bool, msg *string, rt *int64) {
 	l.runOpenAIEndpoint(ctx, provider, success, msg, rt, "Responses API endpoint accessible",
 		func(c client.OpenAIClientInterface, pctx context.Context) (*Result, error) {
-			return probeOpenAIResponses(pctx, c, probeParams{Model: "gpt-4o", Message: "Hi", Mode: E2EModeSimple, Thinking: ThinkingNone})
+			return probeOpenAIResponses(pctx, c, probeParams{Model: "gpt-4o", Message: "Hi", Thinking: ThinkingNone})
 		})
 }
 
