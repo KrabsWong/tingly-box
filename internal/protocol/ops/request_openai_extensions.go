@@ -18,6 +18,12 @@ func ApplyProviderTransforms(req *openai.ChatCompletionNewParams, providerURL, m
 	url := strings.ToLower(providerURL)
 	modelLower := strings.ToLower(model)
 
+	// See stripOpenAIPromptCacheFields for why: most OpenAI-compatible
+	// vendors reject these fields outright (#1548), so default to stripping.
+	if !supportsExplicitPromptCache(url) {
+		stripOpenAIPromptCacheFields(req)
+	}
+
 	switch {
 	case strings.Contains(url, "api.deepseek.com"),
 		strings.Contains(url, "api.moonshot.cn"),
@@ -26,11 +32,6 @@ func ApplyProviderTransforms(req *openai.ChatCompletionNewParams, providerURL, m
 		strings.Contains(url, "opencode.ai/zen/go") && strings.Contains(modelLower, "deepseek"):
 		return applyDeepSeekTransform(req, providerURL, model, config)
 
-	case strings.Contains(url, "integrate.api.nvidia.com"):
-		// NVIDIA NIM rejects prompt-cache fields that Claude Code sends:
-		// "Unsupported parameter(s): `prompt_cache_options`". Strip them.
-		return applyDefaultTransform(stripPromptCacheForNVIDIA(req), config)
-
 	case strings.Contains(url, "generativelanguage.googleapis.com") && strings.Contains(modelLower, "gemini"):
 		return applyGeminiTransform(req, providerURL, model, config)
 
@@ -38,7 +39,80 @@ func ApplyProviderTransforms(req *openai.ChatCompletionNewParams, providerURL, m
 		return applyGeminiPoeTransform(req, providerURL, model, config)
 	}
 
+	// api.openai.com falls through to here too — no vendor-specific shaping
+	// needed beyond applyDefaultTransform's thinking fallback.
 	return applyDefaultTransform(req, config)
+}
+
+// supportsExplicitPromptCache reports whether providerURL is confirmed to
+// accept OpenAI's gpt-5.6+ explicit prompt-cache fields. Extend this
+// allowlist only once a vendor has been verified to accept the fields —
+// the default (stripped) is the safe outcome for an unverified vendor.
+func supportsExplicitPromptCache(url string) bool {
+	return strings.Contains(url, "api.openai.com")
+}
+
+// stripOpenAIPromptCacheFields removes the OpenAI-only prompt-cache fields
+// from a request: top-level prompt_cache_options and prompt_cache_retention,
+// and the per-content-part prompt_cache_breakpoint markers. It's the default
+// for every vendor not on the supportsExplicitPromptCache allowlist — most
+// OpenAI-compatible vendors don't implement these fields and strict-schema
+// gateways reject the whole request over the unknown one (NVIDIA NIM 400s on
+// the top-level fields, #1548). Dropping them is safe: they're pure caching
+// hints, and vendors with their own automatic prefix caching (DeepSeek,
+// Moonshot, most self-hosted backends) still get cache hits without them.
+//
+// Scope is exactly these three fields, per the SDK's history (libs/openai-go):
+// prompt_cache_retention shipped with gpt-5.1, prompt_cache_options /
+// prompt_cache_breakpoint with gpt-5.6. prompt_cache_key predates both by
+// over a year (SDK v1.12.0), is part of the schema every OpenAI-compatible
+// vendor cloned, and is deliberately left alone.
+//
+// All three carry omitzero, so zeroing them omits the keys from the
+// marshaled request without a JSON round-trip — which would drop per-message
+// extra fields such as x_thinking / reasoning_content.
+func stripOpenAIPromptCacheFields(req *openai.ChatCompletionNewParams) {
+	req.PromptCacheOptions = openai.ChatCompletionNewParamsPromptCacheOptions{}
+	req.PromptCacheRetention = ""
+
+	for i := range req.Messages {
+		msg := &req.Messages[i]
+		switch {
+		case msg.OfDeveloper != nil:
+			stripTextPartBreakpoints(msg.OfDeveloper.Content.OfArrayOfContentParts)
+		case msg.OfSystem != nil:
+			stripTextPartBreakpoints(msg.OfSystem.Content.OfArrayOfContentParts)
+		case msg.OfUser != nil:
+			for j := range msg.OfUser.Content.OfArrayOfContentParts {
+				part := &msg.OfUser.Content.OfArrayOfContentParts[j]
+				switch {
+				case part.OfText != nil:
+					part.OfText.PromptCacheBreakpoint = openai.ChatCompletionContentPartTextPromptCacheBreakpointParam{}
+				case part.OfImageURL != nil:
+					part.OfImageURL.PromptCacheBreakpoint = openai.ChatCompletionContentPartImagePromptCacheBreakpointParam{}
+				case part.OfInputAudio != nil:
+					part.OfInputAudio.PromptCacheBreakpoint = openai.ChatCompletionContentPartInputAudioPromptCacheBreakpointParam{}
+				case part.OfFile != nil:
+					part.OfFile.PromptCacheBreakpoint = openai.ChatCompletionContentPartFilePromptCacheBreakpointParam{}
+				}
+			}
+		case msg.OfAssistant != nil:
+			for j := range msg.OfAssistant.Content.OfArrayOfContentParts {
+				part := &msg.OfAssistant.Content.OfArrayOfContentParts[j]
+				if part.OfText != nil {
+					part.OfText.PromptCacheBreakpoint = openai.ChatCompletionContentPartTextPromptCacheBreakpointParam{}
+				}
+			}
+		case msg.OfTool != nil:
+			stripTextPartBreakpoints(msg.OfTool.Content.OfArrayOfContentParts)
+		}
+	}
+}
+
+func stripTextPartBreakpoints(parts []openai.ChatCompletionContentPartTextParam) {
+	for i := range parts {
+		parts[i].PromptCacheBreakpoint = openai.ChatCompletionContentPartTextPromptCacheBreakpointParam{}
+	}
 }
 
 // ApplyCursorCompatContentNormalization flattens rich content in messages for

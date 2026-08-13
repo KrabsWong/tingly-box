@@ -10,6 +10,12 @@ import (
 	"github.com/tingly-dev/tingly-box/internal/protocol"
 )
 
+// NVIDIA NIM 400s on the top-level prompt-cache fields Claude Code sends
+// ("Unsupported parameter(s): `prompt_cache_options`", #1548). There is no
+// NIM-specific transform anymore: NIM is simply not on the
+// supportsExplicitPromptCache allowlist, so the default
+// stripOpenAIPromptCacheFields path covers it. These tests pin the #1548
+// regression end-to-end through ApplyProviderTransforms.
 const nvidiaNIMURL = "https://integrate.api.nvidia.com/v1"
 
 // TestNVIDIAStripPromptCacheTopLevel proves that the top-level
@@ -20,6 +26,7 @@ func TestNVIDIAStripPromptCacheTopLevel(t *testing.T) {
 		Model:                openai.ChatModel("thinkingmachines/inkling"),
 		PromptCacheOptions:   openai.ChatCompletionNewParamsPromptCacheOptions{Mode: "implicit"},
 		PromptCacheRetention: openai.ChatCompletionNewParamsPromptCacheRetention("1400h"),
+		PromptCacheKey:       openai.String("stable-affinity-key"),
 		Messages: []openai.ChatCompletionMessageParamUnion{{
 			OfUser: &openai.ChatCompletionUserMessageParam{
 				Name:    openai.String("u"),
@@ -35,6 +42,8 @@ func TestNVIDIAStripPromptCacheTopLevel(t *testing.T) {
 		"prompt_cache_options must be stripped for NVIDIA NIM")
 	assert.NotContains(t, raw, "prompt_cache_retention",
 		"prompt_cache_retention must be stripped for NVIDIA NIM")
+	assert.Equal(t, "stable-affinity-key", raw["prompt_cache_key"],
+		"prompt_cache_key predates the gpt-5.1/5.6 fields (SDK v1.12.0) and is part of the widely-cloned schema — the strip must not touch it")
 }
 
 // TestNVIDIAStripOnlyPromptCacheOptions proves stripping also works when only
@@ -101,9 +110,10 @@ func TestNVIDIAStripPreservesRequestExtras(t *testing.T) {
 		"request-level extra fields must survive the NVIDIA transform")
 }
 
-// TestNVIDIANonNVIDIAProvidersUnaffected proves the transform only fires for
-// NVIDIA NIM URLs.
-func TestNVIDIANonNVIDIAProvidersUnaffected(t *testing.T) {
+// TestNVIDIAAllowlistedProviderKeepsPromptCache proves the strip is scoped:
+// api.openai.com, the only supportsExplicitPromptCache allowlist entry,
+// keeps prompt_cache_options rather than having it stripped like NIM's.
+func TestNVIDIAAllowlistedProviderKeepsPromptCache(t *testing.T) {
 	req := &openai.ChatCompletionNewParams{
 		Model:              openai.ChatModel("gpt-oss-20b"),
 		PromptCacheOptions: openai.ChatCompletionNewParamsPromptCacheOptions{Mode: "implicit"},
@@ -114,7 +124,7 @@ func TestNVIDIANonNVIDIAProvidersUnaffected(t *testing.T) {
 
 	raw := marshalParams(t, req)
 	assert.Contains(t, raw, "prompt_cache_options",
-		"non-NVIDIA providers must keep prompt_cache_options")
+		"api.openai.com is allowlisted and must keep prompt_cache_options")
 }
 
 func marshalParams(t *testing.T, req *openai.ChatCompletionNewParams) map[string]any {
