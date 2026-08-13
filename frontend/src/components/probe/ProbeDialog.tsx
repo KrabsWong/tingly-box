@@ -29,7 +29,7 @@ import {
 import { useTheme } from '@mui/material/styles';
 import { useTranslation } from 'react-i18next';
 import { toggleButtonGroupStyle } from '@/styles/toggleStyles';
-import type { ProbeResult, ProbeTestMode, ProbeTargetType } from '@/types/probe.ts';
+import type { ProbeResult, ProbeTestMode, ProbeThinking, ProbeTargetType } from '@/types/probe.ts';
 import { runProbe } from './runProbe';
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -44,6 +44,8 @@ interface ProbeDialogProps {
     model?: string;
     /** Initial request shape; can be changed inside the dialog. Defaults to stream. */
     testMode?: ProbeTestMode;
+    /** Initial thinking effort; can be changed inside the dialog. Defaults to none. */
+    thinkingLevel?: ProbeThinking;
     /** Pre-computed result to show on open (e.g. from the quick test); re-run replaces it. */
     initialResult?: ProbeResult;
     /** Called with every fresh result this dialog produces (including re-runs), so a caller holding its own copy (e.g. a card's persistent status badge) stays in sync. */
@@ -57,6 +59,17 @@ interface ProbeDialogProps {
 const MODES: { value: ProbeTestMode; tKey: string }[] = [
     { value: 'simple', tKey: 'probe.nonstream' },
     { value: 'streaming', tKey: 'probe.stream' },
+];
+
+// Extended-thinking effort ladder — an axis orthogonal to Shape (composes with
+// both stream and nonstream). 'none' (default) sends no thinking param; the
+// other levels map to the provider's native thinking knob. Subset of the
+// backend protocol thinking ladder.
+const THINKING_LEVELS: { value: ProbeThinking; tKey: string }[] = [
+    { value: 'none', tKey: 'probe.thinkingNone' },
+    { value: 'low', tKey: 'probe.thinkingLow' },
+    { value: 'medium', tKey: 'probe.thinkingMedium' },
+    { value: 'high', tKey: 'probe.thinkingHigh' },
 ];
 
 // Human-friendly labels for routing_source values from the backend.
@@ -367,11 +380,14 @@ export const ProbeDialog: React.FC<ProbeDialogProps> = ({
     scenario,
     model,
     testMode = 'streaming',
+    thinkingLevel = 'none',
     initialResult,
     onResult,
 }) => {
     const { t } = useTranslation();
     const [mode, setMode] = useState<ProbeTestMode>(testMode);
+    // Thinking effort: orthogonal to the shape axis; 'none' (default) sends no thinking param.
+    const [thinking, setThinking] = useState<ProbeThinking>(thinkingLevel);
     // 范围: false = 经过 TB (default), true = 直连上游. Provider targets only.
     const [direct, setDirect] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
@@ -383,11 +399,12 @@ export const ProbeDialog: React.FC<ProbeDialogProps> = ({
     useEffect(() => {
         if (open) {
             setMode(testMode);
+            setThinking(thinkingLevel);
             setDirect(false);
             setResult(initialResult ?? null);
             setIsLoading(false);
         }
-    }, [open, testMode, initialResult]);
+    }, [open, testMode, thinkingLevel, initialResult]);
 
     const runTest = useCallback(async () => {
         setIsLoading(true);
@@ -399,6 +416,7 @@ export const ProbeDialog: React.FC<ProbeDialogProps> = ({
                 ? { scenario: scenario || 'openai', rule_uuid: targetId }
                 : { provider_uuid: targetId, model: model || '', direct, ...(scenario ? { scenario } : {}) }),
             test_mode: mode,
+            thinking,
             message: defaultMessage(mode),
         };
 
@@ -406,7 +424,7 @@ export const ProbeDialog: React.FC<ProbeDialogProps> = ({
         setResult(res);
         setIsLoading(false);
         onResult?.(res);
-    }, [targetType, scenario, targetId, model, direct, mode, onResult]);
+    }, [targetType, scenario, targetId, model, direct, mode, thinking, onResult]);
 
     const handleCopy = () => {
         if (!result) return;
@@ -523,7 +541,7 @@ export const ProbeDialog: React.FC<ProbeDialogProps> = ({
                 </Box>
             </DialogTitle>
             <DialogContent>
-                {/* Controls: request type + scope */}
+                {/* Controls: request type + thinking + scope */}
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, flexWrap: 'wrap', mb: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Typography variant="caption" sx={{
@@ -541,6 +559,29 @@ export const ProbeDialog: React.FC<ProbeDialogProps> = ({
                             {MODES.map((m) => (
                                 <ToggleButton key={m.value} value={m.value}>
                                     {t(m.tKey)}
+                                </ToggleButton>
+                            ))}
+                        </ToggleButtonGroup>
+                    </Box>
+
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Tooltip title={t('probe.thinkingHint')}>
+                            <Typography variant="caption" sx={{
+                                color: "text.secondary"
+                            }}>
+                                {t('probe.thinking')}
+                            </Typography>
+                        </Tooltip>
+                        <ToggleButtonGroup
+                            size="small"
+                            exclusive
+                            value={thinking}
+                            onChange={(_, v) => v && setThinking(v)}
+                            sx={toggleButtonGroupStyle}
+                        >
+                            {THINKING_LEVELS.map((lvl) => (
+                                <ToggleButton key={lvl.value} value={lvl.value}>
+                                    {t(lvl.tKey)}
                                 </ToggleButton>
                             ))}
                         </ToggleButtonGroup>

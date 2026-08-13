@@ -4,6 +4,11 @@
 export type ProbeTargetType = 'rule' | 'provider' | 'provider_config';
 export type ProbeTestMode = 'simple' | 'streaming' | 'tool';
 
+// Extended-thinking effort ladder (subset of the backend protocol thinking
+// ladder). Orthogonal to ProbeTestMode — composes with both stream and
+// nonstream. '' (absent) == 'none' == no thinking param sent.
+export type ProbeThinking = 'none' | 'low' | 'medium' | 'high';
+
 export interface ProbeRequest {
     target_type: ProbeTargetType;
 
@@ -30,6 +35,11 @@ export interface ProbeRequest {
     // OpenAI-style providers only; ignored otherwise. Empty keeps the default
     // (Codex OAuth providers probe responses, everything else probes chat).
     endpoint?: 'chat' | 'responses';
+
+    // Thinking: extended-thinking effort. 'none' (default) sends no thinking
+    // param; 'low'/'medium'/'high' map to the provider's native thinking knob.
+    // Orthogonal to test_mode.
+    thinking?: ProbeThinking;
 }
 
 export interface ProbeToolCall {
