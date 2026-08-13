@@ -26,6 +26,17 @@ import (
 // keep the upstream response minimal.
 const probeEchoInstruction = "work as `echo` if possible"
 
+// probeParams packages the per-request shape params that every SDK helper
+// forwards verbatim from Probe() -> probeProviderWithSDK() -> helper. Keeping
+// them in one struct means a new request-shape knob (effort, max tokens, …) is
+// added once here instead of widening every signature down the chain.
+type probeParams struct {
+	Model    string
+	Message  string
+	Mode     E2EMode
+	Thinking ThinkingLevel
+}
+
 // thinkingEnabled reports whether the probe should enable extended thinking.
 // "" and "none" both mean "send no thinking param" (the default).
 func thinkingEnabled(t ThinkingLevel) bool {
@@ -126,27 +137,27 @@ func toolCallsFromAnthropic(content []anthropic.ContentBlockUnion) []ToolCall {
 // path. The client package therefore no longer owns any probe-specific code.
 
 // probeOpenAIChat builds and dispatches a minimal Chat Completions probe.
-func probeOpenAIChat(ctx context.Context, oc client.OpenAIClientInterface, model, message string, mode E2EMode, thinking ThinkingLevel) (*Result, error) {
+func probeOpenAIChat(ctx context.Context, oc client.OpenAIClientInterface, p probeParams) (*Result, error) {
 	start := time.Now()
 	params := openai.ChatCompletionNewParams{
-		Model: model,
+		Model: p.Model,
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(probeEchoInstruction),
-			openai.UserMessage(message),
+			openai.UserMessage(p.Message),
 		},
 	}
-	if mode == E2EModeTool {
+	if p.Mode == E2EModeTool {
 		params.Tools = getProbeToolsOpenAI()
 		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: openai.Opt("auto")}
 	}
-	if thinkingEnabled(thinking) {
-		params.ReasoningEffort = thinkingEffort(thinking)
+	if thinkingEnabled(p.Thinking) {
+		params.ReasoningEffort = thinkingEffort(p.Thinking)
 	}
 	url := oc.GetProvider().APIBase + "/chat/completions"
 	// Tool mode needs the structured tool_calls back out of the response, so
 	// it takes the non-streaming path alongside simple mode; only streaming
 	// mode itself needs the SSE round-trip.
-	if mode != E2EModeStreaming {
+	if p.Mode != E2EModeStreaming {
 		resp, err := oc.ChatCompletionsNew(ctx, params)
 		if err != nil {
 			return nil, err
@@ -191,34 +202,34 @@ func probeOpenAIChat(ctx context.Context, oc client.OpenAIClientInterface, model
 }
 
 // probeOpenAIResponses builds and dispatches a minimal Responses API probe.
-func probeOpenAIResponses(ctx context.Context, oc client.OpenAIClientInterface, model, message string, mode E2EMode, thinking ThinkingLevel) (*Result, error) {
+func probeOpenAIResponses(ctx context.Context, oc client.OpenAIClientInterface, p probeParams) (*Result, error) {
 	start := time.Now()
 	params := responses.ResponseNewParams{
-		Model:        model,
+		Model:        p.Model,
 		Instructions: param.NewOpt(probeEchoInstruction),
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: []responses.ResponseInputItemUnionParam{
 				responses.ResponseInputItemParamOfMessage(
 					responses.ResponseInputMessageContentListParam{
-						responses.ResponseInputContentParamOfInputText(message),
+						responses.ResponseInputContentParamOfInputText(p.Message),
 					},
 					responses.EasyInputMessageRoleUser,
 				),
 			},
 		},
 	}
-	if mode == E2EModeTool {
+	if p.Mode == E2EModeTool {
 		params.Tools = getProbeToolsResponses()
 		params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
 			OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsAuto),
 		}
 	}
-	if thinkingEnabled(thinking) {
-		params.Reasoning.Effort = thinkingEffort(thinking)
+	if thinkingEnabled(p.Thinking) {
+		params.Reasoning.Effort = thinkingEffort(p.Thinking)
 	}
 
 	url := oc.GetProvider().APIBase + "/responses"
-	if mode != E2EModeStreaming {
+	if p.Mode != E2EModeStreaming {
 		resp, err := oc.ResponsesNew(ctx, params)
 		if err != nil {
 			return nil, err
@@ -252,7 +263,7 @@ func probeOpenAIResponses(ctx context.Context, oc client.OpenAIClientInterface, 
 }
 
 // probeAnthropicMessages builds and dispatches a minimal Messages probe.
-func probeAnthropicMessages(ctx context.Context, ac client.AnthropicClientInterface, model, message string, mode E2EMode, thinking ThinkingLevel) (*Result, error) {
+func probeAnthropicMessages(ctx context.Context, ac client.AnthropicClientInterface, p probeParams) (*Result, error) {
 	start := time.Now()
 	provider := ac.GetProvider()
 
@@ -262,22 +273,22 @@ func probeAnthropicMessages(ctx context.Context, ac client.AnthropicClientInterf
 	}
 
 	params := &anthropic.MessageNewParams{
-		Model:     anthropic.Model(model),
+		Model:     anthropic.Model(p.Model),
 		MaxTokens: 1024,
 		System:    system,
 		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(message)),
+			anthropic.NewUserMessage(anthropic.NewTextBlock(p.Message)),
 		},
 	}
-	if mode == E2EModeTool {
+	if p.Mode == E2EModeTool {
 		params.Tools = getProbeToolsAnthropic()
 		params.ToolChoice = getProbeToolChoiceAutoAnthropic()
 	}
-	if thinkingEnabled(thinking) {
+	if thinkingEnabled(p.Thinking) {
 		// Extended thinking requires 1024 <= budget_tokens < max_tokens, so
 		// raise MaxTokens above the budget. +2048 leaves headroom for the
 		// visible answer beyond the thinking budget.
-		budget := thinkingBudget(thinking)
+		budget := thinkingBudget(p.Thinking)
 		params.Thinking = anthropic.ThinkingConfigParamUnion{
 			OfEnabled: &anthropic.ThinkingConfigEnabledParam{BudgetTokens: budget},
 		}
@@ -285,7 +296,7 @@ func probeAnthropicMessages(ctx context.Context, ac client.AnthropicClientInterf
 	}
 
 	url := provider.APIBase + "/v1/messages"
-	if mode != E2EModeStreaming {
+	if p.Mode != E2EModeStreaming {
 		resp, err := ac.MessagesNew(ctx, params)
 		if err != nil {
 			return nil, err
@@ -318,21 +329,21 @@ func probeAnthropicMessages(ctx context.Context, ac client.AnthropicClientInterf
 }
 
 // probeGoogleGenerate builds and dispatches a minimal GenerateContent probe.
-func probeGoogleGenerate(ctx context.Context, gc *client.GoogleClient, model, message string, mode E2EMode, thinking ThinkingLevel) (*Result, error) {
+func probeGoogleGenerate(ctx context.Context, gc *client.GoogleClient, p probeParams) (*Result, error) {
 	start := time.Now()
 	contents := []*genai.Content{
-		{Role: "user", Parts: []*genai.Part{{Text: message}}},
+		{Role: "user", Parts: []*genai.Part{{Text: p.Message}}},
 	}
 	config := &genai.GenerateContentConfig{MaxOutputTokens: 1024}
 	url := gc.GetProvider().APIBase
 
-	if thinkingEnabled(thinking) {
-		budget := int32(thinkingBudget(thinking))
+	if thinkingEnabled(p.Thinking) {
+		budget := int32(thinkingBudget(p.Thinking))
 		config.ThinkingConfig = &genai.ThinkingConfig{ThinkingBudget: &budget}
 	}
 
-	if mode == E2EModeSimple {
-		resp, err := gc.GenerateContent(ctx, model, contents, config)
+	if p.Mode == E2EModeSimple {
+		resp, err := gc.GenerateContent(ctx, p.Model, contents, config)
 		if err != nil {
 			return nil, err
 		}
@@ -341,7 +352,7 @@ func probeGoogleGenerate(ctx context.Context, gc *client.GoogleClient, model, me
 	}
 
 	var chunks []any
-	for resp, err := range gc.GenerateContentStream(ctx, model, contents, config) {
+	for resp, err := range gc.GenerateContentStream(ctx, p.Model, contents, config) {
 		if err != nil {
 			return nil, err
 		}
