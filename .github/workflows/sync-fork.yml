@@ -1,0 +1,30 @@
+name: Sync fork
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-fork-main
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync default branch from upstream
+        id: sync
+        uses: KrabsWong/sync-fork-action@v1.2.7
+        with:
+          token: ${{ github.token }}
+          upstream-repository: tingly-dev/tingly-box
+          upstream-branch: main
+          target-branch: main
+          strategy: rebase
+
+      - name: Show sync result
+        run: echo "updated=${{ steps.sync.outputs.updated }}"
